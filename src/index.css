@@ -1,0 +1,119 @@
+/* -------------------------------------------------------------------------
+   Global theme — light "financial console" style: cool light-grey canvas,
+   dark sidebar, crisp white cards, ink primary actions, green money accents.
+   Driven entirely by CSS custom properties; components reference these via
+   inline styles, e.g. style={{ color: "var(--text)", background: "var(--bg-elevated)" }}.
+   Single, deliberate light theme (matches the requested reference UI).
+   ------------------------------------------------------------------------- */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+:root {
+  /* Surfaces */
+  --bg: #eceef1;            /* page canvas — cool light grey */
+  --bg-elevated: #ffffff;   /* cards */
+  --surface: #f4f6f8;       /* table headers, subtle raised areas */
+  --surface-2: #eef1f4;     /* chips, hover, filled cells */
+  --border: #e4e7eb;
+  --border-strong: #d3d9df;
+
+  /* Text */
+  --text: #10131a;          /* near-black */
+  --text-2: #59626e;        /* secondary / values */
+  --muted: #8b95a1;         /* field labels */
+
+  /* Accents */
+  --ink: #16181d;           /* primary buttons, dark bars */
+  --ink-fg: #ffffff;
+  --brand: #2f6f9f;         /* informational blue — icons, rails, links */
+  --brand-2: #245a83;
+  --accent: #e3ac2b;        /* gold — brand mark / secondary accent */
+  --accent-ink: #2a1e02;
+  --accent-dim: #fbf1d2;
+
+  /* Semantic (light pastel bg + saturated fg) */
+  --success: #12894e; --success-dim: #e4f4ec;
+  --warning: #98690f; --warning-dim: #faf0d3;
+  --danger: #c23a29;  --danger-dim: #fae6e2;
+  --info: #2f6f9f;    --info-dim: #e6eff6;
+
+  /* Sidebar (dark) */
+  --sidebar-bg: #0c0e12;
+  --sidebar-fg: #c8ced6;
+  --sidebar-muted: #6a7480;
+  --sidebar-active-bg: rgba(255, 255, 255, 0.09);
+  --sidebar-active-fg: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+
+  /* Type + shape */
+  --font-sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-display: "Inter", var(--font-sans);
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 1px 2px rgba(16, 19, 26, 0.05), 0 6px 20px -12px rgba(16, 19, 26, 0.14);
+  --shadow-lg: 0 28px 64px -24px rgba(16, 19, 26, 0.30);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; letter-spacing: -0.015em; }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: #cfd6dd; border-radius: 20px; border: 3px solid var(--bg); }
+::-webkit-scrollbar-track { background: transparent; }
+
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+@keyframes gla-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes gla-pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+.gla-fade { animation: gla-fade 0.18s ease both; }
+.gla-pop { animation: gla-pop 0.16s ease both; }
+
+@keyframes gla-spin { to { transform: rotate(360deg); } }
+.gla-spin { animation: gla-spin 0.9s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gla-fade, .gla-pop, .gla-spin { animation: none; }
+}
+
+/* ------------------------------- Print / PDF ------------------------------
+   "Print / Save as PDF" on the Electronic Staff File prints only the file
+   itself (chrome hidden), on white, with a company letterhead. Browsers'
+   Save-as-PDF in the print dialog produces the .pdf. */
+.print-only { display: none; }
+.sf-letterhead { text-align: center; padding-bottom: 12px; border-bottom: 2.5px solid #16181d; }
+.sf-lh-name { font-family: var(--font-display); font-weight: 800; font-size: 19px; letter-spacing: .02em; color: #10131a; }
+.sf-lh-sub { font-size: 12.5px; color: #333; margin-top: 3px; }
+.sf-lh-contact { font-size: 11px; color: #666; margin-top: 2px; }
+.sf-lh-meta { font-family: var(--font-mono); font-size: 10.5px; color: #888; margin-top: 6px; }
+
+@media print {
+  @page { size: A4; margin: 14mm; }
+  html, body { background: #fff !important; }
+  /* Isolate the staff file: hide everything, reveal only .sf-print */
+  body * { visibility: hidden; }
+  .sf-print, .sf-print * { visibility: visible; }
+  .sf-print { position: absolute; left: 0; top: 0; width: 100%; max-width: none !important; gap: 12px !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  /* Flatten UI surfaces for clean ink */
+  .sf-print * { box-shadow: none !important; }
+  .sf-print .gla-fade { animation: none !important; }
+  /* Keep rows and headings from splitting awkwardly across pages */
+  .sf-print tr { break-inside: avoid; }
+  .sf-print h2, .sf-print h3 { break-after: avoid; }
+  .sf-print table { width: 100% !important; }
+}
