@@ -54,32 +54,3 @@ export const appraisalsApi = makeCrud("appraisals", "AP");
 export const payrollApi = {
   register: () => respond(data.employees.filter((e) => e.status !== "Terminated")),
 };
-
-// Custom ledger columns
-export const ledgerColumnsApi = {
-  list: () => respond(data.ledgerColumns || []),
-  add: (col) => { const id = col.id || `col-${Date.now().toString(36)}`; const row = { ...col, id }; data.ledgerColumns = [...(data.ledgerColumns || []), row]; return respond(row); },
-  remove: (id) => { data.ledgerColumns = (data.ledgerColumns || []).filter((c) => c.id !== id); return respond({ id }); },
-};
-
-// Processed monthly payroll runs (snapshots)
-export const payrollRunsApi = makeCrud("payrollRuns", "PR");
-
-// Supplier payment schedule
-export const suppliersApi = makeCrud("suppliers", "SUP");
-// Processed supplier schedules (locked history)
-export const supplierRunsApi = makeCrud("supplierRuns", "SPR");
-
-// Salary advance requests
-export const advancesApi = makeCrud("advances", "ADV");
-
-// System settings (single object: company, payroll rates, roles, announcements)
-export const settingsApi = {
-  get: () => respond(data.settings),
-  update: (patch) => { data.settings = { ...data.settings, ...patch }; return respond(data.settings); },
-};
-
-// Stock management
-export const stockItemsApi = makeCrud("stockItems", "STK");
-export const stockMovementsApi = makeCrud("stockMovements", "MOV");
-export const stockClosingsApi = makeCrud("stockClosings", "CLS");
