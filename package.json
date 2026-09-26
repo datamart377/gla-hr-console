@@ -5,17 +5,28 @@
   "type": "module",
   "description": "Front-end demo prototype — HR management console for Global Link Associates Ltd (Kampala, Uganda).",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "npm --prefix server run dev",
     "build": "vite build",
-    "preview": "vite preview --port 3003"
+    "preview": "vite preview --port 3003",
+    "server:install": "npm --prefix server install",
+    "db:create": "npm --prefix server run db:create",
+    "db:migrate": "npm --prefix server run db:migrate",
+    "db:seed": "npm --prefix server run db:seed",
+    "db:reset": "npm --prefix server run db:reset"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.469.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
     "vite": "^5.4.11"
   }
 }

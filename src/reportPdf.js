@@ -144,6 +144,18 @@ function drawSignatories(doc, startY, signatories) {
   const colW = (pageW - MARGIN * 2) / n;
   signatories.forEach((s, i) => {
     const cx = MARGIN + colW * i + colW / 2;
+    // Digital signature (or pending note) drawn just above the ruled line.
+    if (s.signedText) {
+      doc.setFont("helvetica", "bolditalic");
+      doc.setFontSize(15);
+      doc.setTextColor(20, 90, 60);
+      doc.text(String(s.signedText), cx, lineY - 6, { align: "center" });
+    } else if (s.pending) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...MUTED);
+      doc.text(String(s.pending), cx, lineY - 6, { align: "center" });
+    }
     doc.setDrawColor(...RULE);
     doc.setLineWidth(0.6);
     doc.line(cx - colW * 0.33, lineY, cx + colW * 0.33, lineY);
@@ -151,14 +163,30 @@ function drawSignatories(doc, startY, signatories) {
     doc.setFontSize(10.5);
     doc.setTextColor(...INK);
     doc.text(s.name, cx, lineY + 15, { align: "center" });
+    let yy = lineY + 15;
+    if (s.title) {
+      yy += 12;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...BRAND);
+      doc.text(String(s.title), cx, yy, { align: "center" });
+    }
     if (s.contact) {
+      yy += 12;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(...BODY);
-      doc.text(String(s.contact), cx, lineY + 28, { align: "center" });
+      doc.text(String(s.contact), cx, yy, { align: "center" });
+    }
+    if (s.signedMeta) {
+      yy += 11;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...MUTED);
+      doc.text(String(s.signedMeta), cx, yy, { align: "center" });
     }
   });
-  return lineY + 40;
+  return lineY + 60;
 }
 
 /* -------------------------------- footer --------------------------------- */

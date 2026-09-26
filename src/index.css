@@ -64,6 +64,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden; /* safety net against stray horizontal overflow on small screens */
 }
 h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; letter-spacing: -0.015em; }
 button { font-family: inherit; cursor: pointer; }
@@ -82,6 +83,50 @@ input, select, textarea { font-family: inherit; }
 .gla-fade { animation: gla-fade 0.18s ease both; }
 .gla-pop { animation: gla-pop 0.16s ease both; }
 
+@keyframes gla-spin { to { transform: rotate(360deg); } }
+.gla-spin { animation: gla-spin 0.9s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .gla-fade, .gla-pop { animation: none; }
+  .gla-fade, .gla-pop, .gla-spin { animation: none; }
+}
+
+/* ------------------------------- Responsive ------------------------------
+   Collapse the fixed multi-column layouts to a single column on phones so
+   nothing overflows the viewport. The app shell (sidebar → drawer) is handled
+   in JS via a matchMedia hook; these rules cover the in-page grids. */
+@media (max-width: 860px) {
+  .rep-cols, .dash-cols, .two-col { grid-template-columns: 1fr !important; }
+}
+@media (max-width: 560px) {
+  /* Definition lists (staff file, payslip) stack label above value */
+  .stack-dl { grid-template-columns: 1fr !important; gap: 4px 0 !important; }
+}
+
+/* ------------------------------- Print / PDF ------------------------------
+   "Print / Save as PDF" on the Electronic Staff File prints only the file
+   itself (chrome hidden), on white, with a company letterhead. Browsers'
+   Save-as-PDF in the print dialog produces the .pdf. */
+.print-only { display: none; }
+.sf-letterhead { text-align: center; padding-bottom: 12px; border-bottom: 2.5px solid #16181d; }
+.sf-lh-name { font-family: var(--font-display); font-weight: 800; font-size: 19px; letter-spacing: .02em; color: #10131a; }
+.sf-lh-sub { font-size: 12.5px; color: #333; margin-top: 3px; }
+.sf-lh-contact { font-size: 11px; color: #666; margin-top: 2px; }
+.sf-lh-meta { font-family: var(--font-mono); font-size: 10.5px; color: #888; margin-top: 6px; }
+
+@media print {
+  @page { size: A4; margin: 14mm; }
+  html, body { background: #fff !important; }
+  /* Isolate the staff file: hide everything, reveal only .sf-print */
+  body * { visibility: hidden; }
+  .sf-print, .sf-print * { visibility: visible; }
+  .sf-print { position: absolute; left: 0; top: 0; width: 100%; max-width: none !important; gap: 12px !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  /* Flatten UI surfaces for clean ink */
+  .sf-print * { box-shadow: none !important; }
+  .sf-print .gla-fade { animation: none !important; }
+  /* Keep rows and headings from splitting awkwardly across pages */
+  .sf-print tr { break-inside: avoid; }
+  .sf-print h2, .sf-print h3 { break-after: avoid; }
+  .sf-print table { width: 100% !important; }
 }
