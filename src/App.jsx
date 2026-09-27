@@ -1402,6 +1402,7 @@ function EmployeeProfile({ ctx, id }) {
       <KVSection title="Emergency contact" pairs={[["Name", e.emergencyName], ["Relationship", e.emergencyRelation], ["Phone", e.emergencyPhone]]} />
       <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
       <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
+      <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
     </Modal>
   );
 }
@@ -1417,7 +1418,7 @@ function EmployeeForm({ ctx, id }) {
     id: nextEmpId(ctx.store.employees), firstName: "", lastName: "", gender: "Male", dob: "", nationalId: "",
     phone: "", email: "", address: "", department: (ctx.store.settings?.departments?.[0]?.name) || "Engineering Department", jobTitle: "", contractType: "Permanent",
     status: "Active", employmentDate: "", grossSalary: 1200000, tin: "", nssfNumber: "", bankName: "",
-    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "", nextOfKinName: "", nextOfKinDetails: "", nextOfKinName: "", nextOfKinDetails: "",
+    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "", nextOfKinName: "", nextOfKinDetails: "", nextOfKinName: "", nextOfKinDetails: "", nextOfKinName: "", nextOfKinDetails: "",
   }));
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const setN = (group, k) => (e) => setF((s) => ({ ...s, [group]: { ...s[group], [k]: e.target.value } }));
@@ -1513,6 +1514,10 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Contact name"><Input value={f.emergencyName} onChange={set("emergencyName")} /></Field>
         <Field label="Relationship"><Input value={f.emergencyRelation} onChange={set("emergencyRelation")} /></Field>
         <Field label="Contact phone" full><Input value={f.emergencyPhone} onChange={set("emergencyPhone")} /></Field>
+
+        <FieldsetTitle>Next of kin</FieldsetTitle>
+        <Field label="Next of kin"><Input value={f.nextOfKinName || ""} onChange={set("nextOfKinName")} /></Field>
+        <Field label="Next of kin details" full hint="Relationship, phone and address"><Input value={f.nextOfKinDetails || ""} onChange={set("nextOfKinDetails")} /></Field>
 
         <FieldsetTitle>Next of kin</FieldsetTitle>
         <Field label="Next of kin"><Input value={f.nextOfKinName || ""} onChange={set("nextOfKinName")} /></Field>
