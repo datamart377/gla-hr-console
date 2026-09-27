@@ -12,7 +12,7 @@ const router = Router();
 router.post(
   "/login",
   [
-    body("email").isEmail().withMessage("A valid email is required.").normalizeEmail(),
+    body("email").trim().isEmail().withMessage("A valid email is required."),
     body("password").isString().isLength({ min: 1 }).withMessage("Password is required."),
   ],
   validate,
