@@ -1,0 +1,41 @@
+# Render Blueprint — deploys the IHRSM full stack as ONE web service
+# (Express serves the built React app + the /api routes) backed by a managed
+# PostgreSQL database. Commit this file, then in Render: New → Blueprint → pick
+# this repo. See DEPLOY-RENDER.md for the full walkthrough.
+
+databases:
+  - name: ihrsm-db
+    databaseName: gla_hr
+    user: gla_hr
+    plan: free            # free Postgres (note: free DBs expire after ~30 days)
+
+services:
+  - type: web
+    name: ihrsm
+    runtime: node
+    plan: free            # free web service (spins down when idle)
+    # --include=dev is required so Vite (a devDependency) is available for the build,
+    # even though NODE_ENV=production. Build the app, migrate the DB, seed if empty.
+    buildCommand: >-
+      npm install --include=dev &&
+      npm --prefix server install &&
+      npm run build &&
+      npm --prefix server run db:migrate &&
+      node server/scripts/seedIfEmpty.js
+    startCommand: node server/src/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_BASE      # "/" => the app calls the API on its own origin
+        value: /
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ihrsm-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true      # Render generates a strong secret
+      - key: SEED_PASSWORD
+        value: password          # password for the seeded demo accounts

@@ -1,6 +1,9 @@
 // db:seed — loads the demo dataset (shared with the web app) into PostgreSQL
-// and creates login accounts for the demo roles. Safe to re-run: it truncates
-// the domain tables first.
+// and creates login accounts for the demo roles.
+//
+// Exposes doSeed() so other scripts (e.g. seedIfEmpty.js) can reuse it. Running
+// this file directly performs a full (re)seed: it truncates the domain tables.
+import { pathToFileURL } from "node:url";
 import bcrypt from "bcryptjs";
 import { pool } from "../src/db.js";
 import { config } from "../src/config.js";
@@ -27,12 +30,11 @@ const COLLECTIONS = {
 // Demo role mapping — matches the front-end's normalizeEmployee assignment.
 const ROLE_BY_ID = { "GLA-001": "admin", "GLA-002": "hr", "GLA-003": "finance" };
 
-async function main() {
+export async function doSeed() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    // 1) Domain collections
     for (const [table, key] of Object.entries(COLLECTIONS)) {
       const rows = Array.isArray(data[key]) ? data[key] : [];
       await client.query(`TRUNCATE ${table}`);
@@ -44,7 +46,6 @@ async function main() {
       console.log(`seeded ${rows.length.toString().padStart(3)}  ${table}`);
     }
 
-    // 2) Settings (single document)
     await client.query(
       `INSERT INTO settings (key, value) VALUES ('app', $1::jsonb)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
@@ -52,7 +53,6 @@ async function main() {
     );
     console.log("seeded   1  settings");
 
-    // 3) Login accounts (one per active employee that has an email)
     const hash = await bcrypt.hash(config.seedPassword, 10);
     await client.query("TRUNCATE users RESTART IDENTITY");
     let users = 0;
@@ -72,19 +72,21 @@ async function main() {
 
     await client.query("COMMIT");
     console.log("\nSeed complete.");
-    console.log("Demo logins:");
+    console.log("Demo logins (password: \"" + config.seedPassword + "\"):");
     console.log("  admin   → r.okello@glassociates.co.ug");
     console.log("  hr      → s.nakato@glassociates.co.ug");
     console.log("  finance → g.auma@glassociates.co.ug");
-    console.log(`  (password for all: "${config.seedPassword}")`);
   } catch (e) {
     await client.query("ROLLBACK");
-    console.error("db:seed failed:", e.message);
-    process.exitCode = 1;
+    throw e;
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
-main();
+// Run directly (`npm run db:seed`) — performs the seed and closes the pool.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  doSeed()
+    .then(() => pool.end())
+    .catch((e) => { console.error("db:seed failed:", e.message); pool.end().finally(() => process.exit(1)); });
+}

@@ -4,6 +4,9 @@ import helmet from "helmet";
 import cors from "cors";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { config } from "./config.js";
 import { pool } from "./db.js";
@@ -16,7 +19,9 @@ const app = express();
 
 // ---- Security & platform middleware ----
 app.set("trust proxy", 1);
-app.use(helmet());
+// CSP disabled so the bundled single-page app (inline styles, data: images)
+// renders when served from this same service; other helmet protections stay on.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
@@ -72,6 +77,16 @@ const COLLECTIONS = {
 };
 for (const [path, table] of Object.entries(COLLECTIONS)) {
   app.use(`/api/${path}`, crudRouter(table));
+}
+
+// ---- Serve the built front-end (single-service deploy, e.g. Render) ----
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(__dirname, "..", "..", "dist");
+if (fs.existsSync(path.join(distDir, "index.html"))) {
+  app.use(express.static(distDir));
+  // SPA fallback for any non-API GET route.
+  app.get(/^(?!\/api\/).*/, (req, res) => res.sendFile(path.join(distDir, "index.html")));
+  console.log(`Serving web app from ${distDir}`);
 }
 
 // ---- 404 + errors ----

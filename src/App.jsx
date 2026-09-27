@@ -15,6 +15,7 @@ import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
+  authApi, isLive,
 } from "./api/client.js";
 import {
   data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, SITES, LEAVE_TYPES, LEAVE_COLORS,
@@ -292,15 +293,47 @@ export default function App() {
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
     setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, settings });
   };
-  useEffect(() => { reload().then(() => setLoading(false)); }, []);
+  useEffect(() => {
+    (async () => {
+      if (isLive) {
+        // Live mode: protected API — restore a saved session if a token exists,
+        // otherwise show the sign-in screen without loading (which would 401).
+        try {
+          if (authApi.token && authApi.token()) {
+            const u = await authApi.me();
+            setAuth({ empId: u.empId, role: u.role });
+            await reload();
+          }
+        } catch { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } }
+        setLoading(false);
+      } else {
+        await reload();
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   const empById = (id) => store.employees.find((e) => e.id === id);
-  const signOut = () => setAuth(null);
+  const signOut = () => { if (isLive) { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } } setAuth(null); };
+
+  // Authenticate (email + password). Live mode obtains a JWT and loads data;
+  // mock mode matches by email and password is not enforced.
+  const authenticate = async (email, password) => {
+    try {
+      const { user } = await authApi.login(email, password);
+      await reload();
+      setAuth({ empId: user.empId, role: user.role });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message || "Sign-in failed." };
+    }
+  };
+
   const ctx = { store, empById, reload, setModal, auth, currentEmp: auth ? empById(auth.empId) : null, signOut };
 
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
-  else if (!auth) content = <Login employees={store.employees} onLogin={(empId, role) => setAuth({ empId, role })} />;
+  else if (!auth) content = <Login employees={store.employees} live={isLive} authenticate={authenticate} />;
   else if (auth.role === "staff") content = <StaffPortal ctx={ctx} />;
   else content = <AdminConsole ctx={ctx} />;
 
@@ -386,23 +419,35 @@ const LOGIN_ROLE_META = {
   finance: { label: "Finance Officer", note: "Payroll, advances, supplier payments & reports", tone: "#12894e", dim: "#e4f4ec" },
   staff:   { label: "Staff — self-service", note: "Clock-in, leave, payslip & advances", tone: "#98690f", dim: "#faf0d3" },
 };
-function Login({ employees, onLogin }) {
+// Fallback demo accounts for live mode, where the employee list isn't loaded
+// until after sign-in. Emails/roles match the seeded users.
+const DEMO_ACCOUNTS = [
+  { id: "GLA-001", firstName: "Robert", lastName: "Okello", role: "admin", jobTitle: "Director Engineering", email: "r.okello@glassociates.co.ug" },
+  { id: "GLA-002", firstName: "Sarah", lastName: "Nakato", role: "hr", jobTitle: "HR & Admin Manager", email: "s.nakato@glassociates.co.ug" },
+  { id: "GLA-003", firstName: "Grace", lastName: "Auma", role: "finance", jobTitle: "Accountant", email: "g.auma@glassociates.co.ug" },
+  { id: "GLA-006", firstName: "Peter", lastName: "Wanyama", role: "staff", jobTitle: "Field Service Technician", email: "p.wanyama@glassociates.co.ug" },
+];
+function Login({ employees, live, authenticate }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
-  const tryLogin = (em) => {
-    const e = employees.find((x) => (x.email || "").toLowerCase() === em.trim().toLowerCase());
-    if (!e) { setErr("No staff account matches that email."); return; }
-    onLogin(e.id, e.role || "staff");
+  const [busy, setBusy] = useState(false);
+  const submit = async (em, password) => {
+    if (busy) return;
+    setErr(""); setBusy(true);
+    const res = await authenticate((em || "").trim(), password ?? pw);
+    setBusy(false);
+    if (!res.ok) setErr(res.error || "Sign-in failed.");
   };
-  const pickByRole = (r) => employees.find((e) => (e.role || "staff") === r);
+  const source = (employees && employees.length) ? employees : DEMO_ACCOUNTS;
+  const pickByRole = (r) => source.find((e) => (e.role || "staff") === r);
   const consoleAccounts = ["admin", "hr", "finance"].map(pickByRole).filter(Boolean);
-  const staffAccount = employees.find((e) => e.id === "GLA-006") || pickByRole("staff");
+  const staffAccount = source.find((e) => e.id === "GLA-006") || pickByRole("staff");
   const chip = (e) => {
     if (!e) return null;
     const rm = LOGIN_ROLE_META[e.role || "staff"] || LOGIN_ROLE_META.staff;
     return (
-      <button key={e.id} onClick={() => onLogin(e.id, e.role || "staff")} title={`Sign in as ${e.firstName} ${e.lastName}`}
+      <button key={e.id} onClick={() => submit(e.email, live ? "password" : "")} title={`Sign in as ${e.firstName} ${e.lastName}`}
         onMouseEnter={(ev) => { ev.currentTarget.style.borderColor = rm.tone; ev.currentTarget.style.background = "var(--bg-elevated)"; ev.currentTarget.style.boxShadow = "var(--shadow)"; }}
         onMouseLeave={(ev) => { ev.currentTarget.style.borderColor = "var(--border)"; ev.currentTarget.style.background = "var(--surface)"; ev.currentTarget.style.boxShadow = "none"; }}
         style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 11, background: "var(--surface)", cursor: "pointer", textAlign: "left", width: "100%", transition: "all .14s ease" }}>
@@ -431,10 +476,10 @@ function Login({ employees, onLogin }) {
           <h2 style={{ fontSize: 19, fontWeight: 800, color: "var(--text)" }}>Sign in to your portal</h2>
           <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>Your view is set automatically by your role — management get the console, staff get self-service.</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-            <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && tryLogin(email)} /></Field>
-            <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === "Enter" && tryLogin(email)} /></Field>
+            <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+            <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
             {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
-            <Btn variant="primary" onClick={() => tryLogin(email)} style={{ justifyContent: "center", padding: "12px" }}><LogIn size={16} />Sign in</Btn>
+            <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "12px" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
           </div>
           <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px dashed var(--border)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -445,7 +490,7 @@ function Login({ employees, onLogin }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{consoleAccounts.map(chip)}</div>
             <div style={{ marginTop: 14 }}>{sectionLabel("Staff portal")}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{chip(staffAccount)}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>Demo prototype — the password isn't checked. Each account opens a different role-based view.</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>{live ? "Live mode — signs in against the API (demo password: “password”). Each account opens a different role-based view." : "Demo prototype — the password isn't checked. Each account opens a different role-based view."}</div>
           </div>
         </Card>
         <div style={{ textAlign: "center", fontSize: 10.5, color: "var(--muted)", marginTop: 16, fontFamily: "var(--font-mono)", letterSpacing: ".03em" }}>People · Payroll · Leave · Attendance · Advances · Stores</div>

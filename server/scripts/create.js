@@ -4,6 +4,11 @@ import pg from "pg";
 import { config } from "../src/config.js";
 
 async function main() {
+  // On managed hosts (e.g. Render) the database already exists — nothing to create.
+  if (process.env.DATABASE_URL) {
+    console.log("DATABASE_URL is set — using the managed database; skipping db:create.");
+    return;
+  }
   const admin = new pg.Client({
     host: config.db.host, port: config.db.port,
     user: config.db.user, password: config.db.password,

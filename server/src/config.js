@@ -6,8 +6,10 @@ const num = (v, d) => (v == null || v === "" ? d : Number(v));
 
 export const config = {
   port: num(process.env.PORT, 4000),
-  corsOrigin: (process.env.CORS_ORIGIN || "http://localhost:3003")
-    .split(",").map((s) => s.trim()).filter(Boolean),
+  corsOrigin: [
+    ...(process.env.CORS_ORIGIN || "http://localhost:3003").split(",").map((s) => s.trim()),
+    process.env.RENDER_EXTERNAL_URL, // Render injects the public URL of the service
+  ].filter(Boolean),
   jwt: {
     secret: process.env.JWT_SECRET || "dev-insecure-secret-change-me",
     expiresIn: process.env.JWT_EXPIRES_IN || "8h",

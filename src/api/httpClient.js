@@ -17,7 +17,9 @@
    localStorage and attached to every request as a Bearer token.
    ------------------------------------------------------------------------- */
 
-const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || "http://localhost:4000";
+// VITE_API_BASE="/" means "same origin" (backend serves the app) → use relative URLs.
+const _raw = import.meta.env && import.meta.env.VITE_API_BASE;
+const API_BASE = _raw === "/" ? "" : (_raw || "http://localhost:4000");
 const TOKEN_KEY = "ihrsm.token";
 
 const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
