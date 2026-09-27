@@ -1400,6 +1400,7 @@ function EmployeeProfile({ ctx, id }) {
       <KVSection title="Statutory & payroll" pairs={[["Gross salary", ugx(ps.gross)], ["PAYE (monthly)", ugx(ps.paye)], ["NSSF employee (5%)", ugx(ps.nssfEmp)], ["NSSF employer (10%)", ugx(ps.nssfEr)], ["Net pay", ugx(ps.net)], ["TIN", e.tin], ["NSSF no.", e.nssfNumber], ["Bank", `${e.bankName} · ${e.bankAccount}`]]} />
       <KVSection title="Leave balances" pairs={[["Annual", `${annual.remaining} of ${annual.entitlement} days left`], ["Sick", `${e.sickUsed || 0} of ${LEAVE_TYPES.Sick.entitlement} days used`]]} />
       <KVSection title="Emergency contact" pairs={[["Name", e.emergencyName], ["Relationship", e.emergencyRelation], ["Phone", e.emergencyPhone]]} />
+      <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
     </Modal>
   );
 }
@@ -1415,7 +1416,7 @@ function EmployeeForm({ ctx, id }) {
     id: nextEmpId(ctx.store.employees), firstName: "", lastName: "", gender: "Male", dob: "", nationalId: "",
     phone: "", email: "", address: "", department: (ctx.store.settings?.departments?.[0]?.name) || "Engineering Department", jobTitle: "", contractType: "Permanent",
     status: "Active", employmentDate: "", grossSalary: 1200000, tin: "", nssfNumber: "", bankName: "",
-    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "",
+    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "", nextOfKinName: "", nextOfKinDetails: "",
   }));
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const setN = (group, k) => (e) => setF((s) => ({ ...s, [group]: { ...s[group], [k]: e.target.value } }));
@@ -1511,6 +1512,10 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Contact name"><Input value={f.emergencyName} onChange={set("emergencyName")} /></Field>
         <Field label="Relationship"><Input value={f.emergencyRelation} onChange={set("emergencyRelation")} /></Field>
         <Field label="Contact phone" full><Input value={f.emergencyPhone} onChange={set("emergencyPhone")} /></Field>
+
+        <FieldsetTitle>Next of kin</FieldsetTitle>
+        <Field label="Next of kin"><Input value={f.nextOfKinName || ""} onChange={set("nextOfKinName")} /></Field>
+        <Field label="Next of kin details" full hint="Relationship, phone and address"><Input value={f.nextOfKinDetails || ""} onChange={set("nextOfKinDetails")} /></Field>
 
         <Repeater label="Academic Qualifications" Icon={GraduationCap} value={f.academicQualifications} onChange={setArr("academicQualifications")} fields={REPEATER_SCHEMAS.academicQualifications} />
         <Repeater label="Bank Details" Icon={Landmark} value={f.bankDetails} onChange={setArr("bankDetails")} fields={REPEATER_SCHEMAS.bankDetails} />
