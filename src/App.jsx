@@ -481,17 +481,6 @@ function Login({ employees, live, authenticate }) {
             {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
             <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "12px" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
           </div>
-          <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px dashed var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>Demo accounts</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)", fontFamily: "var(--font-mono)", letterSpacing: ".04em", textTransform: "uppercase" }}>Tap to sign in</div>
-            </div>
-            {sectionLabel("Management console")}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{consoleAccounts.map(chip)}</div>
-            <div style={{ marginTop: 14 }}>{sectionLabel("Staff portal")}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{chip(staffAccount)}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>{live ? "Live mode — signs in against the API (demo password: “password”). Each account opens a different role-based view." : "Demo prototype — the password isn't checked. Each account opens a different role-based view."}</div>
-          </div>
         </Card>
         <div style={{ textAlign: "center", fontSize: 10.5, color: "var(--muted)", marginTop: 16, fontFamily: "var(--font-mono)", letterSpacing: ".03em" }}>People · Payroll · Leave · Attendance · Advances · Stores</div>
       </div>
