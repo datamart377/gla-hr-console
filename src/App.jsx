@@ -1426,6 +1426,9 @@ function EmployeeForm({ ctx, id }) {
 
   const submit = async () => {
     if (!f.firstName || !f.lastName || !f.id || !f.jobTitle) return alert("First name, surname, staff ID and job title are required.");
+    if (!f.nationalId) return alert("National ID (NIN) is required.");
+    if (!f.tin || !f.nssfNumber) return alert("Statutory details (TIN and NSSF number) are required.");
+    if (!f.bankName || !f.bankAccount) return alert("Bank details (bank name and account number) are required.");
     const out = { ...f, grossSalary: Number(f.grossSalary) || 0, advanceDeductions: Number(f.advanceDeductions) || 0, annualUsed: Number(f.annualUsed) || 0, sickUsed: Number(f.sickUsed) || 0 };
     if (existing) await employeesApi.update(id, out); else await employeesApi.create(out);
     await ctx.reload();
@@ -1442,7 +1445,7 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Staff ID" required hint="Unique — e.g. GLA-009"><Input value={f.id} onChange={set("id")} /></Field>
         <Field label="Gender"><Select value={f.gender} onChange={set("gender")} options={["Male", "Female"]} /></Field>
         <Field label="Date of birth"><Input type="date" value={f.dob} onChange={set("dob")} /></Field>
-        <Field label="National ID (NIN)"><Input value={f.nationalId} onChange={set("nationalId")} placeholder="CM…" /></Field>
+        <Field label="National ID (NIN)" required><Input value={f.nationalId} onChange={set("nationalId")} placeholder="CM…" /></Field>
         <Field label="Phone"><Input value={f.phone} onChange={set("phone")} placeholder="+256 7…" /></Field>
         <Field label="Email"><Input type="email" value={f.email} onChange={set("email")} /></Field>
         <Field label="Residential address" full><Input value={f.address} onChange={set("address")} /></Field>
@@ -1493,10 +1496,10 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Contact district"><Input value={f.contact.district} onChange={setN("contact", "district")} /></Field>
 
         <FieldsetTitle>Statutory & bank</FieldsetTitle>
-        <Field label="TIN"><Input value={f.tin} onChange={set("tin")} /></Field>
-        <Field label="NSSF number"><Input value={f.nssfNumber} onChange={set("nssfNumber")} /></Field>
-        <Field label="Bank"><Input value={f.bankName} onChange={set("bankName")} /></Field>
-        <Field label="Bank account"><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
+        <Field label="TIN" required><Input value={f.tin} onChange={set("tin")} /></Field>
+        <Field label="NSSF number" required><Input value={f.nssfNumber} onChange={set("nssfNumber")} /></Field>
+        <Field label="Bank" required><Input value={f.bankName} onChange={set("bankName")} /></Field>
+        <Field label="Bank account" required><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
         <Field label="Bank branch"><Input value={f.bankBranch || ""} onChange={set("bankBranch")} /></Field>
         <Field label="Other advance deduction (UGX)" hint="Manual monthly deduction (approved advances recover automatically)"><Input type="number" value={f.advanceDeductions || 0} onChange={set("advanceDeductions")} /></Field>
         <Field label="Annual leave taken (days)"><Input type="number" value={f.annualUsed} onChange={set("annualUsed")} /></Field>
