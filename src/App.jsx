@@ -247,6 +247,7 @@ function Rating({ value }) {
 const NAV = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
   { id: "employees", label: "Employees", Icon: Users },
+  { id: "approvals", label: "Profile Approvals", Icon: ClipboardCheck },
   { id: "leave", label: "Leave", Icon: CalendarDays },
   { id: "attendance", label: "Attendance", Icon: Clock },
   { id: "payroll", label: "Payroll", Icon: Wallet },
@@ -267,6 +268,7 @@ const canDo = (ctx, action) => { const r = currentRole(ctx); return !r || r.acti
 const VIEW_META = {
   dashboard: ["Workforce Overview", "Front-end demo — HR snapshot for Global Link Associates Ltd"],
   employees: ["Employee Register", "Staff records, contracts and statutory details"],
+  approvals: ["Profile Approvals", "Review and validate staff-submitted profile changes"],
   leave: ["Leave Management", "Requests, approvals and statutory balances"],
   attendance: ["Attendance & Timesheets", "Daily clock-in, field sites and overtime"],
   payroll: ["Payroll", "Monthly PAYE & NSSF computation (URA rates)"],
@@ -391,12 +393,13 @@ function AdminConsole({ ctx }) {
   const openStaffFile = (id) => { setSelectedEmpId(id); setView("staffFile"); };
   const actx = { ...ctx, setView, openStaffFile };
   const navView = view === "staffFile" ? "employees" : view;
-  const nav = NAV.filter((n) => can(ctx, n.id));
+  const _isAdmin = ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role)) === "admin";
+  const nav = NAV.filter((n) => can(ctx, n.id) && (n.id !== "approvals" || _isAdmin));
   const [title, sub] = VIEW_META[view];
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, stock: Stock, appraisals: Appraisals, reports: Reports, settings: SettingsView }[view];
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, stock: Stock, appraisals: Appraisals, reports: Reports, settings: SettingsView }[view];
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -488,9 +491,188 @@ function Login({ employees, live, authenticate }) {
   );
 }
 
+/* ================= Self-service profile + admin approval ================= */
+const PROFILE_FLAT_FIELDS = ["firstName","lastName","gender","dob","nationalId","maritalStatus","religion","disability","nationality","phone","email","address","fileNumber","tin","nssfNumber","bankName","bankAccount","bankBranch","emergencyName","emergencyRelation","emergencyPhone","nextOfKinName","nextOfKinDetails"];
+const PROFILE_GROUP_FIELDS = ["origin","residence","contact"];
+const PROFILE_ARRAY_FIELDS = ["academicQualifications","bankDetails","employmentHistory","professionalSpecialization","professionalMembership","children","nextOfKin"];
+const PROFILE_FIELD_LABELS = {
+  firstName: "First name", lastName: "Surname", gender: "Gender", dob: "Date of birth", nationalId: "National ID (NIN)",
+  maritalStatus: "Marital status", religion: "Religion", disability: "Disability", nationality: "Nationality",
+  phone: "Phone", email: "Email", address: "Residential address", fileNumber: "File number",
+  tin: "TIN", nssfNumber: "NSSF number", bankName: "Bank", bankAccount: "Bank account", bankBranch: "Bank branch",
+  emergencyName: "Emergency contact name", emergencyRelation: "Emergency relationship", emergencyPhone: "Emergency phone",
+  nextOfKinName: "Next of kin", nextOfKinDetails: "Next of kin details",
+  origin: "Origin", residence: "Residence", contact: "Contact details",
+  academicQualifications: "Academic qualifications", bankDetails: "Bank details (list)", employmentHistory: "Employment history",
+  professionalSpecialization: "Professional specialization", professionalMembership: "Professional membership",
+  children: "Children / dependants", nextOfKin: "Next of kin (detailed)",
+};
+function profileFmt(v) {
+  if (v == null || v === "") return "—";
+  if (Array.isArray(v)) return v.length + " entr" + (v.length === 1 ? "y" : "ies");
+  if (typeof v === "object") return Object.values(v).filter(Boolean).join(", ") || "—";
+  return String(v);
+}
+function profileChanges(emp) {
+  const d = emp.profileDraft || {}; const out = [];
+  [...PROFILE_FLAT_FIELDS, ...PROFILE_GROUP_FIELDS, ...PROFILE_ARRAY_FIELDS].forEach((k) => {
+    if (!(k in d)) return;
+    const cur = emp[k], nxt = d[k];
+    if (JSON.stringify(cur ?? "") !== JSON.stringify(nxt ?? "")) out.push({ key: k, label: PROFILE_FIELD_LABELS[k] || k, from: profileFmt(cur), to: profileFmt(nxt) });
+  });
+  return out;
+}
+
+function MyProfileEdit({ ctx }) {
+  const emp = ctx.currentEmp;
+  const pending = emp.profileStatus === "pending";
+  const [f, setF] = useState(() => normalizeEmployee({ ...emp, ...(emp.profileDraft || {}) }));
+  const [saving, setSaving] = useState(false);
+  const [sent, setSent] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const setN = (g, k) => (e) => setF((s) => ({ ...s, [g]: { ...s[g], [k]: e.target.value } }));
+  const setArr = (k) => (arr) => setF((s) => ({ ...s, [k]: arr }));
+  const submit = async () => {
+    if (!f.firstName || !f.lastName) return alert("First name and surname are required.");
+    setSaving(true);
+    const draft = {};
+    [...PROFILE_FLAT_FIELDS, ...PROFILE_GROUP_FIELDS, ...PROFILE_ARRAY_FIELDS].forEach((k) => { draft[k] = f[k]; });
+    await employeesApi.update(emp.id, { profileDraft: draft, profileStatus: "pending", profileSubmittedAt: new Date().toISOString() });
+    await ctx.reload();
+    setSaving(false); setSent(true);
+  };
+  return (
+    <>
+      {(pending || sent) && (
+        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--info-dim)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Timer size={18} style={{ color: "var(--accent)", flex: "none" }} />
+            <div style={{ fontSize: 13, color: "var(--text)" }}><b>Your changes are awaiting admin approval.</b> The official record stays unchanged until an administrator validates them. You can keep editing and resubmit below.</div>
+          </div>
+        </Card>
+      )}
+      {emp.profileStatus === "rejected" && !sent && (
+        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--danger-dim)", border: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 13, color: "var(--text)" }}><b>Your last submission was not approved.</b> Please review your details and resubmit.</div>
+        </Card>
+      )}
+      <Card style={{ padding: 24 }}>
+        <div style={{ marginBottom: 14, color: "var(--text-2)", fontSize: 12.5 }}>Update your personal, contact, bank and statutory details. Salary and role assignment are managed by HR. Your changes are submitted for admin approval and do not change the official record until approved.</div>
+        <div style={formGrid}>
+          <FieldsetTitle first>Identity</FieldsetTitle>
+          <Field label="First name" required><Input value={f.firstName} onChange={set("firstName")} /></Field>
+          <Field label="Surname" required><Input value={f.lastName} onChange={set("lastName")} /></Field>
+          <Field label="Gender"><Select value={f.gender} onChange={set("gender")} options={["Male", "Female"]} /></Field>
+          <Field label="Date of birth"><Input type="date" value={f.dob} onChange={set("dob")} /></Field>
+          <Field label="National ID (NIN)"><Input value={f.nationalId} onChange={set("nationalId")} placeholder="CM…" /></Field>
+          <Field label="Phone"><Input value={f.phone} onChange={set("phone")} placeholder="+256 7…" /></Field>
+          <Field label="Email"><Input type="email" value={f.email} onChange={set("email")} /></Field>
+          <Field label="Residential address" full><Input value={f.address} onChange={set("address")} /></Field>
+          <Field label="File number"><Input value={f.fileNumber} onChange={set("fileNumber")} /></Field>
+          <Field label="Marital status"><Select value={f.maritalStatus} onChange={set("maritalStatus")} options={MARITAL_STATUSES} /></Field>
+          <Field label="Religion"><Input value={f.religion} onChange={set("religion")} /></Field>
+          <Field label="Disability"><Input value={f.disability} onChange={set("disability")} /></Field>
+          <Field label="Nationality"><Input value={f.nationality} onChange={set("nationality")} /></Field>
+
+          <FieldsetTitle>Origin</FieldsetTitle>
+          <Field label="Region of origin"><Input value={f.origin.region} onChange={setN("origin", "region")} /></Field>
+          <Field label="District of origin"><Input value={f.origin.district} onChange={setN("origin", "district")} /></Field>
+          <Field label="County of origin"><Input value={f.origin.county} onChange={setN("origin", "county")} /></Field>
+          <Field label="Village of origin"><Input value={f.origin.village} onChange={setN("origin", "village")} /></Field>
+
+          <FieldsetTitle>Residence</FieldsetTitle>
+          <Field label="Residence district"><Input value={f.residence.district} onChange={setN("residence", "district")} /></Field>
+          <Field label="Residence county"><Input value={f.residence.county} onChange={setN("residence", "county")} /></Field>
+          <Field label="Residence sub county"><Input value={f.residence.subCounty} onChange={setN("residence", "subCounty")} /></Field>
+          <Field label="Residence parish"><Input value={f.residence.parish} onChange={setN("residence", "parish")} /></Field>
+          <Field label="Residence village"><Input value={f.residence.village} onChange={setN("residence", "village")} /></Field>
+
+          <FieldsetTitle>Contact</FieldsetTitle>
+          <Field label="Postal address" full><Input value={f.contact.postalAddress} onChange={setN("contact", "postalAddress")} /></Field>
+          <Field label="Telephone"><Input value={f.contact.telephone} onChange={setN("contact", "telephone")} /></Field>
+          <Field label="Mobile"><Input value={f.contact.mobile} onChange={setN("contact", "mobile")} /></Field>
+          <Field label="Contact email"><Input value={f.contact.email} onChange={setN("contact", "email")} /></Field>
+          <Field label="Contact district"><Input value={f.contact.district} onChange={setN("contact", "district")} /></Field>
+
+          <FieldsetTitle>Statutory &amp; bank</FieldsetTitle>
+          <Field label="TIN"><Input value={f.tin} onChange={set("tin")} /></Field>
+          <Field label="NSSF number"><Input value={f.nssfNumber} onChange={set("nssfNumber")} /></Field>
+          <Field label="Bank"><Input value={f.bankName} onChange={set("bankName")} /></Field>
+          <Field label="Bank account"><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
+          <Field label="Bank branch"><Input value={f.bankBranch || ""} onChange={set("bankBranch")} /></Field>
+
+          <FieldsetTitle>Emergency contact</FieldsetTitle>
+          <Field label="Contact name"><Input value={f.emergencyName} onChange={set("emergencyName")} /></Field>
+          <Field label="Relationship"><Input value={f.emergencyRelation} onChange={set("emergencyRelation")} /></Field>
+          <Field label="Contact phone" full><Input value={f.emergencyPhone} onChange={set("emergencyPhone")} /></Field>
+
+          <FieldsetTitle>Next of kin</FieldsetTitle>
+          <Field label="Next of kin"><Input value={f.nextOfKinName || ""} onChange={set("nextOfKinName")} /></Field>
+          <Field label="Next of kin details" full hint="Relationship, phone and address"><Input value={f.nextOfKinDetails || ""} onChange={set("nextOfKinDetails")} /></Field>
+
+          <Repeater label="Academic Qualifications" Icon={GraduationCap} value={f.academicQualifications} onChange={setArr("academicQualifications")} fields={REPEATER_SCHEMAS.academicQualifications} />
+          <Repeater label="Bank Details" Icon={Landmark} value={f.bankDetails} onChange={setArr("bankDetails")} fields={REPEATER_SCHEMAS.bankDetails} />
+          <Repeater label="Employment History" Icon={Briefcase} value={f.employmentHistory} onChange={setArr("employmentHistory")} fields={REPEATER_SCHEMAS.employmentHistory} />
+          <Repeater label="Professional Specialization" Icon={Award} value={f.professionalSpecialization} onChange={setArr("professionalSpecialization")} fields={REPEATER_SCHEMAS.professionalSpecialization} />
+          <Repeater label="Professional Membership" Icon={ShieldCheck} value={f.professionalMembership} onChange={setArr("professionalMembership")} fields={REPEATER_SCHEMAS.professionalMembership} />
+          <Repeater label="Children / Dependants" Icon={Baby} value={f.children} onChange={setArr("children")} fields={REPEATER_SCHEMAS.children} />
+          <Repeater label="Next of Kin" Icon={HeartHandshake} value={f.nextOfKin} onChange={setArr("nextOfKin")} fields={REPEATER_SCHEMAS.nextOfKin} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+          <Btn variant="primary" disabled={saving} onClick={submit}><Check size={15} />{saving ? "Submitting…" : "Submit for approval"}</Btn>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function ProfileApprovals({ ctx }) {
+  const pend = ctx.store.employees.filter((e) => e.profileStatus === "pending" && e.profileDraft);
+  const approve = async (e) => { const d = e.profileDraft || {}; await employeesApi.update(e.id, { ...d, profileDraft: null, profileStatus: "approved", profileReviewedAt: new Date().toISOString() }); await ctx.reload(); };
+  const reject = async (e) => { if (!confirm(`Reject ${e.firstName} ${e.lastName}'s submitted changes?`)) return; await employeesApi.update(e.id, { profileDraft: null, profileStatus: "rejected", profileReviewedAt: new Date().toISOString() }); await ctx.reload(); };
+  if (!pend.length) return (
+    <Card style={{ padding: 40, textAlign: "center" }}>
+      <ClipboardCheck size={28} style={{ opacity: .45 }} />
+      <div style={{ marginTop: 10, fontSize: 14, color: "var(--text)" }}>No profile changes awaiting approval.</div>
+      <div style={{ fontSize: 12.5, marginTop: 4, color: "var(--muted)" }}>When staff submit updates to their details, they appear here for you to validate.</div>
+    </Card>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {pend.map((e) => {
+        const changes = profileChanges(e);
+        return (
+          <Card key={e.id}>
+            <CardHead title={`${e.firstName} ${e.lastName}`} right={<Pill tone="accent">{e.id}</Pill>} />
+            <div style={{ padding: 18 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>{e.jobTitle} · {e.department} · submitted {e.profileSubmittedAt ? fmtDate(e.profileSubmittedAt.slice(0, 10)) : "—"}</div>
+              {changes.length ? (
+                <DataTable
+                  columns={[
+                    { label: "Field", render: (c) => <b>{c.label}</b> },
+                    { label: "Current", render: (c) => <span style={{ color: "var(--muted)" }}>{c.from}</span> },
+                    { label: "Proposed", render: (c) => <span style={{ color: "var(--text)", fontWeight: 600 }}>{c.to}</span> },
+                  ]}
+                  rows={changes}
+                  empty="No changes."
+                />
+              ) : <div style={{ fontSize: 13, color: "var(--muted)" }}>Submitted with no differences from the current record.</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+                <Btn onClick={() => reject(e)}><X size={15} />Reject</Btn>
+                <Btn variant="primary" onClick={() => approve(e)}><Check size={15} />Approve &amp; apply</Btn>
+              </div>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ============================ Staff portal ============================== */
 const STAFF_META = {
   myportal: ["My Portal", "Your self-service dashboard"],
+  myprofile: ["Update My Details", "Submit profile changes for admin approval"],
   clockin: ["Clock In", "Capture attendance with your location"],
   myleave: ["My Leave", "Apply for and track your leave"],
   mypayslip: ["My Payslip", "Your monthly pay breakdown"],
@@ -499,6 +681,7 @@ const STAFF_META = {
 };
 const STAFF_NAV = [
   ["myportal", "My Portal", LayoutDashboard],
+  ["myprofile", "Update My Details", Contact],
   ["clockin", "Clock In", LocateFixed],
   ["myleave", "My Leave", CalendarDays],
   ["mypayslip", "My Payslip", Wallet],
@@ -538,6 +721,7 @@ function StaffPortal({ ctx }) {
         </header>
         <div className="gla-fade" key={sv} style={{ padding: isMobile ? "16px 14px 48px" : "24px 28px 56px" }}>
           {sv === "myportal" && <MyPortal ctx={ctx} setSv={setSv} />}
+          {sv === "myprofile" && <MyProfileEdit ctx={ctx} />}
           {sv === "clockin" && <MyClockIn ctx={ctx} />}
           {sv === "myleave" && <MyLeave ctx={ctx} />}
           {sv === "mypayslip" && <MyPayslip ctx={ctx} />}
@@ -611,6 +795,7 @@ function MyPortal({ ctx, setSv }) {
   return (
     <>
       <Announcements ctx={ctx} audience="staff" />
+      {emp.profileStatus === "pending" && <Card style={{ padding: "12px 16px", marginBottom: 14, background: "var(--info-dim)", border: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}><Timer size={16} style={{ color: "var(--accent)" }} /><div style={{ fontSize: 12.5, color: "var(--text)" }}>Your submitted profile changes are awaiting admin approval.</div></Card>}
       <Card style={{ padding: "20px 22px", marginBottom: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <Avatar emp={emp} size={52} />
         <div style={{ flex: 1, minWidth: 200 }}>
@@ -639,6 +824,7 @@ function MyPortal({ ctx, setSv }) {
             {action(Wallet, "View my payslip", () => setSv("mypayslip"))}
             {action(Banknote, "Request salary advance", () => setSv("myadvance"))}
             {action(IdCard, "View my staff file", () => setSv("myfile"))}
+            {action(Contact, "Update my details", () => setSv("myprofile"))}
           </div>
         </Card>
         <Card>
