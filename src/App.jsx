@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
+import { GLA_LOGO } from "./logo.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
@@ -468,26 +469,39 @@ function Login({ employees, live, authenticate }) {
   };
   const sectionLabel = (t) => <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 8px", fontFamily: "var(--font-mono)", letterSpacing: ".08em", textTransform: "uppercase" }}>{t}</div>;
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, background: "radial-gradient(1100px 520px at 50% -10%, var(--info-dim), transparent 60%), var(--bg)" }}>
-      <div style={{ width: "100%", maxWidth: 460 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 13, justifyContent: "center", marginBottom: 8 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 12, display: "grid", placeItems: "center", fontFamily: "var(--font-display)", fontWeight: 800, color: "#fff", fontSize: 16, background: "#16181d", boxShadow: "inset 0 2.5px 0 var(--accent), var(--shadow)" }}>GL</div>
-          <div><div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17 }}>Global Link Associates</div><div style={{ fontSize: 10.5, color: "var(--muted)", fontFamily: "var(--font-mono)", letterSpacing: ".1em", textTransform: "uppercase" }}>IHRSM · Kampala</div></div>
-        </div>
-        <div style={{ textAlign: "center", fontSize: 12, color: "var(--text-2)", marginBottom: 18 }}>Integrated HR and Supplier Management System (IHRSM)</div>
-        <Card style={{ padding: 24, boxShadow: "var(--shadow-lg)" }}>
-          <h2 style={{ fontSize: 19, fontWeight: 800, color: "var(--text)" }}>Sign in to your portal</h2>
-          <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>Your view is set automatically by your role — management get the console, staff get self-service.</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-            <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
-            <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
-            {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
-            <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "12px" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1200px 620px at 50% -22%, #0a4f6a, transparent 55%), linear-gradient(162deg, #00334655 0%, #002b3d 0%, #013243 55%, #00202c 100%)" }}>
+        <svg viewBox="0 0 1440 240" preserveAspectRatio="none" aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: "100%", height: 200, pointerEvents: "none" }}>
+          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#f0601f" fillOpacity="0.10" />
+          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#f0601f" fillOpacity="0.20" />
+        </svg>
+
+        <div style={{ width: "100%", maxWidth: 440, position: "relative", zIndex: 1 }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 11, letterSpacing: ".26em", textTransform: "uppercase", color: "#f3a983", fontWeight: 700 }}>Engineering &amp; Contracting &middot; Kampala</div>
+            <div style={{ color: "rgba(255,255,255,.74)", fontSize: 12.5, marginTop: 9 }}>Integrated HR &amp; Supplier Management System</div>
           </div>
-        </Card>
-        <div style={{ textAlign: "center", fontSize: 10.5, color: "var(--muted)", marginTop: 16, fontFamily: "var(--font-mono)", letterSpacing: ".03em" }}>People · Payroll · Leave · Attendance · Advances · Stores</div>
+
+          <Card style={{ padding: "28px 26px", borderRadius: 16, border: "1px solid rgba(255,255,255,.10)", boxShadow: "0 28px 64px -22px rgba(0,0,0,.6)" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+              <img src={GLA_LOGO} alt="Global Link Associates" style={{ width: 212, maxWidth: "80%", height: "auto", display: "block" }} />
+            </div>
+            <div style={{ height: 1, background: "linear-gradient(90deg, transparent, var(--border), transparent)", margin: "16px 0 20px" }} />
+            <h2 style={{ fontSize: 19, fontWeight: 800, color: "#002b3d" }}>Sign in to your portal</h2>
+            <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>Your view is set automatically by your role &mdash; management get the console, staff get self-service.</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+              <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+              <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+              {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
+              <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+            </div>
+          </Card>
+
+          <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.62)", marginTop: 18, lineHeight: 1.75 }}>
+            <div>Tirupati Mazima Mall &middot; Ggaba Road &middot; Kampala, Uganda</div>
+            <div style={{ fontFamily: "var(--font-mono)", letterSpacing: ".04em", marginTop: 2 }}>glassociates.co.ug &middot; People &middot; Payroll &middot; Leave &middot; Stores</div>
+          </div>
+        </div>
       </div>
-    </div>
   );
 }
 
