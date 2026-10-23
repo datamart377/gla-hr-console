@@ -1369,14 +1369,14 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
       {add && (
         <Btn variant="primary" onClick={() => add[1](ctx)} title={add[0]}><Plus size={16} />{!isMobile && add[0]}</Btn>
       )}
-      {ctx.currentEmp && (
+      {ctx.auth && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: isMobile ? 0 : 6, marginLeft: 2, borderLeft: isMobile ? "none" : "1px solid var(--border)" }}>
-          <Avatar emp={ctx.currentEmp} size={32} />
+          {ctx.currentEmp && <Avatar emp={ctx.currentEmp} size={32} />}
           {!isMobile && <div style={{ lineHeight: 1.15 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{ctx.currentEmp.firstName} {ctx.currentEmp.lastName}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}` : roleLabel}</div>
             <div style={{ fontSize: 11, color: "var(--muted)" }}>{roleLabel}</div>
           </div>}
-          <Btn variant="ghost" size="sm" onClick={ctx.signOut} title="Sign out"><LogOut size={16} /></Btn>
+          <Btn variant="primary" size="sm" onClick={ctx.signOut} title="Sign out"><LogOut size={16} />{!isMobile && "Sign out"}</Btn>
         </div>
       )}
     </header>

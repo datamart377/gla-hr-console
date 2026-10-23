@@ -18,6 +18,7 @@ const MUTED = argb("8C949D");
 const ZEBRA = argb("F4F7F9");
 const RULE = argb("D6DCE2");
 const WHITE = argb("FFFFFF");
+const GREEN = argb("155A3C");
 const NCOLS = 6;
 
 const refCode = () => {
@@ -59,45 +60,57 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
   });
   ws.columns = [{ width: 5 }, { width: 24 }, { width: 18 }, { width: 16 }, { width: 15 }, { width: 16 }];
 
-  const mergeFull = (rowNum) => ws.mergeCells(rowNum, 1, rowNum, NCOLS);
+  const merge = (r, a, b) => ws.mergeCells(r, a, r, b);
   const bandRow = (text, { font, alignment, height } = {}) => {
-    const row = ws.addRow([text]);
-    mergeFull(row.number);
-    const c = row.getCell(1);
-    if (font) c.font = font;
+    const row = ws.addRow([text]); merge(row.number, 1, NCOLS);
+    const c = row.getCell(1); if (font) c.font = font;
     c.alignment = alignment || { horizontal: "left", vertical: "middle" };
-    if (height) row.height = height;
-    return row.number;
+    if (height) row.height = height; return row;
   };
 
-  // 1) Letterhead — logo floats top-left; address lines right-aligned
-  COMPANY.lines.forEach((ln) => bandRow(ln, { font: fnt({ size: 9, color: { argb: MUTED } }), alignment: { horizontal: "right", vertical: "middle" }, height: 15 }));
-  while (ws.rowCount < 4) bandRow("", { height: 15 });
-  // navy rule
-  const ruleRow = ws.addRow([""]); mergeFull(ruleRow.number);
-  for (let c = 1; c <= NCOLS; c++) ruleRow.getCell(c).border = { bottom: { style: "medium", color: { argb: NAVY } } };
+  // Branded letterhead — logo top-left, address lines right-aligned, orange/navy split rule.
+  const letterhead = () => {
+    const first = ws.rowCount + 1;
+    COMPANY.lines.forEach((ln) => bandRow(ln, { font: fnt({ size: 9, color: { argb: MUTED } }), alignment: { horizontal: "right", vertical: "middle" }, height: 15 }));
+    while (ws.rowCount < first + 3) bandRow("", { height: 15 });
+    const ruleRow = ws.addRow([""]); merge(ruleRow.number, 1, NCOLS);
+    for (let c = 1; c <= NCOLS; c++) ruleRow.getCell(c).border = { bottom: { style: "medium", color: { argb: c <= 2 ? ORANGE : NAVY } } };
+    try { const id = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(id, { tl: { col: 0.05, row: first - 1 + 0.15 }, ext: { width: 176, height: 70 }, editAs: "oneCell" }); } catch (e) { /* logo optional */ }
+  };
 
-  // Embed the logo over the top-left letterhead area
-  try {
-    const imgId = wb.addImage({ base64: GLA_LOGO, extension: "png" });
-    ws.addImage(imgId, { tl: { col: 0.05, row: 0.15 }, ext: { width: 176, height: 70 }, editAs: "oneCell" });
-  } catch (e) { /* logo optional */ }
+  letterhead();
+  ws.addRow([]);
 
-  ws.addRow([]); // spacer
-
-  // 2) Title block
+  // Title block — eyebrow, title (left) + ref (right), subtitle (left) + generated (right).
   bandRow(eyebrow, { font: fnt({ size: 9, bold: true, color: { argb: ORANGE } }) });
-  bandRow(title, { font: fnt({ size: 16, bold: true, color: { argb: INK } }) });
-  bandRow(subtitle, { font: fnt({ size: 10, color: { argb: BODY } }) });
-  bandRow(`Ref: ${refCode()}  ·  Generated ${todayLong()}`, { font: fnt({ size: 8.5, color: { argb: MUTED } }) });
-  ws.addRow([]); // spacer
+  const tr = ws.addRow([title, "", "", "", refCode(), ""]);
+  merge(tr.number, 1, 4); merge(tr.number, 5, 6); tr.height = 22;
+  tr.getCell(1).font = fnt({ size: 16, bold: true, color: { argb: INK } });
+  tr.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
+  tr.getCell(5).font = fnt({ size: 8.5, color: { argb: MUTED } });
+  tr.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+  const sr = ws.addRow([subtitle || "", "", "", "", `Generated ${todayLong()}`, ""]);
+  merge(sr.number, 1, 4); merge(sr.number, 5, 6);
+  sr.getCell(1).font = fnt({ size: 10, color: { argb: BODY } });
+  sr.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
+  sr.getCell(5).font = fnt({ size: 8.5, color: { argb: MUTED } });
+  sr.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+  ws.addRow([]);
 
-  // 3) Meta — cheque + total
-  if (chequeNo) bandRow(`Cheque No: ${chequeNo}`, { font: fnt({ size: 10, bold: true, color: { argb: INK } }) });
-  bandRow(`Total net payable: UGX ${total.toLocaleString("en-US")}`, { font: fnt({ size: 10, bold: true, color: { argb: INK } }) });
-  ws.addRow([]); // spacer
+  // Meta block — cheque, total, and (for sign-off reports) the approval status, like the PDF.
+  const metaLines = [
+    ...(chequeNo ? [`Cheque No: ${chequeNo}`] : []),
+    `Total net payable: UGX ${total.toLocaleString("en-US")}`,
+  ];
+  if (Array.isArray(signatories) && signatories.length) {
+    const a = !!signatories[0]?.signedText, b = !!signatories[1]?.signedText;
+    const status = a && b ? "AUTHORIZED FOR THE BANK" : a ? "CERTIFIED — awaiting Managing Director authorization" : "DRAFT — awaiting signatures";
+    metaLines.push(`Status: ${status}`);
+  }
+  metaLines.forEach((m) => bandRow(m, { font: fnt({ size: 10, bold: true, color: { argb: INK } }) }));
+  ws.addRow([]);
 
-  // 4) Table header
+  // Table header
   const head = ["#", nameHeader, "Account Number", "Bank", "Branch", "Net Pay (UGX)"];
   const hRow = ws.addRow(head);
   hRow.eachCell((cell, col) => {
@@ -106,8 +119,9 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     cell.alignment = { horizontal: col === 1 ? "center" : col === 6 ? "right" : "left", vertical: "middle" };
     cell.border = { bottom: { style: "thin", color: { argb: NAVY } } };
   });
+  hRow.height = 20;
 
-  // 5) Data rows
+  // Data rows
   rows.forEach((row, i) => {
     const rr = ws.addRow([row.no ?? i + 1, row.name || "", row.account || "", row.bank || "", row.branch || "", Number(row.net) || 0]);
     const zebra = i % 2 === 1;
@@ -118,58 +132,53 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
       if (zebra) cell.fill = solid(ZEBRA);
       if (col === 6) cell.numFmt = "#,##0";
     });
+    rr.height = 18;
   });
 
-  // 6) Total row
+  // Total row
   const tRow = ws.addRow(["", "TOTAL NET PAYABLE", "", "", "", total]);
-  ws.mergeCells(tRow.number, 2, tRow.number, 5);
+  merge(tRow.number, 2, 5);
   for (let c = 1; c <= NCOLS; c++) {
     const cell = tRow.getCell(c);
     cell.font = fnt({ bold: true, size: 10.5, color: { argb: WHITE } });
     cell.fill = solid(INK);
-    cell.alignment = { horizontal: c >= 6 ? "right" : c === 2 ? "left" : "center" };
+    cell.alignment = { horizontal: c >= 6 ? "right" : c === 2 ? "left" : "center", vertical: "middle" };
     if (c === 6) cell.numFmt = "#,##0";
   }
+  tRow.height = 20;
 
-  ws.addRow([]); ws.addRow([]); // spacers
-
-  // 7) Approved signatory block. When a digital sign-off record is supplied, render
-  // the two signatures (name, title, digital-signature line and verification code);
-  // otherwise fall back to the generic approved signatories.
+  // Page 2 — repeated letterhead + approved-signatory block (matches the PDF).
+  tRow.addPageBreak();
+  letterhead();
+  ws.addRow([]);
   bandRow("Approved Signatory", { font: fnt({ size: 11, bold: true, color: { argb: INK } }) });
-  const useDigital = Array.isArray(signatories) && signatories.length;
-  const s = useDigital
-    ? [
-        { name: signatories[0]?.name || "", contact: signatories[0]?.title || "", signedText: signatories[0]?.signedText || "", meta: signatories[0]?.signedMeta || signatories[0]?.pending || "" },
-        { name: signatories[1]?.name || "", contact: signatories[1]?.title || "", signedText: signatories[1]?.signedText || "", meta: signatories[1]?.signedMeta || signatories[1]?.pending || "" },
-      ]
-    : SIGNATORIES.map((x) => ({ name: x.name, contact: x.contact, signedText: "", meta: "" }));
-  // Digital signature line (green italic name) above the ruled name line.
-  const signRow = ws.addRow([s[0].signedText, "", "", s[1].signedText, "", ""]);
-  ws.mergeCells(signRow.number, 1, signRow.number, 2);
-  ws.mergeCells(signRow.number, 4, signRow.number, 5);
-  [1, 4].forEach((c) => { signRow.getCell(c).font = fnt({ italic: true, bold: true, size: 13, color: { argb: "FF155A3C" } }); });
-  const nameRow = ws.addRow([s[0].name || "", "", "", s[1].name || "", "", ""]);
-  ws.mergeCells(nameRow.number, 1, nameRow.number, 2);
-  ws.mergeCells(nameRow.number, 4, nameRow.number, 5);
-  [1, 2, 4, 5].forEach((c) => { nameRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
-  nameRow.getCell(1).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
-  nameRow.getCell(4).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
-  const contactRow = ws.addRow([s[0].contact || "", "", "", s[1].contact || "", "", ""]);
-  ws.mergeCells(contactRow.number, 1, contactRow.number, 2);
-  ws.mergeCells(contactRow.number, 4, contactRow.number, 5);
-  contactRow.getCell(1).font = fnt({ bold: useDigital, size: 9, color: { argb: useDigital ? INK : MUTED } });
-  contactRow.getCell(4).font = fnt({ bold: useDigital, size: 9, color: { argb: useDigital ? INK : MUTED } });
-  if (useDigital) {
-    const metaRow = ws.addRow([s[0].meta || "", "", "", s[1].meta || "", "", ""]);
-    ws.mergeCells(metaRow.number, 1, metaRow.number, 2);
-    ws.mergeCells(metaRow.number, 4, metaRow.number, 5);
-    metaRow.getCell(1).font = fnt({ size: 8, color: { argb: MUTED } });
-    metaRow.getCell(4).font = fnt({ size: 8, color: { argb: MUTED } });
+  ws.addRow([]);
+
+  const s = (Array.isArray(signatories) && signatories.length ? signatories : SIGNATORIES).map((x) => ({
+    label: x.title || x.name || "",
+    above: x.signedText || x.pending || "",
+    signed: !!x.signedText,
+    meta: x.signedMeta || "",
+  }));
+  const twoCol = (vals) => {
+    const row = ws.addRow([vals[0] || "", "", "", vals[1] || "", "", ""]);
+    merge(row.number, 1, 2); merge(row.number, 4, 5); return row;
+  };
+  const aboveRow = twoCol([s[0]?.above, s[1]?.above]);
+  [1, 4].forEach((c) => { const sg = s[c === 1 ? 0 : 1] || {}; aboveRow.getCell(c).font = fnt({ italic: true, bold: sg.signed, size: sg.signed ? 13 : 10, color: { argb: sg.signed ? GREEN : MUTED } }); aboveRow.getCell(c).alignment = { horizontal: "center", vertical: "bottom" }; });
+  aboveRow.height = 22;
+  const lineRow = twoCol(["", ""]);
+  [1, 2, 4, 5].forEach((c) => { lineRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+  const labelRow = twoCol([s[0]?.label, s[1]?.label]);
+  [1, 4].forEach((c) => { labelRow.getCell(c).font = fnt({ bold: true, size: 10.5, color: { argb: INK } }); labelRow.getCell(c).alignment = { horizontal: "center", vertical: "top" }; });
+  if (s.some((x) => x.meta)) {
+    const metaRow = twoCol([s[0]?.meta, s[1]?.meta]);
+    [1, 4].forEach((c) => { metaRow.getCell(c).font = fnt({ size: 8, color: { argb: MUTED } }); metaRow.getCell(c).alignment = { horizontal: "center" }; });
   }
 
-  ws.addRow([]);
-  bandRow(`${COMPANY.name} · Confidential`, { font: fnt({ size: 8.5, color: { argb: MUTED } }) });
+  // Page footer on every printed page — confidential (left) · page x of y (right).
+  ws.headerFooter.oddFooter = `&L&8&KA0A0A0${COMPANY.name} · Confidential&R&8&KA0A0A0Page &P of &N`;
+  ws.headerFooter.evenFooter = ws.headerFooter.oddFooter;
 
   const buf = await wb.xlsx.writeBuffer();
   triggerDownload(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename || "GLA-Bank-Report.xlsx");
