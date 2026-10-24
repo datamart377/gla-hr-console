@@ -2184,10 +2184,11 @@ function ClockInModal({ ctx, empId }) {
   const confirm = async () => {
     const now = new Date();
     const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const within = match ? match.within : false;
     const site = match ? match.fence.name : "Unknown";
     await attendanceApi.create({
-      empId, date: TODAY, clockIn: hhmm, clockOut: "", site,
+      empId, date: ymd, clockIn: hhmm, clockOut: "", site,
       status: within ? (site.includes("Head Office") ? "Present" : "Field") : "Field",
       overtime: 0, lat: pos.lat, lng: pos.lng, accuracy: Math.round(pos.accuracy || 0),
       geoSite: site, withinFence: within, distanceM: match ? Math.round(match.distanceM) : null, method: pos.method, photo,

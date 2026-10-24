@@ -10,7 +10,8 @@
    Statutory figures use Uganda URA monthly PAYE bands + NSSF (5% + 10%).
    ------------------------------------------------------------------------- */
 
-export const TODAY = "2026-09-03";
+const _now = new Date();
+export const TODAY = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}-${String(_now.getDate()).padStart(2, "0")}`;
 
 export const DEPARTMENTS = [
   "Power Systems", "HVAC & Refrigeration", "Electrical Installation",
