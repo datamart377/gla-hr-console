@@ -5737,9 +5737,23 @@ function GeoMapReport({ ctx }) {
   useEffect(() => {
     if (!containerRef.current) return;
     const map = L.map(containerRef.current, { scrollWheelZoom: false, zoomControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19, attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+
+    // Base map tiles. OpenStreetMap's own tile servers block embedded apps, so
+    // we use key-free providers that permit embedding, with an automatic
+    // fallback if the first one ever fails to serve tiles.
+    const PROVIDERS = [
+      { url: "https://{s}.basemap.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", opts: { maxZoom: 20, subdomains: "abcd", attribution: "&copy; OpenStreetMap contributors &copy; CARTO" } },
+      { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", opts: { maxZoom: 19, attribution: "Tiles &copy; Esri" } },
+    ];
+    let baseLayer = null;
+    const useProvider = (i) => {
+      if (baseLayer) baseLayer.remove();
+      const pr = PROVIDERS[i];
+      let errs = 0;
+      baseLayer = L.tileLayer(pr.url, pr.opts).addTo(map);
+      baseLayer.on("tileerror", () => { if (++errs >= 4 && i + 1 < PROVIDERS.length) useProvider(i + 1); });
+    };
+    useProvider(0);
 
     const bounds = L.latLngBounds([]);
 
