@@ -10,6 +10,7 @@ import {
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
+import L from "leaflet";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
 import { GLA_LOGO } from "./logo.js";
@@ -4700,7 +4701,7 @@ function Reports({ ctx }) {
   const [tab, setTab] = useState("attendance");
   const groups = [
     { key: "staff", label: "Staff reports", accent: "#2f6f9f", GroupIcon: Users, tabs: [
-      ["attendance", "Attendance", Clock], ["workforce", "Workforce", Users], ["leave", "Leave", CalendarDays],
+      ["attendance", "Attendance", Clock], ["geo-map", "Clock-in Map", MapPin], ["workforce", "Workforce", Users], ["leave", "Leave", CalendarDays],
       ["payroll", "Payroll", Wallet], ["statement", "Statement", Banknote], ["paye", "PAYE", FileText], ["nssf", "NSSF", Building2],
     ] },
     { key: "suppliers", label: "Supplier reports", accent: "#b8860b", GroupIcon: Landmark, tabs: [
@@ -4738,6 +4739,7 @@ function Reports({ ctx }) {
         ))}
       </div>
       {tab === "attendance" && <AttendanceReport ctx={ctx} />}
+      {tab === "geo-map" && <GeoMapReport ctx={ctx} />}
       {tab === "workforce" && <WorkforceReport ctx={ctx} />}
       {tab === "leave" && <LeaveReport ctx={ctx} />}
       {tab === "payroll" && <PayrollReport ctx={ctx} />}
@@ -5696,6 +5698,151 @@ function AttendanceReport({ ctx }) {
           empty="No attendance in this period."
         />
       </Card>
+    </>
+  );
+}
+
+// Clock-in geo-distribution: every GPS-tagged clock-in plotted on a real map,
+// coloured green (inside a site geofence) or red (outside), over the site
+// geofence circles. Uses Leaflet + OpenStreetMap tiles.
+function GeoMapReport({ ctx }) {
+  const { store } = ctx;
+  const [period, setPeriod] = useState("14");
+
+  const dISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const endD = new Date(TODAY + "T00:00:00");
+  let startD;
+  if (period === "month") startD = new Date(TODAY.slice(0, 7) + "-01T00:00:00");
+  else if (period === "all") startD = new Date("2000-01-01T00:00:00");
+  else { startD = new Date(endD); startD.setDate(endD.getDate() - (Number(period) - 1)); }
+  const start = dISO(startD), end = TODAY;
+
+  // GPS-tagged clock-ins in range, newest first.
+  const points = useMemo(() => store.attendance
+    .filter((a) => a.lat != null && a.lng != null && a.date >= start && a.date <= end)
+    .map((a) => {
+      const emp = store.employees.find((e) => e.id === a.empId);
+      return { ...a, emp, name: emp ? fullName(emp) : (a.empId || "Unknown") };
+    })
+    .sort((a, b) => (b.date === a.date ? (b.clockIn || "").localeCompare(a.clockIn || "") : b.date.localeCompare(a.date))),
+    [store.attendance, store.employees, start, end]);
+
+  const within = points.filter((p) => p.withinFence).length;
+  const outside = points.length - within;
+  const sitesCovered = new Set(points.map((p) => p.geoSite).filter(Boolean)).size;
+  const offSite = points.filter((p) => !p.withinFence);
+
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const map = L.map(containerRef.current, { scrollWheelZoom: false, zoomControl: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+
+    const bounds = L.latLngBounds([]);
+
+    // Site geofence circles (metres) + a small centre dot.
+    GEOFENCES.forEach((g) => {
+      L.circle([g.lat, g.lng], { radius: g.radius, color: "#2f6f9f", weight: 1.5, opacity: 0.75, fillColor: "#2f6f9f", fillOpacity: 0.07, dashArray: "5 4" })
+        .addTo(map).bindPopup(`<b>${g.name}</b><br>Site geofence · ${g.radius} m radius`);
+      L.circleMarker([g.lat, g.lng], { radius: 3, color: "#2f6f9f", fillColor: "#2f6f9f", fillOpacity: 1, weight: 1 }).addTo(map);
+      bounds.extend([g.lat, g.lng]);
+    });
+
+    // Clock-in markers, coloured by geofence compliance.
+    points.forEach((p) => {
+      const col = p.withinFence ? "#12894e" : "#c23a29";
+      L.circleMarker([p.lat, p.lng], { radius: 6, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.9 })
+        .addTo(map)
+        .bindPopup(
+          `<div style="min-width:172px;line-height:1.5">` +
+          `<b>${p.name}</b><br>` +
+          `${fmtDate(p.date)} · ${p.clockIn || "—"}<br>` +
+          `<span style="color:${col};font-weight:600">${p.withinFence ? "✓ Within" : "✗ Outside"}</span> ${p.geoSite || p.site || ""}` +
+          `${p.distanceM != null ? ` · ${formatDistance(p.distanceM)}` : ""}<br>` +
+          `<span style="font-family:monospace;font-size:11px">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span> · ±${Math.round(p.accuracy || 0)} m` +
+          `</div>`
+        );
+      bounds.extend([p.lat, p.lng]);
+    });
+
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.18));
+    else map.setView([0.3136, 32.5811], 12); // Kampala fallback
+
+    const t = setTimeout(() => map.invalidateSize(), 60);
+    return () => { clearTimeout(t); map.remove(); };
+  }, [points]);
+
+  const exportCsv = () => {
+    const cols = ["Staff ID", "Name", "Date", "Clock-in", "Nearest site", "Within fence", "Distance (m)", "Latitude", "Longitude", "Accuracy (m)", "Method"];
+    const lines = [cols.join(",")].concat(points.map((p) => [
+      p.empId, p.name, p.date, p.clockIn || "", p.geoSite || p.site || "", p.withinFence ? "Yes" : "No",
+      p.distanceM == null ? "" : p.distanceM, p.lat, p.lng, Math.round(p.accuracy || 0), p.method || "",
+    ].map((x) => `"${x}"`).join(",")));
+    downloadFile(`gla-clockin-geo-${start}_to_${end}.csv`, lines.join("\n"));
+  };
+
+  const legendDot = (color, label) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)" }}>
+      <span style={{ width: 12, height: 12, borderRadius: "50%", background: color, border: "1.5px solid #fff", boxShadow: "0 0 0 1px var(--border)" }} />{label}
+    </span>
+  );
+
+  return (
+    <>
+      <Toolbar>
+        <div style={{ fontSize: 13, color: "var(--text-2)" }}>Period <b style={{ color: "var(--text)" }}>{fmtDate(start)} → {fmtDate(end)}</b></div>
+        <div style={{ flex: 1 }} />
+        <Select value={period} onChange={(e) => setPeriod(e.target.value)} options={[{ value: "7", label: "Last 7 days" }, { value: "14", label: "Last 14 days" }, { value: "month", label: "This month" }, { value: "all", label: "All time" }]} style={{ width: "auto" }} />
+        <Btn onClick={exportCsv}><Download size={15} />Export CSV</Btn>
+        <Btn onClick={() => window.print()}><Printer size={15} />Print</Btn>
+      </Toolbar>
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={MapPin} label="Geo-tagged clock-ins" value={points.length} meta="plotted on the map" tone="brand" />
+        <StatCard Icon={ShieldCheck} label="Within a geofence" value={within} meta={points.length ? Math.round((within / points.length) * 100) + "% of plotted" : "—"} tone="success" />
+        <StatCard Icon={AlertTriangle} label="Outside any fence" value={outside} meta="off-site clock-ins" tone={outside ? "warning" : "success"} />
+        <StatCard Icon={Navigation} label="Sites covered" value={sitesCovered} meta={`of ${GEOFENCES.length} geofenced sites`} tone="accent" />
+      </div>
+
+      <Card>
+        <CardHead title="Clock-in geo-distribution" right={<span style={{ fontSize: 11.5, color: "var(--muted)" }}>drag to pan · scroll inside to zoom</span>} />
+        <div style={{ padding: 14 }}>
+          {points.length === 0 && (
+            <Banner Icon={MapPin}>No GPS-tagged clock-ins in this period. Clock-ins captured on a phone with location on will appear here as points.</Banner>
+          )}
+          <div ref={containerRef} style={{ height: 480, width: "100%", borderRadius: 12, overflow: "hidden", border: "1px solid var(--border)", isolation: "isolate", position: "relative", zIndex: 0, background: "var(--surface-2)" }} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center", marginTop: 12, padding: "0 2px" }}>
+            {legendDot("#12894e", "Within site geofence")}
+            {legendDot("#c23a29", "Outside any geofence")}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)" }}>
+              <span style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px dashed #2f6f9f", background: "rgba(47,111,159,.1)" }} />Site geofence
+            </span>
+            <span style={{ fontSize: 11.5, color: "var(--muted)", marginLeft: "auto" }}>Map data © OpenStreetMap contributors</span>
+          </div>
+        </div>
+      </Card>
+
+      {offSite.length > 0 && (
+        <Card style={{ marginTop: 16 }}>
+          <CardHead title={`Off-site clock-ins (${offSite.length})`} right={<span style={{ fontSize: 11.5, color: "var(--muted)" }}>captured outside every site geofence</span>} />
+          <DataTable
+            columns={[
+              { label: "Employee", render: (p) => <EmpCell emp={p.emp} /> },
+              { label: "Date", render: (p) => fmtDate(p.date) },
+              { label: "In", render: (p) => p.clockIn || "—" },
+              { label: "Nearest site", render: (p) => p.geoSite || p.site || "—" },
+              { label: "Distance", num: true, render: (p) => formatDistance(p.distanceM) },
+              { label: "Coordinates", render: (p) => <span className="mono" style={{ fontSize: 12 }}>{p.lat.toFixed(6)}, {p.lng.toFixed(6)}</span> },
+              { label: "Acc.", num: true, render: (p) => "±" + Math.round(p.accuracy || 0) + " m" },
+            ]}
+            rows={offSite}
+            empty="No off-site clock-ins."
+          />
+        </Card>
+      )}
     </>
   );
 }
