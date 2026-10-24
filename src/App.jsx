@@ -887,7 +887,7 @@ function MyClockIn({ ctx }) {
             { label: "In", render: (a) => a.clockIn || "—" },
             { label: "Out", render: (a) => a.clockOut || "—" },
             { label: "Site", render: (a) => a.site },
-            { label: "GPS location", render: (a) => a.lat != null ? <span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(5)}, {a.lng.toFixed(5)}</span> : <span style={{ color: "var(--muted)" }}>—</span> },
+            { label: "GPS location", render: (a) => a.lat != null ? <span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(6)}, {a.lng.toFixed(6)}</span> : <span style={{ color: "var(--muted)" }}>—</span> },
             { label: "Geo-fence", render: (a) => a.lat == null ? <Pill tone="muted">No location</Pill> : a.withinFence ? <Pill tone="success">Within fence</Pill> : <Pill tone="danger">Outside · {formatDistance(a.distanceM)}</Pill> },
             { label: "Status", render: (a) => <Pill tone={attTone[a.status]}>{a.status}</Pill> },
           ]}
@@ -2026,7 +2026,7 @@ function Attendance({ ctx }) {
             { label: "Out", render: (a) => a.clockOut || "—" },
             { label: "Site", render: (a) => a.site },
             { label: "GPS location", render: (a) => a.lat != null
-              ? <div><span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(5)}, {a.lng.toFixed(5)}</span><div style={{ fontSize: 11, color: "var(--muted)" }}>±{Math.round(a.accuracy || 0)} m · {a.method || "GPS"}</div></div>
+              ? <div><span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(6)}, {a.lng.toFixed(6)}</span><div style={{ fontSize: 11, color: "var(--muted)" }}>±{Math.round(a.accuracy || 0)} m · {a.method || "GPS"}</div></div>
               : <span style={{ color: "var(--muted)" }}>—</span> },
             { label: "Geo-fence", render: (a) => a.lat == null ? <Pill tone="muted">No location</Pill> : a.withinFence ? <Pill tone="success">Within fence</Pill> : <Pill tone="danger">Outside · {formatDistance(a.distanceM)}</Pill> },
             { label: "Photo", render: (a) => a.photo
@@ -2103,7 +2103,7 @@ function PhotoViewer({ photo, emp, rec, onClose }) {
         <div style={{ marginTop: 12 }}>
           {rec.withinFence ? <Pill tone="success">✓ Within {rec.geoSite}</Pill> : <Pill tone="danger">Outside fence</Pill>}
         </div>
-        {rec.lat != null && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }} className="mono">{rec.lat.toFixed(5)}, {rec.lng.toFixed(5)} · ±{Math.round(rec.accuracy || 0)} m</div>}
+        {rec.lat != null && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }} className="mono">{rec.lat.toFixed(6)}, {rec.lng.toFixed(6)} · ±{Math.round(rec.accuracy || 0)} m</div>}
       </div>
     </Modal>
   );
@@ -2173,13 +2173,8 @@ function ClockInModal({ ctx, empId }) {
     navigator.geolocation.getCurrentPosition(
       (p) => applyPos(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "GPS"),
       (e) => { setPhase("error"); setErrMsg(e && e.message ? e.message : "Location permission was blocked."); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
-  };
-  const simulate = (g, off) => {
-    const jit = () => (Math.random() - 0.5) * 0.0008;
-    if (off) applyPos(g.lat + 0.02, g.lng + 0.02, 40, "Simulated");
-    else applyPos(g.lat + jit(), g.lng + jit(), 12 + Math.round(Math.random() * 12), "Simulated");
   };
   const confirm = async () => {
     const now = new Date();
@@ -2204,15 +2199,6 @@ function ClockInModal({ ctx, empId }) {
     </div>
   );
 
-  const simRow = (
-    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--border)" }}>
-      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>No GPS in this preview? Simulate a location (demo):</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {GEOFENCES.slice(0, 4).map((g) => <Btn key={g.id} size="sm" onClick={() => simulate(g, false)}><MapPin size={12} />{g.name.split(" — ")[0].split(",")[0]}</Btn>)}
-        <Btn size="sm" variant="danger" onClick={() => simulate(GEOFENCES[0], true)}><Navigation size={12} />Off-site</Btn>
-      </div>
-    </div>
-  );
 
   let footer = <Btn onClick={close}>Close</Btn>;
   if (phase === "photo") footer = <><Btn onClick={close}>Cancel</Btn><Btn variant="primary" onClick={() => setPhase("geo")} disabled={!photo} style={!photo ? { opacity: 0.5 } : undefined}>Next: capture location<ChevronRight size={15} /></Btn></>;
@@ -2272,7 +2258,8 @@ function ClockInModal({ ctx, empId }) {
           <div style={{ fontSize: 12.5, color: "var(--text-2)", margin: "6px auto 16px", maxWidth: 360 }}>Your phone's coordinates are checked against the nearest site geofence and stamped on the attendance record.</div>
           <Btn variant="primary" onClick={useLocation} style={{ margin: "0 auto" }}><Navigation size={16} />Use my current location</Btn>
           {phase === "error" && <div style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>{errMsg}</div>}
-          {simRow}
+          {phase === "error" && <div style={{ marginTop: 10 }}><Btn size="sm" onClick={useLocation}><RefreshCw size={13} />Try again</Btn></div>}
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 16, maxWidth: 360, marginLeft: "auto", marginRight: "auto", lineHeight: 1.55 }}>For an accurate reading, clock in from a phone with location switched on — ideally outdoors or near a window — and allow the location permission when your browser asks.</div>
         </div>
       )}
       {phase === "locating" && (
@@ -2294,7 +2281,7 @@ function ClockInModal({ ctx, empId }) {
                   : <Pill tone="danger">Outside geofence — {formatDistance(match.distanceM)} from {match.fence.name}</Pill>}
               </div>
               <dl style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: "6px 12px", fontSize: 13, margin: 0 }}>
-                <dt style={{ color: "var(--text-2)" }}>Coordinates</dt><dd style={{ margin: 0 }} className="mono">{pos.lat.toFixed(5)}, {pos.lng.toFixed(5)}</dd>
+                <dt style={{ color: "var(--text-2)" }}>Coordinates</dt><dd style={{ margin: 0 }} className="mono">{pos.lat.toFixed(6)}, {pos.lng.toFixed(6)}</dd>
                 <dt style={{ color: "var(--text-2)" }}>Accuracy</dt><dd style={{ margin: 0 }}>±{Math.round(pos.accuracy || 0)} m · {pos.method}</dd>
                 <dt style={{ color: "var(--text-2)" }}>Nearest site</dt><dd style={{ margin: 0 }}>{match.fence.name}</dd>
                 <dt style={{ color: "var(--text-2)" }}>Distance</dt><dd style={{ margin: 0 }}>{formatDistance(match.distanceM)} (fence {match.fence.radius} m)</dd>
