@@ -2111,58 +2111,12 @@ function PhotoViewer({ photo, emp, rec, onClose }) {
 
 function ClockInModal({ ctx, empId }) {
   const emp = ctx.empById(empId);
-  const [phase, setPhase] = useState("photo"); // photo | camera | geo | locating | located | error
-  const [photo, setPhoto] = useState(null);
+  const [phase, setPhase] = useState("geo"); // geo | locating | located | error
   const [pos, setPos] = useState(null);
   const [match, setMatch] = useState(null);
   const [errMsg, setErrMsg] = useState("");
-  const videoRef = React.useRef(null);
-  const fileRef = React.useRef(null);
-  const streamRef = React.useRef(null);
 
-  const stopCamera = () => { if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; } };
-  useEffect(() => stopCamera, []);
-  const close = () => { stopCamera(); ctx.setModal(null); };
-
-  // ---- photo capture ----
-  const downscale = (imgOrVideo, w, h, max = 520) => {
-    const s = Math.min(1, max / w);
-    const c = document.createElement("canvas");
-    c.width = Math.round(w * s); c.height = Math.round(h * s);
-    c.getContext("2d").drawImage(imgOrVideo, 0, 0, c.width, c.height);
-    return c.toDataURL("image/jpeg", 0.7);
-  };
-  const startCamera = async () => {
-    setErrMsg("");
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { fileRef.current && fileRef.current.click(); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream; setPhase("camera");
-      setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); } }, 50);
-    } catch (e) { fileRef.current && fileRef.current.click(); }
-  };
-  const capturePhoto = () => {
-    const v = videoRef.current; if (!v) return;
-    setPhoto(downscale(v, v.videoWidth || 480, v.videoHeight || 640));
-    stopCamera(); setPhase("photo");
-  };
-  const onFile = (e) => {
-    const f = e.target.files && e.target.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = () => { const img = new Image(); img.onload = () => setPhoto(downscale(img, img.width, img.height)); img.src = r.result; };
-    r.readAsDataURL(f);
-  };
-  const demoPhoto = () => {
-    const c = document.createElement("canvas"); c.width = 320; c.height = 320;
-    const g = c.getContext("2d");
-    g.fillStyle = avatarColor(emp ? emp.id : "GLA"); g.fillRect(0, 0, 320, 320);
-    g.fillStyle = "rgba(255,255,255,.18)"; g.beginPath(); g.arc(160, 130, 70, 0, Math.PI * 2); g.fill();
-    g.fillRect(70, 210, 180, 130);
-    g.fillStyle = "#fff"; g.font = "bold 96px Helvetica, Arial"; g.textAlign = "center"; g.textBaseline = "middle";
-    g.fillText(emp ? initials(emp) : "GL", 160, 135);
-    g.font = "500 20px Helvetica, Arial"; g.fillText("DEMO PHOTO", 160, 300);
-    setPhoto(c.toDataURL("image/jpeg", 0.8));
-  };
+  const close = () => { ctx.setModal(null); };
 
   // ---- location capture ----
   const applyPos = (lat, lng, accuracy, method) => { setPos({ lat, lng, accuracy, method }); setMatch(matchGeofence(lat, lng)); setPhase("located"); };
@@ -2186,75 +2140,22 @@ function ClockInModal({ ctx, empId }) {
       empId, date: ymd, clockIn: hhmm, clockOut: "", site,
       status: within ? (site.includes("Head Office") ? "Present" : "Field") : "Field",
       overtime: 0, lat: pos.lat, lng: pos.lng, accuracy: Math.round(pos.accuracy || 0),
-      geoSite: site, withinFence: within, distanceM: match ? Math.round(match.distanceM) : null, method: pos.method, photo,
+      geoSite: site, withinFence: within, distanceM: match ? Math.round(match.distanceM) : null, method: pos.method,
     });
     await ctx.reload(); close();
   };
 
-  const stepDots = (n) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 14, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
-      <span style={{ color: n >= 1 ? "var(--brand)" : "var(--muted)" }}>① Photo</span>
-      <span style={{ width: 22, height: 2, background: "var(--border-strong)", borderRadius: 2 }} />
-      <span style={{ color: n >= 2 ? "var(--brand)" : "var(--muted)" }}>② Location</span>
-    </div>
-  );
-
-
   let footer = <Btn onClick={close}>Close</Btn>;
-  if (phase === "photo") footer = <><Btn onClick={close}>Cancel</Btn><Btn variant="primary" onClick={() => setPhase("geo")} disabled={!photo} style={!photo ? { opacity: 0.5 } : undefined}>Next: capture location<ChevronRight size={15} /></Btn></>;
-  else if (phase === "located") footer = <><Btn onClick={close}>Cancel</Btn><Btn variant="primary" onClick={confirm}><Check size={15} />Confirm clock-in</Btn></>;
+  if (phase === "located") footer = <><Btn onClick={close}>Cancel</Btn><Btn variant="primary" onClick={confirm}><Check size={15} />Confirm clock-in</Btn></>;
 
   return (
     <Modal title="Phone clock-in" sub={emp ? `${emp.firstName} ${emp.lastName} · ${emp.jobTitle}` : ""} onClose={close} footer={footer}>
-      <input ref={fileRef} type="file" accept="image/*" capture="user" onChange={onFile} style={{ display: "none" }} />
 
-      {/* STEP 1 — PHOTO */}
-      {phase === "photo" && (
-        <div style={{ textAlign: "center", padding: "4px 0" }}>
-          {stepDots(1)}
-          {!photo ? (
-            <>
-              <div style={{ width: 60, height: 60, borderRadius: 16, margin: "0 auto 14px", display: "grid", placeItems: "center", background: "rgba(47,111,159,.12)", color: "var(--brand)" }}><Camera size={28} /></div>
-              <div style={{ fontWeight: 600, color: "var(--text)" }}>Take your photo to clock in</div>
-              <div style={{ fontSize: 12.5, color: "var(--text-2)", margin: "6px auto 16px", maxWidth: 360 }}>Snap a quick photo of yourself. It's stamped on the attendance record together with your GPS location.</div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                <Btn variant="primary" onClick={startCamera}><Camera size={16} />Take photo</Btn>
-                <Btn onClick={() => fileRef.current && fileRef.current.click()}><PackagePlus size={15} />Upload instead</Btn>
-              </div>
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border)" }}>
-                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>No camera in this preview?</div>
-                <Btn size="sm" onClick={demoPhoto}><Camera size={12} />Use demo photo</Btn>
-              </div>
-            </>
-          ) : (
-            <>
-              <img src={photo} alt="Clock-in selfie" style={{ width: 150, height: 150, objectFit: "cover", borderRadius: 16, border: "1px solid var(--border)", margin: "0 auto 12px", display: "block" }} />
-              <Pill tone="success">✓ Photo captured</Pill>
-              <div style={{ fontSize: 12.5, color: "var(--text-2)", margin: "10px auto 0", maxWidth: 340 }}>Looks good? Continue to capture your location, or retake the photo.</div>
-              <div style={{ marginTop: 14 }}><Btn size="sm" onClick={() => { setPhoto(null); }}><RotateCcw size={13} />Retake photo</Btn></div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* CAMERA LIVE PREVIEW */}
-      {phase === "camera" && (
-        <div style={{ textAlign: "center" }}>
-          {stepDots(1)}
-          <video ref={videoRef} playsInline muted style={{ width: "100%", maxWidth: 360, borderRadius: 14, background: "#000", transform: "scaleX(-1)" }} />
-          <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "center" }}>
-            <Btn onClick={() => { stopCamera(); setPhase("photo"); }}>Cancel</Btn>
-            <Btn variant="primary" onClick={capturePhoto}><Camera size={16} />Capture photo</Btn>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 2 — LOCATION */}
+      {/* LOCATION */}
       {(phase === "geo" || phase === "error") && (
         <div style={{ textAlign: "center", padding: "4px 0" }}>
-          {stepDots(2)}
           <div style={{ width: 60, height: 60, borderRadius: 16, margin: "0 auto 14px", display: "grid", placeItems: "center", background: "rgba(47,111,159,.12)", color: "var(--brand)" }}><LocateFixed size={28} /></div>
-          <div style={{ fontWeight: 600, color: "var(--text)" }}>Now capture your GPS location</div>
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>Clock in with your GPS location</div>
           <div style={{ fontSize: 12.5, color: "var(--text-2)", margin: "6px auto 16px", maxWidth: 360 }}>Your phone's coordinates are checked against the nearest site geofence and stamped on the attendance record.</div>
           <Btn variant="primary" onClick={useLocation} style={{ margin: "0 auto" }}><Navigation size={16} />Use my current location</Btn>
           {phase === "error" && <div style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>{errMsg}</div>}
@@ -2272,7 +2173,6 @@ function ClockInModal({ ctx, empId }) {
       {phase === "located" && match && (
         <div>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
-            {photo && <img src={photo} alt="Clock-in selfie" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 12, border: "1px solid var(--border)" }} />}
             <FenceMap match={match} pos={pos} />
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ marginBottom: 10 }}>
@@ -2291,7 +2191,6 @@ function ClockInModal({ ctx, empId }) {
           {!match.within && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle}>This point is outside the site geofence. The clock-in will be recorded and flagged for review.</Banner></div>}
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn size="sm" onClick={useLocation}><RefreshCw size={13} />Re-capture location</Btn>
-            <Btn size="sm" onClick={() => { setPhoto(null); setPos(null); setMatch(null); setPhase("photo"); }}><RotateCcw size={13} />Start over</Btn>
           </div>
         </div>
       )}
