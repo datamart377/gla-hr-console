@@ -437,6 +437,12 @@ function Login({ employees, live, authenticate }) {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const resetToken = useMemo(() => { try { return new URLSearchParams(window.location.search).get("reset") || ""; } catch { return ""; } }, []);
+  const [mode, setMode] = useState(resetToken ? "reset" : "signin"); // signin | forgot | reset
+  const [info, setInfo] = useState("");
+  const [np, setNp] = useState("");
+  const [np2, setNp2] = useState("");
+  const clearMsgs = () => { setErr(""); setInfo(""); };
   const submit = async (em, password) => {
     if (busy) return;
     setErr(""); setBusy(true);
@@ -444,6 +450,30 @@ function Login({ employees, live, authenticate }) {
     setBusy(false);
     if (!res.ok) setErr(res.error || "Sign-in failed.");
   };
+  const sendReset = async () => {
+    if (busy) return;
+    clearMsgs();
+    if (!email.trim()) { setErr("Enter your work email first."); return; }
+    setBusy(true);
+    try { const r = await authApi.forgotPassword(email.trim()); setInfo((r && r.message) || "If that email has an account, a reset link is on its way. Check your inbox (and spam)."); }
+    catch (e) { setErr(e.message || "Could not send the reset link. Please try again."); }
+    setBusy(false);
+  };
+  const doReset = async () => {
+    if (busy) return;
+    clearMsgs();
+    if (np.length < 8) { setErr("Password must be at least 8 characters."); return; }
+    if (np !== np2) { setErr("The two passwords do not match."); return; }
+    setBusy(true);
+    try {
+      await authApi.resetPassword(resetToken, np);
+      setMode("signin"); setNp(""); setNp2("");
+      setInfo("Your password has been updated. You can now sign in with your new password.");
+      try { window.history.replaceState({}, "", window.location.pathname); } catch { /* ignore */ }
+    } catch (e) { setErr(e.message || "Could not reset the password. The link may have expired — request a new one."); }
+    setBusy(false);
+  };
+  const linkStyle = { background: "none", border: "none", padding: 0, color: "#f0601f", fontWeight: 600, fontSize: 12.5, cursor: "pointer" };
   const source = (employees && employees.length) ? employees : DEMO_ACCOUNTS;
   const pickByRole = (r) => source.find((e) => (e.role || "staff") === r);
   const consoleAccounts = ["admin", "hr", "finance"].map(pickByRole).filter(Boolean);
@@ -487,14 +517,43 @@ function Login({ employees, live, authenticate }) {
               <img src={GLA_LOGO} alt="Global Link Associates" style={{ width: 212, maxWidth: "80%", height: "auto", display: "block" }} />
             </div>
             <div style={{ height: 1, background: "linear-gradient(90deg, transparent, var(--border), transparent)", margin: "16px 0 20px" }} />
-            <h2 style={{ fontSize: 19, fontWeight: 800, color: "#002b3d" }}>Sign in to your portal</h2>
-            <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>Your view is set automatically by your role &mdash; management get the console, staff get self-service.</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-              <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
-              <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
-              {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
-              <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+            <h2 style={{ fontSize: 19, fontWeight: 800, color: "#002b3d" }}>{mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Sign in to your portal"}</h2>
+            <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>
+              {mode === "forgot" ? "Enter your work email and we'll send you a link to set a new password."
+                : mode === "reset" ? "Set a new password for your account. Minimum 8 characters."
+                : "Your view is set automatically by your role — management get the console, staff get self-service."}
             </div>
+
+            {mode === "signin" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+                <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+                {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
+                {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
+                <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+                <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("forgot"); clearMsgs(); }}>Forgot password?</button></div>
+              </div>
+            )}
+
+            {mode === "forgot" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && sendReset()} /></Field>
+                {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
+                {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
+                <Btn variant="primary" disabled={busy} onClick={sendReset} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><Mail size={16} />{busy ? "Sending…" : "Send reset link"}</Btn>
+                <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
+              </div>
+            )}
+
+            {mode === "reset" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                <Field label="New password"><Input type="password" value={np} onChange={(e) => { setNp(e.target.value); clearMsgs(); }} placeholder="At least 8 characters" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
+                <Field label="Confirm new password"><Input type="password" value={np2} onChange={(e) => { setNp2(e.target.value); clearMsgs(); }} placeholder="Re-enter new password" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
+                {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
+                <Btn variant="primary" disabled={busy} onClick={doReset} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><ShieldCheck size={16} />{busy ? "Updating…" : "Update password"}</Btn>
+                <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
+              </div>
+            )}
           </Card>
 
           <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.62)", marginTop: 18, lineHeight: 1.75 }}>

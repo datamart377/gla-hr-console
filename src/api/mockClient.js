@@ -107,4 +107,6 @@ export const authApi = {
   me: () => Promise.reject(new Error("No session")),
   logout: () => {},
   token: () => null,
+  forgotPassword: () => respond({ ok: true, message: "If that email has an account, a password-reset link is on its way." }),
+  resetPassword: () => Promise.reject(new Error("Password reset needs the live server (not available in the offline demo).")),
 };

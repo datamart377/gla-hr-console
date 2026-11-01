@@ -1,12 +1,18 @@
-// Authentication routes — login (JWT) and current-user lookup.
+// Authentication routes — login (JWT), current-user lookup, and self-service
+// password reset (forgot → email link → set new password).
 import { Router } from "express";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { body } from "express-validator";
 import { query } from "../db.js";
+import { config } from "../config.js";
 import { signToken, requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { sendResetMail } from "../email.js";
 
 const router = Router();
+
+const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 
 // POST /api/auth/login
 router.post(
@@ -29,6 +35,61 @@ router.post(
       if (!user || !ok) return res.status(401).json({ error: "Invalid email or password." });
       const token = signToken(user);
       res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, empId: user.emp_id } });
+    } catch (e) { next(e); }
+  },
+);
+
+// POST /api/auth/forgot-password — issues a one-time reset link by email.
+// Always responds the same way whether or not the email matches an account, so
+// it can't be used to discover which emails have accounts.
+router.post(
+  "/forgot-password",
+  [body("email").trim().isEmail().withMessage("A valid email is required.")],
+  validate,
+  async (req, res, next) => {
+    const generic = { ok: true, message: "If that email has an account, a password-reset link is on its way." };
+    try {
+      const { rows } = await query(`SELECT id, email, name FROM users WHERE lower(email) = lower($1)`, [req.body.email]);
+      const user = rows[0];
+      if (user) {
+        const token = crypto.randomBytes(32).toString("hex");
+        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        await query(
+          `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+          [user.id, sha256(token), expires],
+        );
+        const base = (config.mail.appUrl || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+        await sendResetMail({ to: user.email, name: user.name, link: `${base}/?reset=${token}` });
+      }
+      res.json(generic);
+    } catch (e) { next(e); }
+  },
+);
+
+// POST /api/auth/reset-password — consumes a valid token and sets a new password.
+router.post(
+  "/reset-password",
+  [
+    body("token").isString().isLength({ min: 10 }).withMessage("A reset token is required."),
+    body("password").isString().isLength({ min: 8 }).withMessage("Password must be at least 8 characters."),
+  ],
+  validate,
+  async (req, res, next) => {
+    try {
+      const { token, password } = req.body;
+      const { rows } = await query(
+        `SELECT id, user_id FROM password_resets
+          WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+          ORDER BY id DESC LIMIT 1`,
+        [sha256(token)],
+      );
+      const row = rows[0];
+      if (!row) return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
+      const hash = await bcrypt.hash(password, 10);
+      await query(`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, [hash, row.user_id]);
+      // Burn this token and any other outstanding tokens for the user.
+      await query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [row.user_id]);
+      res.json({ ok: true });
     } catch (e) { next(e); }
   },
 );

@@ -61,6 +61,8 @@ export const authApi = {
   me: () => request("GET", "/api/auth/me"),
   logout: () => setToken(null),
   token: getToken,
+  forgotPassword: (email) => request("POST", "/api/auth/forgot-password", { email }),
+  resetPassword: (token, password) => request("POST", "/api/auth/reset-password", { token, password }),
 };
 
 // ---- Domain collections (paths match server/src/index.js) ----

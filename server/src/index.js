@@ -45,6 +45,15 @@ app.use("/api/auth/login", rateLimit({
   message: { error: "Too many sign-in attempts — please wait a few minutes." },
 }));
 
+// Limit password-reset requests to blunt abuse / email flooding.
+app.use("/api/auth/forgot-password", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many reset requests — please wait a few minutes." },
+}));
+
 // ---- Health check ----
 app.get("/api/health", async (req, res) => {
   try {
