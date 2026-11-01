@@ -48,18 +48,32 @@ router.post(
   validate,
   async (req, res, next) => {
     const generic = { ok: true, message: "If that email has an account, a password-reset link is on its way." };
+    const emailIn = req.body.email;
     try {
-      const { rows } = await query(`SELECT id, email, name FROM users WHERE lower(email) = lower($1)`, [req.body.email]);
+      const { rows } = await query(`SELECT id, email, name FROM users WHERE lower(email) = lower($1)`, [emailIn]);
       const user = rows[0];
-      if (user) {
-        const token = crypto.randomBytes(32).toString("hex");
-        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-        await query(
-          `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-          [user.id, sha256(token), expires],
-        );
-        const base = (config.mail.appUrl || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
-        await sendResetMail({ to: user.email, name: user.name, link: `${base}/?reset=${token}` });
+      if (!user) {
+        // No LOGIN account (users table) for this address. Note: an employee
+        // record is not a login account, so editing an employee's email does
+        // not create/point a login here.
+        console.log(`[forgot-password] no login account for "${emailIn}" — nothing sent`);
+        return res.json(generic);
+      }
+      const token = crypto.randomBytes(32).toString("hex");
+      const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await query(
+        `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+        [user.id, sha256(token), expires],
+      );
+      const base = (config.mail.appUrl || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+      // Email is best-effort and must not 500 the request. Log the outcome so a
+      // misconfiguration is visible in the server logs.
+      try {
+        const out = await sendResetMail({ to: user.email, name: user.name, link: `${base}/?reset=${token}` });
+        if (out && out.sent) console.log(`[forgot-password] reset email SENT to ${user.email}`);
+        else console.warn(`[forgot-password] reset email NOT sent to ${user.email} (${out && out.reason}) — check SMTP_* env vars in Render`);
+      } catch (mailErr) {
+        console.error(`[forgot-password] SMTP send FAILED for ${user.email}: ${mailErr && mailErr.message ? mailErr.message : mailErr}`);
       }
       res.json(generic);
     } catch (e) { next(e); }
