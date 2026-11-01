@@ -15,6 +15,22 @@ export const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || "8h",
   },
   seedPassword: process.env.SEED_PASSWORD || "password",
+  // Outbound email (SMTP) for system notifications. Left blank => notifications
+  // are silently skipped (the app keeps working). Set these as secrets in Render.
+  mail: {
+    host: process.env.SMTP_HOST || "",
+    port: num(process.env.SMTP_PORT, 587),
+    // Secure (implicit TLS) is used for port 465; STARTTLS for 587. An explicit
+    // SMTP_SECURE=true|false overrides the port-based default.
+    secure: process.env.SMTP_SECURE != null && process.env.SMTP_SECURE !== ""
+      ? String(process.env.SMTP_SECURE).toLowerCase() === "true"
+      : num(process.env.SMTP_PORT, 587) === 465,
+    user: process.env.SMTP_USER || "",
+    pass: process.env.SMTP_PASS || "",
+    from: process.env.MAIL_FROM || (process.env.SMTP_USER ? `Global Link Associates HR <${process.env.SMTP_USER}>` : ""),
+    // Public app URL used for links inside emails (falls back to Render's URL).
+    appUrl: process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || "",
+  },
   db: {
     host: process.env.PGHOST || "localhost",
     port: num(process.env.PGPORT, 5432),

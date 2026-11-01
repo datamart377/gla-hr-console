@@ -84,6 +84,12 @@ export const settingsApi = {
   update: (patch) => { data.settings = { ...data.settings, ...patch }; return respond(data.settings); },
 };
 
+// Notifications are a no-op in the standalone/demo build (no mail server).
+export const notifyApi = {
+  send: () => respond({ sent: false, mock: true }),
+  status: () => respond({ configured: false }),
+};
+
 // Stock management
 export const stockItemsApi = makeCrud("stockItems", "STK");
 export const stockMovementsApi = makeCrud("stockMovements", "MOV");

@@ -17,7 +17,7 @@ import { GLA_LOGO } from "./logo.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
-  authApi, isLive,
+  authApi, notifyApi, isLive,
 } from "./api/client.js";
 import {
   data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, SITES, LEAVE_TYPES, LEAVE_COLORS,
@@ -643,8 +643,8 @@ function MyProfileEdit({ ctx }) {
 
 function ProfileApprovals({ ctx }) {
   const pend = ctx.store.employees.filter((e) => e.profileStatus === "pending" && e.profileDraft);
-  const approve = async (e) => { const d = e.profileDraft || {}; await employeesApi.update(e.id, { ...d, profileDraft: null, profileStatus: "approved", profileReviewedAt: new Date().toISOString() }); await ctx.reload(); };
-  const reject = async (e) => { if (!confirm(`Reject ${e.firstName} ${e.lastName}'s submitted changes?`)) return; await employeesApi.update(e.id, { profileDraft: null, profileStatus: "rejected", profileReviewedAt: new Date().toISOString() }); await ctx.reload(); };
+  const approve = async (e) => { const d = e.profileDraft || {}; await employeesApi.update(e.id, { ...d, profileDraft: null, profileStatus: "approved", profileReviewedAt: new Date().toISOString() }); notifyApi.send("profile_decision", e.id, { decision: "approved" }); await ctx.reload(); };
+  const reject = async (e) => { if (!confirm(`Reject ${e.firstName} ${e.lastName}'s submitted changes?`)) return; await employeesApi.update(e.id, { profileDraft: null, profileStatus: "rejected", profileReviewedAt: new Date().toISOString() }); notifyApi.send("profile_decision", e.id, { decision: "rejected" }); await ctx.reload(); };
   if (!pend.length) return (
     <Card style={{ padding: 40, textAlign: "center" }}>
       <ClipboardCheck size={28} style={{ opacity: .45 }} />
@@ -1186,11 +1186,13 @@ function Advances({ ctx }) {
 
   const approveAsIs = async (a) => {
     await advancesApi.update(a.id, { status: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: "Robert Okello (HR)", decidedAt: TODAY, note: a.note || "Approved as requested." });
+    notifyApi.send("advance_decision", a.empId, { decision: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: "Robert Okello (HR)" });
     await reload();
   };
   const reject = async (a) => {
     if (window.confirm(`Reject ${fullName(empById(a.empId))}'s advance request?`)) {
       await advancesApi.update(a.id, { status: "Rejected", decidedBy: "Robert Okello (HR)", decidedAt: TODAY });
+      notifyApi.send("advance_decision", a.empId, { decision: "Rejected", decidedBy: "Robert Okello (HR)" });
       await reload();
     }
   };
@@ -1271,6 +1273,7 @@ function AdvanceReview({ ctx, id }) {
       decidedBy: "Robert Okello (HR)", decidedAt: TODAY,
       note: note.trim() || (status === "Approved" ? (changed ? "Approved with modifications." : "Approved as requested.") : "Request declined."),
     });
+    notifyApi.send("advance_decision", a.empId, { decision: status, approvedAmount: status === "Approved" ? amt : null, approvedMonths: status === "Approved" ? mo : null, startMonth: status === "Approved" ? CURRENT_MONTH : "", decidedBy: "Robert Okello (HR)", note: note.trim() || undefined });
     await ctx.reload(); ctx.setModal(null);
   };
   return (
@@ -1631,7 +1634,8 @@ function EmployeeForm({ ctx, id }) {
     if (!f.tin || !f.nssfNumber) return alert("Statutory details (TIN and NSSF number) are required.");
     if (!f.bankName || !f.bankAccount) return alert("Bank details (bank name and account number) are required.");
     const out = { ...f, grossSalary: Number(f.grossSalary) || 0, advanceDeductions: Number(f.advanceDeductions) || 0, annualUsed: Number(f.annualUsed) || 0, sickUsed: Number(f.sickUsed) || 0 };
-    if (existing) await employeesApi.update(id, out); else await employeesApi.create(out);
+    if (existing) await employeesApi.update(id, out);
+    else { await employeesApi.create(out); notifyApi.send("staff_welcome", out.id, { name: `${out.firstName} ${out.lastName}`, email: out.email }); }
     await ctx.reload();
     ctx.setModal(null);
   };
@@ -1796,6 +1800,7 @@ function LeaveRequests({ ctx }) {
 
   const decide = async (l, decision) => {
     await leaveApi.update(l.id, { status: decision, decidedBy: "Sarah Nakato (HR)", decidedAt: TODAY });
+    notifyApi.send("leave_decision", l.empId, { decision, type: l.type, startDate: l.startDate, endDate: l.endDate, days: l.days, decidedBy: "Sarah Nakato (HR)" });
     if (decision === "Approved" && l.type === "Annual") {
       const e = empById(l.empId);
       if (e) await employeesApi.update(e.id, { annualUsed: (e.annualUsed || 0) + (l.days || 0) });

@@ -92,3 +92,10 @@ export const settingsApi = {
   get: () => request("GET", "/api/settings"),
   update: (patch) => request("PUT", "/api/settings", patch),
 };
+
+// System email notifications. Best-effort: a failure never rejects, so a failed
+// email can't break the UI action that triggered it.
+export const notifyApi = {
+  send: (type, empId, data) => request("POST", "/api/notify", { type, empId, data }).catch(() => ({ sent: false })),
+  status: () => request("GET", "/api/notify/status").catch(() => ({ configured: false })),
+};

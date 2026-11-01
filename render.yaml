@@ -39,3 +39,20 @@ services:
         generateValue: true      # Render generates a strong secret
       - key: SEED_PASSWORD
         value: password          # password for the seeded demo accounts
+      # ---- Outbound email (SMTP) for system notifications ----
+      # Set these in the Render dashboard (Environment); sync:false keeps the
+      # mailbox password out of the repo. Leave unset to disable email.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: APP_URL
+        value: https://hr.glassociates.co.ug
