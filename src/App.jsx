@@ -6358,7 +6358,9 @@ function SettingsSites({ ctx, readOnly }) {
   const baseline = () => (s.geofences && s.geofences.length) ? s.geofences : GEOFENCES;
   const [geos, setGeos] = useState(() => JSON.parse(JSON.stringify(baseline())));
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(0);
   const [saved, setSaved] = useState(false);
+  const PER_PAGE = 25;
   const dirty = JSON.stringify(geos) !== JSON.stringify(baseline());
 
   const save = async () => {
@@ -6385,6 +6387,9 @@ function SettingsSites({ ctx, readOnly }) {
 
   const shown = geos.map((g, i) => ({ g, i }))
     .filter(({ g }) => !q || `${g.name} ${g.area || ""} ${g.brand || ""}`.toLowerCase().includes(q.toLowerCase()));
+  const pageCount = Math.max(1, Math.ceil(shown.length / PER_PAGE));
+  const safePage = Math.min(Math.max(0, page), pageCount - 1);
+  const pageRows = shown.slice(safePage * PER_PAGE, safePage * PER_PAGE + PER_PAGE);
 
   return (
     <>
@@ -6392,7 +6397,7 @@ function SettingsSites({ ctx, readOnly }) {
       <Toolbar>
         <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
           <Search size={15} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
-          <Input placeholder="Search sites by name, area or brand…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 32 }} />
+          <Input placeholder="Search sites by name, area or brand…" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} style={{ paddingLeft: 32 }} />
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>{geos.length} site{geos.length === 1 ? "" : "s"}</div>
         <div style={{ flex: 1 }} />
@@ -6414,9 +6419,18 @@ function SettingsSites({ ctx, readOnly }) {
               </div>
             ) },
           ]}
-          rows={shown}
+          rows={pageRows}
           empty={q ? "No sites match your search." : "No sites yet. Add one to enable clock-in."}
         />
+        {shown.length > PER_PAGE && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>Showing {safePage * PER_PAGE + 1}–{Math.min(shown.length, safePage * PER_PAGE + PER_PAGE)} of {shown.length}</div>
+            <div style={{ flex: 1 }} />
+            <Btn size="sm" disabled={safePage <= 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={14} />Prev</Btn>
+            <span style={{ fontSize: 12.5, color: "var(--text-2)", minWidth: 92, textAlign: "center" }}>Page {safePage + 1} of {pageCount}</span>
+            <Btn size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>Next<ChevronRight size={14} /></Btn>
+          </div>
+        )}
       </Card>
     </>
   );
