@@ -108,4 +108,5 @@ export const accountsApi = {
   status: (empId) => request("GET", `/api/accounts/${encodeURIComponent(empId)}`).catch(() => ({ hasLogin: false })),
   invite: (empId) => request("POST", "/api/accounts/invite", { empId }),
   setPassword: (empId, password) => request("POST", "/api/accounts/set-password", { empId, password }),
+  syncEmail: (empId) => request("POST", "/api/accounts/sync-email", { empId }),
 };

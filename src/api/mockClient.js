@@ -96,6 +96,7 @@ export const accountsApi = {
   status: () => respond({ hasLogin: false }),
   invite: () => respond({ ok: true, created: true, emailed: false, mock: true }),
   setPassword: () => respond({ ok: true, created: true, mock: true }),
+  syncEmail: () => respond({ synced: false, mock: true }),
 };
 
 // Stock management

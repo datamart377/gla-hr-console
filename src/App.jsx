@@ -1744,8 +1744,11 @@ function EmployeeForm({ ctx, id }) {
     if (!f.tin || !f.nssfNumber) return alert("Statutory details (TIN and NSSF number) are required.");
     if (!f.bankName || !f.bankAccount) return alert("Bank details (bank name and account number) are required.");
     const out = { ...f, grossSalary: Number(f.grossSalary) || 0, advanceDeductions: Number(f.advanceDeductions) || 0, annualUsed: Number(f.annualUsed) || 0, sickUsed: Number(f.sickUsed) || 0 };
-    if (existing) await employeesApi.update(id, out);
-    else {
+    if (existing) {
+      await employeesApi.update(id, out);
+      // Keep any existing login's email in step with the employee's email.
+      try { await accountsApi.syncEmail(id); } catch { /* no login yet, or email clash — surfaced in Login & access */ }
+    } else {
       await employeesApi.create(out);
       // Auto-provision a login account and email a "set your password" link.
       // Best-effort: a mail/account hiccup must not block saving the employee.
