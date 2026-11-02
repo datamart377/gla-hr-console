@@ -64,7 +64,7 @@ async function syncLogin(empId, emp, { password } = {}) {
         [email, name, role, await bcrypt.hash(password, 10), keepId],
       );
     } else {
-      await query(`UPDATE users SET email = $1, name = $2, updated_at = now() WHERE id = $3`, [email, name, keepId]);
+      await query(`UPDATE users SET email = $1, name = $2, role = $3, updated_at = now() WHERE id = $4`, [email, name, role, keepId]);
     }
     return { id: keepId, email, created: false };
   }

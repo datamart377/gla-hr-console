@@ -1727,7 +1727,9 @@ function LoginAccessSection({ ctx, empId }) {
 
 function EmployeeForm({ ctx, id }) {
   const existing = id ? ctx.empById(id) : null;
+  const isAdmin = (ctx.auth && ctx.auth.role) === "admin";
   const canManageLogin = existing && ["admin", "hr"].includes(ctx.auth && ctx.auth.role);
+  const roleOptions = (ctx.store.settings?.roles || []).map((r) => ({ value: r.id, label: r.name }));
   const [f, setF] = useState(() => existing ? { ...existing } : normalizeEmployee({
     id: nextEmpId(ctx.store.employees), firstName: "", lastName: "", gender: "Male", dob: "", nationalId: "",
     phone: "", email: "", address: "", department: (ctx.store.settings?.departments?.[0]?.name) || "Engineering Department", jobTitle: "", contractType: "Permanent",
@@ -1793,6 +1795,7 @@ function EmployeeForm({ ctx, id }) {
           </>);
         })()}
         <Field label="Contract type"><Select value={f.contractType} onChange={set("contractType")} options={CONTRACT_TYPES} /></Field>
+        {isAdmin && <Field label="Access role" hint="What this person can see & do once they sign in. Takes effect next time they sign in."><Select value={f.role || "staff"} onChange={set("role")} options={roleOptions} /></Field>}
         <Field label="Status"><Select value={f.status} onChange={set("status")} options={EMP_STATUSES} /></Field>
         <Field label="Date joined"><Input type="date" value={f.employmentDate} onChange={set("employmentDate")} /></Field>
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
