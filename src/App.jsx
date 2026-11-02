@@ -29,7 +29,7 @@ import {
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
   itemValuation, avgCost, movementDelta, sortedMovements, suggestedOrderQty, avgDailyUsage, daysOfCover,
   monthKeyOf, monthLabel, addMonth, prevMonthKey, CURRENT_MONTH, monthLedgerRow, monthIsClosed,
-  GEOFENCES, matchGeofence, formatDistance,
+  GEOFENCES, matchGeofence, formatDistance, setGeofences, getGeofences,
   timeToMinutes, minutesToTime, LATE_THRESHOLD_MIN,
 } from "./data.js";
 
@@ -295,6 +295,7 @@ export default function App() {
       stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), settingsApi.get(),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
+    setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
     setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, settings });
   };
   useEffect(() => {
@@ -5889,7 +5890,7 @@ function GeoMapReport({ ctx }) {
     const bounds = L.latLngBounds([]);
 
     // Site geofence circles (metres) + a small centre dot.
-    GEOFENCES.forEach((g) => {
+    getGeofences().forEach((g) => {
       L.circle([g.lat, g.lng], { radius: g.radius, color: "#2f6f9f", weight: 1.5, opacity: 0.75, fillColor: "#2f6f9f", fillOpacity: 0.07, dashArray: "5 4" })
         .addTo(map).bindPopup(`<b>${g.name}</b><br>Site geofence · ${g.radius} m radius`);
       L.circleMarker([g.lat, g.lng], { radius: 3, color: "#2f6f9f", fillColor: "#2f6f9f", fillOpacity: 1, weight: 1 }).addTo(map);
@@ -5950,7 +5951,7 @@ function GeoMapReport({ ctx }) {
         <StatCard Icon={MapPin} label="Geo-tagged clock-ins" value={points.length} meta="plotted on the map" tone="brand" />
         <StatCard Icon={ShieldCheck} label="Within a geofence" value={within} meta={points.length ? Math.round((within / points.length) * 100) + "% of plotted" : "—"} tone="success" />
         <StatCard Icon={AlertTriangle} label="Outside any fence" value={outside} meta="off-site clock-ins" tone={outside ? "warning" : "success"} />
-        <StatCard Icon={Navigation} label="Sites covered" value={sitesCovered} meta={`of ${GEOFENCES.length} geofenced sites`} tone="accent" />
+        <StatCard Icon={Navigation} label="Sites covered" value={sitesCovered} meta={`of ${getGeofences().length} geofenced sites`} tone="accent" />
       </div>
 
       <Card>
@@ -6189,7 +6190,7 @@ function SettingsView({ ctx }) {
   const [tab, setTab] = useState("general");
   if (!s) return null;
   const readOnly = !canDo(ctx, "manageSettings");
-  const tabs = [["general", "General", Building], ["departments", "Departments", Building2], ["roles", "Roles & Permissions", ShieldCheckIcon], ["announcements", "Announcements", Megaphone]];
+  const tabs = [["general", "General", Building], ["departments", "Departments", Building2], ["sites", "Sites & Geofences", MapPin], ["roles", "Roles & Permissions", ShieldCheckIcon], ["announcements", "Announcements", Megaphone]];
   return (
     <>
       <div style={{ display: "inline-flex", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, gap: 3, marginBottom: 16, flexWrap: "wrap" }}>
@@ -6203,6 +6204,7 @@ function SettingsView({ ctx }) {
       {readOnly && <Banner Icon={ShieldQuestion}>Your role has read-only access to settings. Ask an administrator to make changes.</Banner>}
       {tab === "general" && <SettingsGeneral ctx={ctx} readOnly={readOnly} />}
       {tab === "departments" && <SettingsDepartments ctx={ctx} readOnly={readOnly} />}
+      {tab === "sites" && <SettingsSites ctx={ctx} readOnly={readOnly} />}
       {tab === "roles" && <SettingsRoles ctx={ctx} readOnly={readOnly} />}
       {tab === "announcements" && <SettingsAnnouncements ctx={ctx} readOnly={readOnly} />}
     </>
@@ -6345,6 +6347,117 @@ function SettingsGeneral({ ctx, readOnly }) {
         {saved && <span style={{ fontSize: 13, color: "var(--success)", fontWeight: 600 }}>✓ Saved — applied across the system</span>}
       </div>}
     </>
+  );
+}
+
+// Clock-in sites / geofences manager — admin adds, edits and removes the sites
+// staff can clock in at. Persisted to settings.geofences; the clock-in matcher
+// uses this list at runtime. Add new sites as locations are acquired.
+function SettingsSites({ ctx, readOnly }) {
+  const s = ctx.store.settings;
+  const baseline = () => (s.geofences && s.geofences.length) ? s.geofences : GEOFENCES;
+  const [geos, setGeos] = useState(() => JSON.parse(JSON.stringify(baseline())));
+  const [q, setQ] = useState("");
+  const [editing, setEditing] = useState(null); // index (edit) | "new" | null
+  const [saved, setSaved] = useState(false);
+  const dirty = JSON.stringify(geos) !== JSON.stringify(baseline());
+
+  const save = async () => {
+    await settingsApi.update({ geofences: geos });
+    setGeofences(geos);
+    await ctx.reload();
+    setSaved(true); setTimeout(() => setSaved(false), 2500);
+  };
+  const upsert = (site) => {
+    if (editing === "new") setGeos([{ ...site, id: site.id || `GF-${Date.now().toString(36)}` }, ...geos]);
+    else setGeos(geos.map((g, idx) => (idx === editing ? { ...g, ...site } : g)));
+    setEditing(null);
+  };
+  const del = (i) => { if (window.confirm(`Remove the site “${geos[i].name}”? Staff will no longer match to it on clock-in.`)) setGeos(geos.filter((_, idx) => idx !== i)); };
+
+  const rows = geos.map((g, i) => ({ g, i }))
+    .filter(({ g }) => !q || `${g.name} ${g.area || ""} ${g.brand || ""}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = rows.slice(0, 100);
+
+  return (
+    <>
+      <Banner Icon={MapPin}>Sites staff can clock in at. On clock-in, the system matches the nearest site within its radius. <b>Add a site</b> as you acquire a location — stand on site and use <b>Capture current location</b>, or type coordinates. Changes take effect once you <b>Save sites</b>.</Banner>
+      <Toolbar>
+        <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
+          <Search size={15} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
+          <Input placeholder="Search sites by name, area or brand…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 32 }} />
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>{geos.length} site{geos.length === 1 ? "" : "s"}</div>
+        <div style={{ flex: 1 }} />
+        {!readOnly && <Btn variant="primary" onClick={() => setEditing("new")}><Plus size={15} />Add site</Btn>}
+        {!readOnly && <Btn variant="primary" disabled={!dirty} onClick={save} style={!dirty ? { opacity: 0.5 } : undefined}><Check size={15} />Save sites</Btn>}
+        {saved && <span style={{ fontSize: 13, color: "var(--success)", fontWeight: 600 }}>✓ Saved — applied to clock-in</span>}
+      </Toolbar>
+      {dirty && !readOnly && <div style={{ fontSize: 12, color: "var(--warning)", margin: "0 0 10px" }}>You have unsaved changes — click <b>Save sites</b> to apply them.</div>}
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Site", render: ({ g }) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{g.name}</div>{(g.area || g.brand) && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{[g.brand, g.area].filter(Boolean).join(" · ")}</div>}</div> },
+            { label: "Coordinates", render: ({ g }) => <span className="mono" style={{ fontSize: 12 }}>{Number(g.lat).toFixed(6)}, {Number(g.lng).toFixed(6)}</span> },
+            { label: "Radius", num: true, render: ({ g }) => `${g.radius || 150} m` },
+            { label: "", render: ({ i }) => readOnly ? null : (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => setEditing(i)}><Pencil size={13} />Edit</Btn>
+                <Btn size="sm" variant="danger" onClick={() => del(i)}><Trash2 size={13} /></Btn>
+              </div>
+            ) },
+          ]}
+          rows={shown}
+          empty={q ? "No sites match your search." : "No sites yet. Add one to enable clock-in."}
+        />
+        {rows.length > shown.length && <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--muted)", borderTop: "1px solid var(--border)" }}>Showing {shown.length} of {rows.length} matches — refine your search to see more.</div>}
+      </Card>
+      {editing !== null && <SiteEditModal site={editing === "new" ? null : geos[editing]} onSave={upsert} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+// Add / edit a single clock-in site, with a one-tap GPS capture for field acquisition.
+function SiteEditModal({ site, onSave, onClose }) {
+  const [f, setF] = useState(() => ({ name: site?.name || "", brand: site?.brand || "", area: site?.area || "", lat: site?.lat ?? "", lng: site?.lng ?? "", radius: site?.radius || 150, id: site?.id }));
+  const [locating, setLocating] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const capture = () => {
+    setErr("");
+    if (!navigator.geolocation) { setErr("This device has no location services."); return; }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { setF((s) => ({ ...s, lat: Number(p.coords.latitude.toFixed(6)), lng: Number(p.coords.longitude.toFixed(6)) })); setLocating(false); },
+      (e) => { setErr(e && e.message ? e.message : "Could not get your location."); setLocating(false); },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  };
+  const submit = () => {
+    const lat = parseFloat(f.lat), lng = parseFloat(f.lng), radius = parseInt(f.radius, 10);
+    if (!f.name.trim()) return alert("A site name is required.");
+    if (isNaN(lat) || lat < -90 || lat > 90) return alert("Enter a valid latitude (decimal degrees, e.g. 0.29977).");
+    if (isNaN(lng) || lng < -180 || lng > 180) return alert("Enter a valid longitude (decimal degrees, e.g. 32.59656).");
+    if (isNaN(radius) || radius < 20) return alert("Enter a radius of at least 20 metres.");
+    onSave({ id: f.id, name: f.name.trim(), brand: f.brand.trim() || undefined, area: f.area.trim() || undefined, lat, lng, radius });
+  };
+  return (
+    <Modal title={site ? "Edit site" : "Add site"} sub={site ? site.name : "New clock-in location"} onClose={onClose}
+      footer={<><Btn onClick={onClose}>Cancel</Btn><Btn variant="primary" onClick={submit}><Check size={15} />{site ? "Save site" : "Add site"}</Btn></>}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 16px" }}>
+        <Field label="Site name" required full><Input value={f.name} onChange={set("name")} placeholder="e.g. Shell Kansanga" /></Field>
+        <Field label="Brand / client (optional)"><Input value={f.brand} onChange={set("brand")} placeholder="Shell, TotalEnergies…" /></Field>
+        <Field label="Area / town (optional)"><Input value={f.area} onChange={set("area")} placeholder="Kampala, Jinja…" /></Field>
+        <Field label="Latitude" required hint="Decimal degrees"><Input value={f.lat} onChange={set("lat")} placeholder="0.29977" /></Field>
+        <Field label="Longitude" required hint="Decimal degrees"><Input value={f.lng} onChange={set("lng")} placeholder="32.59656" /></Field>
+        <Field label="Radius (metres)" hint="How close staff must be — 150 m suits most sites"><Input type="number" value={f.radius} onChange={set("radius")} /></Field>
+        <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <Btn onClick={capture} disabled={locating}><LocateFixed size={15} />{locating ? "Getting location…" : "Capture current location"}</Btn>
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Stand at the site and tap to fill the coordinates from this device's GPS.</span>
+        </div>
+        {err && <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+      </div>
+    </Modal>
   );
 }
 

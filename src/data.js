@@ -690,9 +690,10 @@ export const monthIsClosed = (monthKey, closings) => (closings || []).some((c) =
    Each site has a centre (lat/lng) and a radius in metres. A phone clock-in
    is "verified" when the captured GPS point falls inside a site's radius.
    ========================================================================= */
+// Default / seed geofence sites. At runtime the app replaces this list with the
+// sites saved in Settings (settings.geofences) when present — see setGeofences.
 export const GEOFENCES = [
-  // Company office. Replace these coordinates with the real Head Office location if needed.
-  { id: "GF-HO", name: "Head Office — Ggaba Rd", lat: 0.28030, lng: 32.61800, radius: 150 },
+  { id: "GF-HO", name: "Global Link Associates — Head Office", area: "Kampala", lat: 0.29977, lng: 32.59656, radius: 150 },
   // Shell & TotalEnergies service stations across Uganda (proximity clock-in sites).
   { id: "ST-0001", name: "Shell Arua · Pakwach Road", brand: "Shell", area: "Arua", lat: 3.008484, lng: 30.911121, radius: 150 },
   { id: "ST-0002", name: "Shell Atiak (Adjumani road) · Atiak-Laropi Rd", brand: "Shell", area: "Atiak (Adjumani road)", lat: 3.37885, lng: 31.791809, radius: 150 },
@@ -1004,12 +1005,22 @@ export function distanceMeters(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
+// The live geofence list the app matches against. Defaults to the seed list
+// above, and is replaced by the sites saved in Settings (settings.geofences)
+// once they load — so HR can add/edit/remove sites without a code change.
+let _geofences = GEOFENCES;
+export function setGeofences(list) {
+  _geofences = Array.isArray(list) && list.length ? list.filter((g) => g && g.lat != null && g.lng != null) : GEOFENCES;
+}
+export function getGeofences() { return _geofences; }
+
 // Nearest geofence to a point, with distance and whether it's inside the radius.
 export function matchGeofence(lat, lng) {
   let best = null;
-  for (const g of GEOFENCES) {
-    const d = distanceMeters(lat, lng, g.lat, g.lng);
-    if (!best || d < best.distanceM) best = { fence: g, distanceM: d, within: d <= g.radius };
+  for (const g of _geofences) {
+    const radius = Number(g.radius) || 150;
+    const d = distanceMeters(lat, lng, Number(g.lat), Number(g.lng));
+    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d, within: d <= radius };
   }
   return best;
 }
