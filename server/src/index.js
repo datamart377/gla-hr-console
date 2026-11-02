@@ -14,6 +14,7 @@ import { notFound, errorHandler } from "./middleware/error.js";
 import authRoutes from "./routes/auth.js";
 import settingsRoutes from "./routes/settings.js";
 import notifyRoutes from "./routes/notify.js";
+import accountsRoutes from "./routes/accounts.js";
 import { crudRouter } from "./routes/crud.js";
 
 const app = express();
@@ -68,6 +69,7 @@ app.get("/api/health", async (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/notify", notifyRoutes);
+app.use("/api/accounts", accountsRoutes);
 
 // Domain collections (table name -> REST resource path).
 const COLLECTIONS = {

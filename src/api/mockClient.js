@@ -90,6 +90,14 @@ export const notifyApi = {
   status: () => respond({ configured: false }),
 };
 
+// Account management is a no-op in the standalone/demo build (no users table).
+export const accountsApi = {
+  list: () => respond([]),
+  status: () => respond({ hasLogin: false }),
+  invite: () => respond({ ok: true, created: true, emailed: false, mock: true }),
+  setPassword: () => respond({ ok: true, created: true, mock: true }),
+};
+
 // Stock management
 export const stockItemsApi = makeCrud("stockItems", "STK");
 export const stockMovementsApi = makeCrud("stockMovements", "MOV");

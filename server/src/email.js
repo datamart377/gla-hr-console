@@ -134,6 +134,29 @@ function template(type, emp, data = {}) {
   }
 }
 
+// Welcome / account-invite email with a one-time "set your password" link.
+// Sent when an employee is given a login account.
+export async function sendWelcomeMail({ to, name, link, created = true }) {
+  const t = getTransport();
+  if (!t) return { sent: false, reason: "email_not_configured" };
+  if (!to) return { sent: false, reason: "no_recipient_email" };
+  const safeName = name || "there";
+  const lead = created
+    ? "A staff account has been created for you"
+    : "Your staff account access has been updated";
+  const html = shell("Welcome",
+    `<p>Dear ${esc(safeName)},</p>
+     <p>${lead} on the Global Link Associates HR portal (IHRSM).</p>
+     <p>Set your password using the button below to activate your sign-in. For security, this link expires in <b>7 days</b> and can be used once.</p>
+     <p style="margin:18px 0"><a href="${esc(link)}" style="background:#f0601f;color:#ffffff;text-decoration:none;padding:11px 20px;border-radius:8px;display:inline-block;font-weight:600">Set my password</a></p>
+     <div style="background:#f4f7f9;border-radius:8px;padding:12px 14px;margin:14px 0">Your sign-in email: <b>${esc(to)}</b></div>
+     <p style="color:#6b747d;font-size:12px;margin:0">If the button doesn't work, paste this link into your browser:<br><span style="word-break:break-all">${esc(link)}</span></p>
+     <p style="color:#6b747d;font-size:12px;margin:14px 0 0">From the portal you can view your payslips, request leave and salary advances, and keep your personal details up to date.</p>`);
+  const text = `Dear ${safeName},\n\n${lead} on the Global Link Associates HR portal (IHRSM).\n\nSet your password to activate your sign-in (link expires in 7 days, one-time use):\n${link}\n\nYour sign-in email: ${to}`;
+  await t.sendMail({ from: config.mail.from, to, subject: "Set up your HR portal account", html, text });
+  return { sent: true, to };
+}
+
 // Password-reset email. The caller (auth route) supplies the recipient and a
 // one-time link, so this does not resolve from the employee table.
 export async function sendResetMail({ to, name, link }) {

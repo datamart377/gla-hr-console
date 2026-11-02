@@ -101,3 +101,11 @@ export const notifyApi = {
   send: (type, empId, data) => request("POST", "/api/notify", { type, empId, data }).catch(() => ({ sent: false })),
   status: () => request("GET", "/api/notify/status").catch(() => ({ configured: false })),
 };
+
+// Staff login-account management (admin / HR).
+export const accountsApi = {
+  list: () => request("GET", "/api/accounts").catch(() => []),
+  status: (empId) => request("GET", `/api/accounts/${encodeURIComponent(empId)}`).catch(() => ({ hasLogin: false })),
+  invite: (empId) => request("POST", "/api/accounts/invite", { empId }),
+  setPassword: (empId, password) => request("POST", "/api/accounts/set-password", { empId, password }),
+};

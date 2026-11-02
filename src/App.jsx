@@ -17,7 +17,7 @@ import { GLA_LOGO } from "./logo.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
-  authApi, notifyApi, isLive,
+  authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
   data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, SITES, LEAVE_TYPES, LEAVE_COLORS,
@@ -1675,8 +1675,61 @@ function nextEmpId(employees) {
   return "GLA-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0");
 }
 
+// Admin/HR login-account controls shown inside the employee edit form:
+// current login status, set/change a password directly, or email a
+// "set your password" invite link.
+function LoginAccessSection({ ctx, empId }) {
+  const [status, setStatus] = useState(null);
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { ok, text }
+  const load = async () => { try { setStatus(await accountsApi.status(empId)); } catch { setStatus({ hasLogin: false }); } };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [empId]);
+
+  const setPassword = async () => {
+    if (pw.length < 8) { setMsg({ ok: false, text: "Password must be at least 8 characters." }); return; }
+    setBusy(true); setMsg(null);
+    try { const r = await accountsApi.setPassword(empId, pw); setPw(""); setMsg({ ok: true, text: `Password set — they can sign in with ${r.loginEmail}.` }); await load(); }
+    catch (e) { setMsg({ ok: false, text: e.message || "Could not set the password." }); }
+    setBusy(false);
+  };
+  const sendInvite = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await accountsApi.invite(empId);
+      setMsg({ ok: true, text: r.emailed
+        ? `Set-password email sent to ${r.loginEmail}.`
+        : `Login is ready for ${r.loginEmail}, but no email was sent (${r.reason || "mail not configured"}). You can set a password directly below.` });
+      await load();
+    } catch (e) { setMsg({ ok: false, text: e.message || "Could not create the login." }); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <FieldsetTitle>Login &amp; access</FieldsetTitle>
+      <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 10, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {status == null ? <span style={{ fontSize: 12.5, color: "var(--muted)" }}>Checking…</span>
+            : status.hasLogin ? <Pill tone="success">Has login · {status.email} · {status.role}</Pill>
+            : <Pill tone="muted">No login account yet</Pill>}
+          <div style={{ flex: 1 }} />
+          <Btn size="sm" disabled={busy} onClick={sendInvite}><Mail size={14} />{status && status.hasLogin ? "Resend set-password email" : "Create login & email invite"}</Btn>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <Input type="password" value={pw} onChange={(e) => { setPw(e.target.value); setMsg(null); }} placeholder="New password (min 8 chars)" style={{ maxWidth: 260 }} />
+          <Btn size="sm" variant="primary" disabled={busy || !pw} onClick={setPassword}><ShieldCheck size={14} />{status && status.hasLogin ? "Change password" : "Set password & create login"}</Btn>
+        </div>
+        {msg && <div style={{ fontSize: 12.5, color: msg.ok ? "var(--success)" : "var(--danger)" }}>{msg.text}</div>}
+        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Setting a password here lets the staff member sign in immediately. The email invite lets them choose their own (link valid 7 days).</div>
+      </div>
+    </>
+  );
+}
+
 function EmployeeForm({ ctx, id }) {
   const existing = id ? ctx.empById(id) : null;
+  const canManageLogin = existing && ["admin", "hr"].includes(ctx.auth && ctx.auth.role);
   const [f, setF] = useState(() => existing ? { ...existing } : normalizeEmployee({
     id: nextEmpId(ctx.store.employees), firstName: "", lastName: "", gender: "Male", dob: "", nationalId: "",
     phone: "", email: "", address: "", department: (ctx.store.settings?.departments?.[0]?.name) || "Engineering Department", jobTitle: "", contractType: "Permanent",
@@ -1694,7 +1747,12 @@ function EmployeeForm({ ctx, id }) {
     if (!f.bankName || !f.bankAccount) return alert("Bank details (bank name and account number) are required.");
     const out = { ...f, grossSalary: Number(f.grossSalary) || 0, advanceDeductions: Number(f.advanceDeductions) || 0, annualUsed: Number(f.annualUsed) || 0, sickUsed: Number(f.sickUsed) || 0 };
     if (existing) await employeesApi.update(id, out);
-    else { await employeesApi.create(out); notifyApi.send("staff_welcome", out.id, { name: `${out.firstName} ${out.lastName}`, email: out.email }); }
+    else {
+      await employeesApi.create(out);
+      // Auto-provision a login account and email a "set your password" link.
+      // Best-effort: a mail/account hiccup must not block saving the employee.
+      try { await accountsApi.invite(out.id); } catch { /* admin can invite later from the edit form */ }
+    }
     await ctx.reload();
     ctx.setModal(null);
   };
@@ -1738,6 +1796,8 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Date joined"><Input type="date" value={f.employmentDate} onChange={set("employmentDate")} /></Field>
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
         <Field label="Position (full title)" full><Input value={f.position} onChange={set("position")} placeholder="e.g. Deputy Chief ICT Officer, Directorate of ICT" /></Field>
+
+        {canManageLogin && <LoginAccessSection ctx={ctx} empId={id} />}
 
         <FieldsetTitle>Origin</FieldsetTitle>
         <Field label="Region of origin"><Input value={f.origin.region} onChange={setN("origin", "region")} /></Field>
