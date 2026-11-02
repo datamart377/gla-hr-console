@@ -878,7 +878,18 @@ function MyPortal({ ctx, setSv }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <TodayStatus rec={today} />
-          {!today && <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <ClockInModal ctx={cc} empId={emp.id} />)}><LocateFixed size={16} />Clock in now</Btn>}
+        </div>
+      </Card>
+
+      {/* Prominent clock-in — the first and primary action on the staff landing page. */}
+      <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16, border: `1.5px solid ${today ? "var(--success)" : "var(--brand)"}` }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "20px 22px", background: today ? "rgba(18,137,78,.06)" : "rgba(47,111,159,.07)" }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, flex: "none", display: "grid", placeItems: "center", background: today ? "rgba(18,137,78,.14)" : "rgba(47,111,159,.14)", color: today ? "var(--success)" : "var(--brand)" }}><LocateFixed size={26} /></div>
+          <div style={{ minWidth: 200, flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 17, color: "var(--text)" }}>{today ? "You're clocked in today" : "Clock in for today"}</div>
+            <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 3 }}>{today ? `Recorded at ${today.clockIn || "—"}${today.site ? ` · ${today.site}` : ""}` : "Tap below — your GPS location is checked against the nearest site geofence."}</div>
+          </div>
+          <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <ClockInModal ctx={cc} empId={emp.id} />)} style={{ padding: "13px 24px", fontSize: 15, fontWeight: 700, flex: "0 0 auto" }}><LocateFixed size={18} />{today ? "Clock in again" : "Clock in now"}</Btn>
         </div>
       </Card>
 
