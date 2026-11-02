@@ -5893,7 +5893,8 @@ function GeoMapReport({ ctx }) {
       L.circle([g.lat, g.lng], { radius: g.radius, color: "#2f6f9f", weight: 1.5, opacity: 0.75, fillColor: "#2f6f9f", fillOpacity: 0.07, dashArray: "5 4" })
         .addTo(map).bindPopup(`<b>${g.name}</b><br>Site geofence · ${g.radius} m radius`);
       L.circleMarker([g.lat, g.lng], { radius: 3, color: "#2f6f9f", fillColor: "#2f6f9f", fillOpacity: 1, weight: 1 }).addTo(map);
-      bounds.extend([g.lat, g.lng]);
+      // Note: site geofences are NOT added to `bounds` — with hundreds of sites
+      // nationwide, the map focuses on the actual clock-ins instead.
     });
 
     // Clock-in markers, coloured by geofence compliance.
