@@ -6358,7 +6358,6 @@ function SettingsSites({ ctx, readOnly }) {
   const baseline = () => (s.geofences && s.geofences.length) ? s.geofences : GEOFENCES;
   const [geos, setGeos] = useState(() => JSON.parse(JSON.stringify(baseline())));
   const [q, setQ] = useState("");
-  const [editing, setEditing] = useState(null); // index (edit) | "new" | null
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(geos) !== JSON.stringify(baseline());
 
@@ -6368,16 +6367,24 @@ function SettingsSites({ ctx, readOnly }) {
     await ctx.reload();
     setSaved(true); setTimeout(() => setSaved(false), 2500);
   };
-  const upsert = (site) => {
-    if (editing === "new") setGeos([{ ...site, id: site.id || `GF-${Date.now().toString(36)}` }, ...geos]);
-    else setGeos(geos.map((g, idx) => (idx === editing ? { ...g, ...site } : g)));
-    setEditing(null);
-  };
-  const del = (i) => { if (window.confirm(`Remove the site “${geos[i].name}”? Staff will no longer match to it on clock-in.`)) setGeos(geos.filter((_, idx) => idx !== i)); };
+  // Open the editor through the app's modal root so it centres on screen
+  // (rendering it inline inside this long list mis-positions a fixed overlay).
+  const openEditor = (index) => ctx.setModal(() => (cc) => (
+    <SiteEditModal
+      site={index == null ? null : geos[index]}
+      onClose={() => cc.setModal(null)}
+      onSave={(site) => {
+        setGeos((prev) => index == null
+          ? [{ ...site, id: site.id || `GF-${Date.now().toString(36)}` }, ...prev]
+          : prev.map((g, idx) => (idx === index ? { ...g, ...site } : g)));
+        cc.setModal(null);
+      }}
+    />
+  ));
+  const del = (i) => { if (window.confirm(`Remove the site “${geos[i].name}”? Staff will no longer match to it on clock-in.`)) setGeos((prev) => prev.filter((_, idx) => idx !== i)); };
 
-  const rows = geos.map((g, i) => ({ g, i }))
+  const shown = geos.map((g, i) => ({ g, i }))
     .filter(({ g }) => !q || `${g.name} ${g.area || ""} ${g.brand || ""}`.toLowerCase().includes(q.toLowerCase()));
-  const shown = rows.slice(0, 100);
 
   return (
     <>
@@ -6389,7 +6396,7 @@ function SettingsSites({ ctx, readOnly }) {
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>{geos.length} site{geos.length === 1 ? "" : "s"}</div>
         <div style={{ flex: 1 }} />
-        {!readOnly && <Btn variant="primary" onClick={() => setEditing("new")}><Plus size={15} />Add site</Btn>}
+        {!readOnly && <Btn variant="primary" onClick={() => openEditor(null)}><Plus size={15} />Add site</Btn>}
         {!readOnly && <Btn variant="primary" disabled={!dirty} onClick={save} style={!dirty ? { opacity: 0.5 } : undefined}><Check size={15} />Save sites</Btn>}
         {saved && <span style={{ fontSize: 13, color: "var(--success)", fontWeight: 600 }}>✓ Saved — applied to clock-in</span>}
       </Toolbar>
@@ -6402,7 +6409,7 @@ function SettingsSites({ ctx, readOnly }) {
             { label: "Radius", num: true, render: ({ g }) => `${g.radius || 150} m` },
             { label: "", render: ({ i }) => readOnly ? null : (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                <Btn size="sm" onClick={() => setEditing(i)}><Pencil size={13} />Edit</Btn>
+                <Btn size="sm" onClick={() => openEditor(i)}><Pencil size={13} />Edit</Btn>
                 <Btn size="sm" variant="danger" onClick={() => del(i)}><Trash2 size={13} /></Btn>
               </div>
             ) },
@@ -6410,9 +6417,7 @@ function SettingsSites({ ctx, readOnly }) {
           rows={shown}
           empty={q ? "No sites match your search." : "No sites yet. Add one to enable clock-in."}
         />
-        {rows.length > shown.length && <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--muted)", borderTop: "1px solid var(--border)" }}>Showing {shown.length} of {rows.length} matches — refine your search to see more.</div>}
       </Card>
-      {editing !== null && <SiteEditModal site={editing === "new" ? null : geos[editing]} onSave={upsert} onClose={() => setEditing(null)} />}
     </>
   );
 }
