@@ -1811,6 +1811,7 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Status"><Select value={f.status} onChange={set("status")} options={EMP_STATUSES} /></Field>
         <Field label="Date joined"><Input type="date" value={f.employmentDate} onChange={set("employmentDate")} /></Field>
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
+        <Field label="Employer type (PAYE basis)" hint="Primary → progressive URA bands. Secondary → flat 40% (Global Link is not this person's main employer)."><Select value={f.employerType || "primary"} onChange={set("employerType")} options={[{ value: "primary", label: "Primary employer — progressive PAYE" }, { value: "secondary", label: "Secondary employer — 40% flat" }]} /></Field>
         <Field label="Position (full title)" full><Input value={f.position} onChange={set("position")} placeholder="e.g. Deputy Chief ICT Officer, Directorate of ICT" /></Field>
 
         {canManageLogin && <LoginAccessSection ctx={ctx} empId={id} />}
@@ -5648,7 +5649,7 @@ function PayeReport({ ctx }) {
         <StatCard key="3" Icon={FileText} label="Total PAYE" value={ugxShort(t.paye)} meta="remit to URA" tone="warning" />,
         <StatCard key="4" Icon={Check} label="Effective rate" value={pct(effRate)} meta="PAYE ÷ gross" tone="success" />,
       ]} />
-      <Banner Icon={FileText}>PAYE Deduction Schedule for <b>{monthLbl}</b> — income tax withheld from every active staff member's emoluments, computed on the URA resident individual bands (tax-free up to UGX 335,000; then 20% / 25% / 30%, plus 10% on taxable income above UGX 10m) under the Income Tax (Amendment) Act, 2026, effective 1 July 2026. Remit to URA by the 15th.{missing ? ` ${missing} staff have no TIN on file — add it on their employee record.` : ""}</Banner>
+      <Banner Icon={FileText}>PAYE Deduction Schedule for <b>{monthLbl}</b> — income tax withheld from every active staff member's emoluments, computed on the URA resident individual bands (tax-free up to UGX 335,000; then 20% / 25% / 30%, plus 10% on taxable income above UGX 10m) under the Income Tax (Amendment) Act, 2026, effective 1 July 2026. Staff for whom Global Link is a secondary employer are taxed at a flat 40% (set per person on their employee record). Remit to URA by the 15th.{missing ? ` ${missing} staff have no TIN on file — add it on their employee record.` : ""}</Banner>
       <Card>
         <CardHead title={`PAYE Deduction Schedule — ${monthLbl}`} right={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn size="sm" onClick={exportPdf}><FileText size={14} />PDF</Btn>

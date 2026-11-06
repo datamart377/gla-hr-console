@@ -220,6 +220,8 @@ export function normalizeEmployee(e) {
   // Seeded so each role can be demoed: GLA-001 Administrator, GLA-002 HR Officer,
   // GLA-003 Finance Officer, everyone else self-service staff.
   if (!m.role) m.role = ({ "GLA-001": "admin", "GLA-002": "hr", "GLA-003": "finance" })[e.id] || "staff";
+  // PAYE basis: "primary" uses the progressive URA bands; "secondary" is a flat 40%.
+  if (m.employerType !== "secondary") m.employerType = "primary";
   if (!m.position) m.position = e.jobTitle ? `${e.jobTitle}, ${e.department}` : "";
   if (!m.fileNumber) m.fileNumber = e.id;
   if (!m.contact.email) m.contact.email = e.email || "";
@@ -459,7 +461,7 @@ data.advances = [
   months.forEach((month) => {
     const emps = data.employees.filter((e) => e.status !== "Terminated");
     const rows = emps.map((e, i) => {
-      const gross = Number(e.grossSalary) || 0, nssf5 = Math.round(gross * 0.05), paye = derivePAYE(gross);
+      const gross = Number(e.grossSalary) || 0, nssf5 = Math.round(gross * 0.05), paye = derivePAYE(gross, e.employerType);
       const advance = (Number(e.advanceDeductions) || 0) + advanceRepaymentForMonth(data.advances, e.id, month);
       const custom = {}; cols.forEach((c) => { custom[c.id] = (e.custom || {})[c.id] ?? (c.kind === "text" ? "" : 0); });
       let net = gross - nssf5 - paye - advance;
@@ -480,8 +482,11 @@ data.advances = [
 //   410,001 – 485,000     : 15,000 + 25% × (TI − 410,000)
 //   485,001 – 10,000,000  : 33,750 + 30% × (TI − 485,000)
 //   Above 10,000,000      : the above + 10% × (TI − 10,000,000)
-export function derivePAYE(gross) {
+export function derivePAYE(gross, employerType) {
   const g = Number(gross) || 0;
+  // Secondary employment: URA taxes the whole chargeable income at a flat 40%
+  // (the tax-free band and lower rates belong to the primary employer).
+  if (employerType === "secondary") return Math.round(0.4 * g);
   let t = 0;
   if (g <= 335000) t = 0;
   else if (g <= 410000) t = 0.2 * (g - 335000);
@@ -498,7 +503,7 @@ export const deriveNssfEmployer = (g) => Math.round((Number(g) || 0) * ((data.se
 
 export function derivePayslip(emp) {
   const gross = Number(emp.grossSalary) || 0;
-  const paye = derivePAYE(gross);
+  const paye = derivePAYE(gross, emp.employerType);
   const nssfEmp = deriveNssfEmployee(gross);
   const nssfEr = deriveNssfEmployer(gross);
   const advance = Number(emp.advanceDeductions) || 0;
