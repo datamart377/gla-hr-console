@@ -474,14 +474,20 @@ data.advances = [
 /* ----------------------------- derived helpers ---------------------------- */
 
 // Uganda URA monthly PAYE for resident individuals.
+// New rates under the Income Tax (Amendment) Act, 2026 — effective 1 July 2026:
+//   0 – 335,000           : NIL
+//   335,001 – 410,000     : 20% × (TI − 335,000)
+//   410,001 – 485,000     : 15,000 + 25% × (TI − 410,000)
+//   485,001 – 10,000,000  : 33,750 + 30% × (TI − 485,000)
+//   Above 10,000,000      : the above + 10% × (TI − 10,000,000)
 export function derivePAYE(gross) {
   const g = Number(gross) || 0;
   let t = 0;
-  if (g <= 235000) t = 0;
-  else if (g <= 335000) t = 0.1 * (g - 235000);
-  else if (g <= 410000) t = 10000 + 0.2 * (g - 335000);
+  if (g <= 335000) t = 0;
+  else if (g <= 410000) t = 0.2 * (g - 335000);
+  else if (g <= 485000) t = 15000 + 0.25 * (g - 410000);
   else {
-    t = 25000 + 0.3 * (g - 410000);
+    t = 33750 + 0.3 * (g - 485000);
     if (g > 10000000) t += 0.1 * (g - 10000000);
   }
   return Math.round(t);

@@ -5648,7 +5648,7 @@ function PayeReport({ ctx }) {
         <StatCard key="3" Icon={FileText} label="Total PAYE" value={ugxShort(t.paye)} meta="remit to URA" tone="warning" />,
         <StatCard key="4" Icon={Check} label="Effective rate" value={pct(effRate)} meta="PAYE ÷ gross" tone="success" />,
       ]} />
-      <Banner Icon={FileText}>PAYE Deduction Schedule for <b>{monthLbl}</b> — income tax withheld from every active staff member's emoluments, computed on the URA resident individual bands (tax-free up to UGX 235,000; 10% / 20% / 30%, plus 10% on gross above UGX 10m). Remit to URA by the 15th.{missing ? ` ${missing} staff have no TIN on file — add it on their employee record.` : ""}</Banner>
+      <Banner Icon={FileText}>PAYE Deduction Schedule for <b>{monthLbl}</b> — income tax withheld from every active staff member's emoluments, computed on the URA resident individual bands (tax-free up to UGX 335,000; then 20% / 25% / 30%, plus 10% on taxable income above UGX 10m) under the Income Tax (Amendment) Act, 2026, effective 1 July 2026. Remit to URA by the 15th.{missing ? ` ${missing} staff have no TIN on file — add it on their employee record.` : ""}</Banner>
       <Card>
         <CardHead title={`PAYE Deduction Schedule — ${monthLbl}`} right={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn size="sm" onClick={exportPdf}><FileText size={14} />PDF</Btn>
