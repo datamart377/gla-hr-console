@@ -4013,6 +4013,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
         { heading: "Terms of Employment", type: "kv", rows: [
           ["Terms of Employment", na(tm.terms)], ["Start Date", fmtDateLong(tm.startDate)], ["End Date", fmtDateLong(tm.endDate)],
           ["Entry Salary", na(tm.entrySalary)], ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
+          ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
         ] },
         { heading: "Professional Specialization", type: "table", head: ["Specialization", "Institution", "Year"],
           body: (e.professionalSpecialization || []).map((r) => [na(r.area), na(r.institution), na(r.year)]), empty: "No specialization on record" },
@@ -4163,6 +4164,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ["Entry Salary", na(e.terms.entrySalary)],
           ["Appointment Authority", na(e.terms.appointmentAuthority)],
           ["Source of Payment", na(e.terms.sourceOfPayment)],
+          ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
         ]} />
       </SFSection>
 
