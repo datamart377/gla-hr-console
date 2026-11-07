@@ -69,6 +69,7 @@ function Btn({ children, onClick, variant = "default", size = "md", style, type 
     primary: { background: "var(--ink)", color: "var(--ink-fg)", border: "1px solid var(--ink)" },
     ghost: { background: "transparent", border: "1px solid transparent", color: "var(--text-2)" },
     success: { color: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 45%, var(--border))" },
+    warning: { color: "var(--warning)", border: "1px solid color-mix(in srgb, var(--warning) 45%, var(--border))" },
     danger: { color: "var(--danger)", border: "1px solid color-mix(in srgb, var(--danger) 45%, var(--border))" },
   };
   return (
@@ -2997,7 +2998,12 @@ function SupplierSchedule({ ctx }) {
   const processSchedule = async () => {
     const lines = store.supplierSchedule || [];
     if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Add line” to pick a supplier from the register and enter the invoice amount."); return; }
-    const rows = lines.map((line, i) => { const r = resolveScheduleLine(line); return { no: i + 1, supplierId: r.supplierId, name: r.name, tin: r.tin, email: r.email, bankAccount: r.bankAccount, bankName: r.bankName, bankBranch: r.bankBranch, subTotal: r.subTotal, applyWht: r.applyWht, applyVat: r.applyVat, wht: r.wht, vat: r.vat, net: r.net }; });
+    const resolved = lines.map((line) => resolveScheduleLine(line));
+    const held = resolved.filter((r) => r.held);
+    const payableLines = resolved.filter((r) => !r.held);
+    if (!payableLines.length) { alert("Every line on this schedule is a frozen supplier (payment held), so there is nothing to pay.\n\nReactivate a supplier in the register, or add a payable line, before processing."); return; }
+    if (held.length && !window.confirm(`${held.length} line(s) are for frozen suppliers and will be HELD — excluded from this run and not paid:\n\n${held.map((r) => `• ${r.name}`).join("\n")}\n\nProcess the remaining ${payableLines.length} payable line(s)?`)) return;
+    const rows = payableLines.map((r, i) => ({ no: i + 1, supplierId: r.supplierId, name: r.name, tin: r.tin, email: r.email, bankAccount: r.bankAccount, bankName: r.bankName, bankBranch: r.bankBranch, subTotal: r.subTotal, applyWht: r.applyWht, applyVat: r.applyVat, wht: r.wht, vat: r.vat, net: r.net }));
     const totals = rows.reduce((a, r) => ({ subTotal: a.subTotal + r.subTotal, wht: a.wht + r.wht, vat: a.vat + r.vat, net: a.net + r.net }), { subTotal: 0, wht: 0, vat: 0, net: 0 });
     const who = currentEmp ? `${currentEmp.firstName} ${currentEmp.lastName} (HR)` : "HR";
     const id = `SPR-${Date.now().toString(36).toUpperCase().slice(-6)}`;
@@ -3364,7 +3370,10 @@ function ManageScheduleSuppliers({ ctx }) {
   const toggle = async (s) => {
     const mine = lines.filter((l) => l.supplierId === s.id);
     if (mine.length) { for (const l of mine) await supplierScheduleApi.remove(l.id); }
-    else { await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }); }
+    else {
+      if (s.status === "Frozen") { alert(`“${s.name}” is frozen (payment held) and can't be added to a schedule.\n\nReactivate them in the Suppliers register first.`); return; }
+      await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false });
+    }
     await reload();
   };
   return (
@@ -3381,7 +3390,7 @@ function ManageScheduleSuppliers({ ctx }) {
               <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)" }}>
                 <span style={{ width: 30, height: 30, flex: "none", borderRadius: 8, display: "grid", placeItems: "center", background: "var(--surface-2)", color: "var(--muted)" }}><Landmark size={15} /></span>
                 <div style={{ lineHeight: 1.2, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{s.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>{s.name}{s.status === "Frozen" && <Pill tone="warning">Frozen</Pill>}</div>
                   <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.category || "—"}{s.tin ? ` · TIN ${s.tin}` : ""}{on && n > 1 ? ` · ${n} lines` : ""}</div>
                 </div>
                 <button type="button" onClick={() => toggle(s)} title={on ? "On schedule — click to remove" : "Off schedule — click to add"}
@@ -3405,7 +3414,9 @@ function SupplierDraft({ ctx, date, setDate }) {
   const { store, setModal, reload } = ctx;
   const lines = store.supplierSchedule || [];
   const rows = lines.map((line) => resolveScheduleLine(line));
-  const t = rows.reduce((a, r) => ({ subTotal: a.subTotal + r.subTotal, wht: a.wht + r.wht, vat: a.vat + r.vat, net: a.net + r.net }), { subTotal: 0, wht: 0, vat: 0, net: 0 });
+  const payable = rows.filter((r) => !r.held); // frozen suppliers' lines are held out of payment
+  const heldRows = rows.filter((r) => r.held);
+  const t = payable.reduce((a, r) => ({ subTotal: a.subTotal + r.subTotal, wht: a.wht + r.wht, vat: a.vat + r.vat, net: a.net + r.net }), { subTotal: 0, wht: 0, vat: 0, net: 0 });
   const hasSuppliers = (store.suppliers || []).some((s) => s.status !== "Inactive");
   const [chequeNo, setChequeNo] = useState("");
 
@@ -3419,8 +3430,8 @@ function SupplierDraft({ ctx, date, setDate }) {
     out.push([`SUPPLIERS PAYMENT SCHEDULE : ${date}`].map((x) => `"${x}"`).join(","));
     if (chequeNo) out.push([`Cheque No.:,${chequeNo}`].map((x) => `"${x}"`).join(","));
     out.push(["No", "Name", "TIN", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "18% VAT (incl.)", "Net Pay"].join(","));
-    rows.forEach((r, i) => out.push([i + 1, r.name, r.tin, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.net].map((x) => `"${x ?? ""}"`).join(",")));
-    out.push(["", "TOTAL", "", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
+    rows.forEach((r, i) => out.push([i + 1, r.held ? r.name + " (PAYMENT HELD)" : r.name, r.tin, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.held ? "HELD" : r.net].map((x) => `"${x ?? ""}"`).join(",")));
+    out.push(["", "TOTAL (payable)", "", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
     out.push(...signatoryCsvLines());
     downloadFile(`gla-supplier-schedule-${date}.csv`, out.join("\n"));
   };
@@ -3432,8 +3443,8 @@ function SupplierDraft({ ctx, date, setDate }) {
     subtitle: `Schedule date: ${fmtDate(date)} · ${rows.length} suppliers`,
     meta: [...(chequeNo ? [`Cheque No: ${chequeNo}`] : []), `Sub-total: UGX ${fmtN(t.subTotal)}   6% WHT: UGX ${fmtN(t.wht)}   18% VAT: UGX ${fmtN(t.vat)}   Net payable: UGX ${fmtN(t.net)}`],
     head: ["#", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-) 6% WHT", "18% VAT (incl.)", "Net Pay"],
-    body: rows.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.subTotal), r.applyWht ? fmtN(r.wht) : "n/a", r.applyVat ? fmtN(r.vat) : "n/a", fmtN(r.net)])
-      .concat([["", "TOTAL", "", "", "", fmtN(t.subTotal), fmtN(t.wht), fmtN(t.vat), fmtN(t.net)]]),
+    body: rows.map((r, i) => [i + 1, r.held ? r.name + " (held)" : r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.subTotal), r.applyWht ? fmtN(r.wht) : "n/a", r.applyVat ? fmtN(r.vat) : "n/a", r.held ? "HELD" : fmtN(r.net)])
+      .concat([["", "TOTAL (payable)", "", "", "", fmtN(t.subTotal), fmtN(t.wht), fmtN(t.vat), fmtN(t.net)]]),
     orientation: "landscape",
   });
   // Supplier bank payment schedule — net payable per supplier, like the staff bank report.
@@ -3447,7 +3458,7 @@ function SupplierDraft({ ctx, date, setDate }) {
     subtitle: `Schedule date: ${fmtDate(date)} · net payable to suppliers`,
     meta: [`Cheque No: ${chequeNo || "__________________________"}`, `Total net payable: UGX ${fmtN(t.net)}`, `Status: ${bankApprovalState(rec) === "authorized" ? "AUTHORIZED FOR THE BANK" : bankApprovalState(rec) === "certified" ? "CERTIFIED — awaiting Managing Director authorization" : "DRAFT — awaiting signatures"}`],
     head: ["#", "Supplier", "Account Number", "Bank", "Branch", "Net Pay (UGX)"],
-    body: rows.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.net)])
+    body: payable.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.net)])
       .concat([["", "TOTAL NET PAYABLE", "", "", "", fmtN(t.net)]]),
   });
   const bankReportExcel = () => downloadBankReportXlsx({
@@ -3455,7 +3466,7 @@ function SupplierDraft({ ctx, date, setDate }) {
     subtitle: `Schedule date: ${fmtDate(date)} · net payable to suppliers`,
     chequeNo: chequeNo || "__________________________",
     signatories: bankSignatories(bankRec),
-    rows: rows.map((r, i) => ({ no: i + 1, name: r.name, account: r.bankAccount, bank: r.bankName, branch: r.bankBranch, net: r.net })),
+    rows: payable.map((r, i) => ({ no: i + 1, name: r.name, account: r.bankAccount, bank: r.bankName, branch: r.bankBranch, net: r.net })),
     filename: `GLA-Supplier-Bank-Report-${date}.xlsx`,
   });
 
@@ -3477,6 +3488,7 @@ function SupplierDraft({ ctx, date, setDate }) {
         <StatCard Icon={Check} label="Net payable" value={ugxShort(t.net)} meta="to suppliers" tone="success" />
       </div>
       <Banner Icon={Landmark}>Suppliers Payment Schedule — lines are picked from the <b>Suppliers</b> register. Net Pay = Sub total − 6% income withholding tax. The sub-total is VAT-inclusive: it is divided by 1.18 to get the VAT-exclusive base, the 6% is charged on that base, and the 18% VAT is added back — so VAT is net-neutral and only the withholding reduces the payment. Use <b>Manage suppliers</b> to add or remove suppliers, then enter each invoice amount on its row; bank details, the 6%, 18% and Net Pay fill in automatically.</Banner>
+      {heldRows.length > 0 && <Banner Icon={Ban} tone="warning">{heldRows.length} line{heldRows.length === 1 ? " is" : "s are"} for frozen supplier{heldRows.length === 1 ? "" : "s"} ({heldRows.map((r) => r.name).join(", ")}) — marked <b>Payment held</b> and excluded from the net payable, the bank report and processing. Reactivate the supplier in the <b>Suppliers</b> register to pay them.</Banner>}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: "var(--text-2)" }}>Schedule date</span>
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
@@ -3513,14 +3525,14 @@ function SupplierDraft({ ctx, date, setDate }) {
               {rows.map((r, i) => (
                 <tr key={r.id} onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--surface)")} onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}>
                   <td style={{ ...cellR, color: "var(--muted)" }}>{i + 1}</td>
-                  <td style={cell}><div style={{ fontWeight: 600 }}>{r.name}</div>{r.category ? <div style={{ fontSize: 11, color: "var(--muted)" }}>{r.category}{r.tin ? ` · TIN ${r.tin}` : ""}</div> : null}</td>
-                  <td style={{ ...cell, fontFamily: "var(--font-mono)", fontSize: 12 }}>{dash(r.bankAccount)}</td>
-                  <td style={cell}>{dash(r.bankName)}</td>
-                  <td style={cell}>{dash(r.bankBranch)}</td>
-                  <td style={cellR}>{fmtN(r.subTotal)}</td>
-                  <td style={{ ...cellR, color: r.applyWht ? "var(--danger)" : "var(--muted)" }}>{r.applyWht ? (r.wht ? "−" + fmtN(r.wht) : "0") : "n/a"}</td>
-                  <td style={{ ...cellR, color: "var(--text-2)" }}>{r.applyVat ? (r.vat ? fmtN(r.vat) : "0") : "n/a"}</td>
-                  <td style={{ ...cellR, fontWeight: 700, color: "var(--success)" }}>{fmtN(r.net)}</td>
+                  <td style={{ ...cell, opacity: r.held ? 0.6 : 1 }}><div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{r.name}{r.held && <Pill tone="warning">Payment held</Pill>}</div>{r.category ? <div style={{ fontSize: 11, color: "var(--muted)" }}>{r.category}{r.tin ? ` · TIN ${r.tin}` : ""}</div> : null}</td>
+                  <td style={{ ...cell, fontFamily: "var(--font-mono)", fontSize: 12, opacity: r.held ? 0.6 : 1 }}>{dash(r.bankAccount)}</td>
+                  <td style={{ ...cell, opacity: r.held ? 0.6 : 1 }}>{dash(r.bankName)}</td>
+                  <td style={{ ...cell, opacity: r.held ? 0.6 : 1 }}>{dash(r.bankBranch)}</td>
+                  <td style={{ ...cellR, opacity: r.held ? 0.6 : 1 }}>{fmtN(r.subTotal)}</td>
+                  <td style={{ ...cellR, color: r.applyWht ? "var(--danger)" : "var(--muted)", opacity: r.held ? 0.6 : 1 }}>{r.applyWht ? (r.wht ? "−" + fmtN(r.wht) : "0") : "n/a"}</td>
+                  <td style={{ ...cellR, color: "var(--text-2)", opacity: r.held ? 0.6 : 1 }}>{r.applyVat ? (r.vat ? fmtN(r.vat) : "0") : "n/a"}</td>
+                  <td style={{ ...cellR, fontWeight: 700, color: r.held ? "var(--warning)" : "var(--success)" }}>{r.held ? "HELD" : fmtN(r.net)}</td>
                   <td style={{ ...cell, textAlign: "right" }}>
                     <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                       <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierPaymentAdvice ctx={cc} run={{ id: "DRAFT", scheduleDate: date, emailedAt: "" }} row={r} />)} title="Payment slip — print or email"><Printer size={13} /></Btn>
@@ -3534,7 +3546,7 @@ function SupplierDraft({ ctx, date, setDate }) {
               {rows.length > 0 && (
                 <tr>
                   <td style={tot}></td>
-                  <td style={tot}>TOTAL · {rows.length} suppliers</td>
+                  <td style={tot}>TOTAL · {payable.length} payable{heldRows.length ? ` · ${heldRows.length} held` : ""}</td>
                   <td style={tot} colSpan={3}></td>
                   <td style={totR}>{fmtN(t.subTotal)}</td>
                   <td style={totR}>{fmtN(t.wht)}</td>
@@ -3555,7 +3567,7 @@ function SupplierDraft({ ctx, date, setDate }) {
 // and toggle the 6% WHT / 18% VAT (defaulting to the supplier's tax defaults).
 function ScheduleLineForm({ ctx, id }) {
   const adding = !id;
-  const suppliers = (ctx.store.suppliers || []).filter((s) => s.status !== "Inactive");
+  const suppliers = (ctx.store.suppliers || []).filter((s) => s.status !== "Inactive" && s.status !== "Frozen");
   const existing = (ctx.store.supplierSchedule || []).find((l) => l.id === id);
   const [f, setF] = useState(existing
     ? { supplierId: existing.supplierId, subTotal: existing.subTotal, applyWht: existing.applyWht !== false, applyVat: existing.applyVat !== false }
@@ -3632,8 +3644,15 @@ function Suppliers({ ctx }) {
   });
   const active = all.filter((s) => s.status !== "Inactive").length;
   const onSchedule = new Set((store.supplierSchedule || []).map((l) => l.supplierId)).size;
-  const statusTone = (s) => (s === "Inactive" ? "muted" : "success");
+  const statusTone = (s) => (s === "Inactive" ? "muted" : s === "Frozen" ? "warning" : "success");
   const addToSchedule = async (s) => { await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }); await ctx.reload(); };
+  const toggleFreeze = async (s) => {
+    if (s.status === "Frozen") { await suppliersApi.update(s.id, { status: "Active" }); await ctx.reload(); return; }
+    const onDraft = scheduleCount(s.id) > 0;
+    if (window.confirm(`Freeze payments for “${s.name}”?\n\nThey stay in the register but cannot be paid: they can't be added to a schedule${onDraft ? ", and their line already on the current draft will be held (excluded from the net payable, bank report and processing)" : ""}. You can reactivate them any time.`)) {
+      await suppliersApi.update(s.id, { status: "Frozen" }); await ctx.reload();
+    }
+  };
   return (
     <>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
@@ -3663,7 +3682,10 @@ function Suppliers({ ctx }) {
             { label: "", render: (s) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierView ctx={cc} id={s.id} />)} title="View supplier"><FileText size={13} /></Btn>
-                {scheduleCount(s.id) === 0 && s.status !== "Inactive" && <Btn size="sm" variant="success" onClick={() => addToSchedule(s)} title="Add to payment schedule"><Plus size={13} />Schedule</Btn>}
+                {scheduleCount(s.id) === 0 && s.status !== "Inactive" && s.status !== "Frozen" && <Btn size="sm" variant="success" onClick={() => addToSchedule(s)} title="Add to payment schedule"><Plus size={13} />Schedule</Btn>}
+                {s.status !== "Inactive" && (s.status === "Frozen"
+                  ? <Btn size="sm" variant="success" onClick={() => toggleFreeze(s)} title="Reactivate — allow payments"><Check size={13} />Activate</Btn>
+                  : <Btn size="sm" variant="warning" onClick={() => toggleFreeze(s)} title="Freeze — hold payments"><Ban size={13} />Freeze</Btn>)}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)} title="Edit"><Pencil size={13} /></Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} />)} title="Delete"><Trash2 size={13} /></Btn>
               </div>

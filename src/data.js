@@ -253,7 +253,9 @@ export const SUPPLIER_CATEGORIES = [
   "Petroleum Equipment", "Fuels & Lubricants", "Tools & Equipment", "Civil & Construction",
   "ICT & Office", "Professional Services", "Consumables", "Other",
 ];
-export const SUPPLIER_STATUSES = ["Active", "Inactive"];
+// "Frozen" = payment held: the supplier stays in the register but cannot be paid
+// (can't be added to a schedule, and any existing line is excluded from the run).
+export const SUPPLIER_STATUSES = ["Active", "Frozen", "Inactive"];
 
 // Suppliers master register (vendor master). Bank, TIN, contacts and tax defaults
 // live here; the payment schedule references a supplier and adds the invoice amount.
@@ -304,6 +306,8 @@ export function resolveScheduleLine(line) {
     bankAccount: s.bankAccount || "",
     bankName: s.bankName || "",
     bankBranch: s.bankBranch || "",
+    status: s.status || "Active",
+    held: s.status === "Frozen", // payment held — excluded from totals, bank report and processing
     ...deriveSupplier(line),
   };
 }
