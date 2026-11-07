@@ -2996,7 +2996,8 @@ function SupplierSchedule({ ctx }) {
   const run = runs.find((r) => r.id === view);
 
   const processSchedule = async () => {
-    const lines = store.supplierSchedule || [];
+    const supplierIdSet = new Set((store.suppliers || []).map((s) => s.id));
+    const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
     if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Add line” to pick a supplier from the register and enter the invoice amount."); return; }
     const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
     const resolved = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
@@ -3413,7 +3414,9 @@ function ManageScheduleSuppliers({ ctx }) {
 
 function SupplierDraft({ ctx, date, setDate }) {
   const { store, setModal, reload } = ctx;
-  const lines = store.supplierSchedule || [];
+  // Drop lines whose supplier no longer exists (deleted supplier) so they never show or get paid.
+  const supplierIdSet = new Set((store.suppliers || []).map((s) => s.id));
+  const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
   // Freeze status lives in the live store, not the seed resolveScheduleLine() reads, so decide held here.
   const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
   const rows = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
@@ -3646,7 +3649,8 @@ function Suppliers({ ctx }) {
     return [s.name, s.tin, s.category, s.contactPerson, s.bankName, s.email].join(" ").toLowerCase().includes(q.toLowerCase());
   });
   const active = all.filter((s) => s.status !== "Inactive").length;
-  const onSchedule = new Set((store.supplierSchedule || []).map((l) => l.supplierId)).size;
+  const supplierIdSet = new Set(all.map((s) => s.id));
+  const onSchedule = new Set((store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId)).map((l) => l.supplierId)).size;
   const statusTone = (s) => (s === "Inactive" ? "muted" : s === "Frozen" ? "warning" : "success");
   const addToSchedule = async (s) => { await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }); await ctx.reload(); };
   // Optimistic status change: flip the badge immediately, persist, then reload;
@@ -3703,7 +3707,7 @@ function Suppliers({ ctx }) {
                   ? <Btn size="sm" variant="success" onClick={() => toggleFreeze(s)} title="Reactivate — allow payments"><Check size={13} />Activate</Btn>
                   : <Btn size="sm" variant="warning" onClick={() => toggleFreeze(s)} title="Freeze — hold payments"><Ban size={13} />Freeze</Btn>)}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)} title="Edit"><Pencil size={13} /></Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} />)} title="Delete"><Trash2 size={13} /></Btn>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} cleanup={async () => { for (const l of (store.supplierSchedule || []).filter((x) => x.supplierId === s.id)) await supplierScheduleApi.remove(l.id); }} />)} title="Delete"><Trash2 size={13} /></Btn>
               </div>
             ) },
           ]}
@@ -6663,8 +6667,8 @@ function Announcements({ ctx, audience }) {
 }
 
 /* ============================ Confirm delete ============================ */
-function ConfirmDelete({ ctx, api, id, label }) {
-  const remove = async () => { await api.remove(id); await ctx.reload(); ctx.setModal(null); };
+function ConfirmDelete({ ctx, api, id, label, cleanup }) {
+  const remove = async () => { await api.remove(id); if (cleanup) { try { await cleanup(); } catch { /* best effort */ } } await ctx.reload(); ctx.setModal(null); };
   return (
     <Modal title="Delete record?" sub={label} onClose={() => ctx.setModal(null)}
       footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" style={{ background: "var(--danger)", color: "#fff" }} onClick={remove}><Trash2 size={15} />Delete</Btn></>}>
