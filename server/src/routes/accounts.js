@@ -78,11 +78,24 @@ async function syncLogin(empId, emp, { password } = {}) {
 
 const takenMsg = (email) => `Another account already uses ${email}. Give this employee a different email first.`;
 
-// GET /api/accounts — employees that have a login.
+// GET /api/accounts — employees that have a login (+ last sign-in, for the sessions view).
 router.get("/", async (req, res, next) => {
   try {
-    const { rows } = await query(`SELECT emp_id, email, role FROM users WHERE emp_id IS NOT NULL`);
-    res.json(rows.map((r) => ({ empId: r.emp_id, email: r.email, role: r.role })));
+    const { rows } = await query(`SELECT emp_id, email, role, name, last_login_at FROM users WHERE emp_id IS NOT NULL ORDER BY role, name`);
+    res.json(rows.map((r) => ({ empId: r.emp_id, email: r.email, role: r.role, name: r.name, lastLoginAt: r.last_login_at })));
+  } catch (e) { next(e); }
+});
+
+// POST /api/accounts/:empId/revoke — end every active session for this login by
+// bumping its token epoch. Existing tokens are rejected on their next request.
+router.post("/:empId/revoke", async (req, res, next) => {
+  try {
+    const { rowCount } = await query(
+      `UPDATE users SET token_epoch = token_epoch + 1, updated_at = now() WHERE emp_id = $1`,
+      [req.params.empId],
+    );
+    if (!rowCount) return res.status(404).json({ error: "No login exists for that employee." });
+    res.json({ ok: true, revoked: true });
   } catch (e) { next(e); }
 });
 

@@ -25,15 +25,17 @@ router.post(
   async (req, res, next) => {
     try {
       const { email, password } = req.body;
+      const remember = req.body.remember === true || req.body.remember === "true";
       const { rows } = await query(
-        `SELECT id, email, password_hash, name, role, emp_id FROM users WHERE lower(email) = lower($1)`,
+        `SELECT id, email, password_hash, name, role, emp_id, token_epoch FROM users WHERE lower(email) = lower($1)`,
         [email],
       );
       const user = rows[0];
       // Constant-ish comparison path — always run bcrypt to avoid user enumeration.
       const ok = user ? await bcrypt.compare(password, user.password_hash) : await bcrypt.compare(password, "$2a$10$invalidinvalidinvalidinvalidinv");
       if (!user || !ok) return res.status(401).json({ error: "Invalid email or password." });
-      const token = signToken(user);
+      const token = signToken(user, { expiresIn: remember ? (process.env.JWT_REMEMBER_EXPIRES || "30d") : config.jwt.expiresIn });
+      await query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [user.id]);
       res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, empId: user.emp_id } });
     } catch (e) { next(e); }
   },

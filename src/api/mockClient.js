@@ -97,6 +97,7 @@ export const accountsApi = {
   invite: () => respond({ ok: true, created: true, emailed: false, mock: true }),
   setPassword: () => respond({ ok: true, created: true, mock: true }),
   syncEmail: () => respond({ synced: false, mock: true }),
+  revoke: () => respond({ ok: true, revoked: true, mock: true }),
 };
 
 // Stock management
@@ -107,7 +108,7 @@ export const stockClosingsApi = makeCrud("stockClosings", "CLS");
 // Demo auth — matches a staff record by email; password is not checked in the
 // mock (the live backend enforces it). Mirrors httpClient.authApi's surface.
 export const authApi = {
-  login: (email) => {
+  login: (email, _password, _remember) => {
     const e = data.employees.find((x) => (x.email || "").toLowerCase() === String(email || "").trim().toLowerCase());
     if (!e) return Promise.reject(new Error("No staff account matches that email."));
     const role = ({ "GLA-001": "admin", "GLA-002": "hr", "GLA-003": "finance" })[e.id] || e.role || "staff";
@@ -116,6 +117,7 @@ export const authApi = {
   me: () => Promise.reject(new Error("No session")),
   logout: () => {},
   token: () => null,
+  expiresAt: () => null,
   forgotPassword: () => respond({ ok: true, message: "If that email has an account, a password-reset link is on its way." }),
   resetPassword: () => Promise.reject(new Error("Password reset needs the live server (not available in the offline demo).")),
 };

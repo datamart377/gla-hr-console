@@ -259,6 +259,7 @@ const NAV = [
   { id: "stock", label: "Stock", Icon: Boxes },
   { id: "appraisals", label: "Appraisals", Icon: Star },
   { id: "reports", label: "Reports", Icon: BarChart3 },
+  { id: "sessions", label: "Sessions", Icon: ShieldCheck },
   { id: "settings", label: "Settings", Icon: SettingsIcon },
 ];
 // Current user's role definition (from Settings). Admins default to full access.
@@ -280,6 +281,7 @@ const VIEW_META = {
   stock: ["Stock Management", "Stock in / out with automatic month-end balancing"],
   appraisals: ["Performance Appraisals", "Competency reviews and ratings"],
   reports: ["HR Reports", "Staff analytics — attendance, workforce, leave and payroll"],
+  sessions: ["Accounts & Sessions", "Who can sign in, their last activity, and revoking access"],
   settings: ["Settings Management", "Roles, permissions, announcements and system configuration"],
   staffFile: ["Electronic Staff File", "Complete staff record"],
 };
@@ -289,6 +291,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [auth, setAuth] = useState(null); // { empId, role }
+  const [sessionNotice, setSessionNotice] = useState(""); // shown on the sign-in screen after an auto sign-out
+  const [idleWarn, setIdleWarn] = useState(false); // inactivity warning banner
 
   const reload = async () => {
     const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, settings] = await Promise.all([
@@ -320,14 +324,41 @@ export default function App() {
   }, []);
 
   const empById = (id) => store.employees.find((e) => e.id === id);
-  const signOut = () => { if (isLive) { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } } setAuth(null); };
+  const signOut = (notice) => { if (isLive) { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } } setAuth(null); setIdleWarn(false); setSessionNotice(typeof notice === "string" ? notice : ""); };
+
+  // Auto sign-out when the server reports the session is gone (expired, revoked,
+  // or the signing key was rotated) — httpClient fires this on a 401.
+  useEffect(() => {
+    const onExpired = (e) => { if (isLive) { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } } setAuth(null); setIdleWarn(false); setSessionNotice((e && e.detail && e.detail.message) || "Your session has ended. Please sign in again."); };
+    window.addEventListener("ihrsm:session-expired", onExpired);
+    return () => window.removeEventListener("ihrsm:session-expired", onExpired);
+  }, []);
+
+  // Inactivity auto-logout: warn one minute before, sign out after IDLE_MS of no activity.
+  useEffect(() => {
+    if (!auth) return;
+    const IDLE_MS = (typeof window !== "undefined" && window.__IHRSM_IDLE_MS__) || 30 * 60 * 1000;
+    const WARN_MS = Math.min(60 * 1000, IDLE_MS / 2);
+    let idleT, warnT;
+    const arm = () => {
+      setIdleWarn(false);
+      clearTimeout(idleT); clearTimeout(warnT);
+      warnT = setTimeout(() => setIdleWarn(true), IDLE_MS - WARN_MS);
+      idleT = setTimeout(() => signOut("You were signed out after a period of inactivity."), IDLE_MS);
+    };
+    const evs = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    evs.forEach((ev) => window.addEventListener(ev, arm, { passive: true }));
+    arm();
+    return () => { evs.forEach((ev) => window.removeEventListener(ev, arm)); clearTimeout(idleT); clearTimeout(warnT); };
+  }, [auth]);
 
   // Authenticate (email + password). Live mode obtains a JWT and loads data;
   // mock mode matches by email and password is not enforced.
-  const authenticate = async (email, password) => {
+  const authenticate = async (email, password, remember) => {
     try {
-      const { user } = await authApi.login(email, password);
+      const { user } = await authApi.login(email, password, remember);
       await reload();
+      setSessionNotice("");
       setAuth({ empId: user.empId, role: user.role });
       return { ok: true };
     } catch (e) {
@@ -339,11 +370,11 @@ export default function App() {
 
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
-  else if (!auth) content = <Login employees={store.employees} live={isLive} authenticate={authenticate} />;
+  else if (!auth) content = <Login employees={store.employees} live={isLive} authenticate={authenticate} notice={sessionNotice} />;
   else if (auth.role === "staff") content = <StaffPortal ctx={ctx} />;
   else content = <AdminConsole ctx={ctx} />;
 
-  return (<>{content}{modal && modal(ctx)}</>);
+  return (<>{content}{auth && idleWarn && <IdleWarning onStay={() => setIdleWarn(false)} onSignOut={() => signOut("")} />}{modal && modal(ctx)}</>);
 }
 
 /* ============================ Responsive shell ============================ */
@@ -398,12 +429,13 @@ function AdminConsole({ ctx }) {
   const actx = { ...ctx, setView, openStaffFile };
   const navView = view === "staffFile" ? "employees" : view;
   const _isAdmin = ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role)) === "admin";
-  const nav = NAV.filter((n) => can(ctx, n.id) && (n.id !== "approvals" || _isAdmin));
+  const _isAdminOrHr = ["admin", "hr"].includes((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role));
+  const nav = NAV.filter((n) => can(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (n.id !== "sessions" || _isAdminOrHr));
   const [title, sub] = VIEW_META[view];
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, stock: Stock, appraisals: Appraisals, reports: Reports, settings: SettingsView }[view];
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView }[view];
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -416,6 +448,83 @@ function AdminConsole({ ctx }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ============================ Idle-logout warning ============================ */
+function IdleWarning({ onStay, onSignOut }) {
+  return (
+    <div style={{ position: "fixed", left: 0, right: 0, bottom: 20, display: "flex", justifyContent: "center", zIndex: 1000, pointerEvents: "none" }}>
+      <div style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 14, background: "var(--ink)", color: "#fff", padding: "12px 16px", borderRadius: 12, boxShadow: "0 18px 44px -16px rgba(0,0,0,.6)", maxWidth: 520 }}>
+        <Clock size={17} style={{ flex: "none", color: "var(--warning)" }} />
+        <div style={{ fontSize: 13, lineHeight: 1.35 }}>You’ll be signed out shortly due to inactivity.</div>
+        <div style={{ flex: 1 }} />
+        <button onClick={onSignOut} style={{ background: "transparent", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Sign out</button>
+        <button onClick={onStay} style={{ background: "#f0601f", border: "none", color: "#fff", borderRadius: 8, padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Stay signed in</button>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= Accounts & Sessions (admin) ========================= */
+function fmtDateTime(s) {
+  if (!s) return "";
+  try { const d = new Date(s); return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return String(s); }
+}
+function fmtSessionExpiry(ms) {
+  if (!ms) return null;
+  const diff = ms - Date.now();
+  if (diff <= 0) return "expired";
+  const h = Math.floor(diff / 3600000), d = Math.floor(h / 24);
+  if (d >= 1) return `in ${d} day${d === 1 ? "" : "s"}`;
+  if (h >= 1) return `in ${h} hour${h === 1 ? "" : "s"}`;
+  return `in ${Math.max(1, Math.floor(diff / 60000))} min`;
+}
+function SessionsView({ ctx }) {
+  const [accounts, setAccounts] = useState(null);
+  const [busy, setBusy] = useState("");
+  const myEmpId = ctx.auth && ctx.auth.empId;
+  const expiry = (authApi.expiresAt && authApi.expiresAt()) || null;
+  const load = async () => { try { setAccounts(await accountsApi.list()); } catch { setAccounts([]); } };
+  useEffect(() => { load(); }, []);
+  const revoke = async (a) => {
+    const self = a.empId === myEmpId;
+    const msg = self
+      ? "Revoke YOUR own access? You’ll be signed out on your next action and will need to sign in again."
+      : `Revoke access for ${a.name || a.email}? Any device they’re signed in on will be signed out on its next action.`;
+    if (!window.confirm(msg)) return;
+    setBusy(a.empId);
+    try { await accountsApi.revoke(a.empId); await load(); }
+    catch (e) { alert(e.message || "Could not revoke that session."); }
+    setBusy("");
+  };
+  const roleTone = { admin: "info", hr: "info", finance: "success", staff: "muted" };
+  if (!isLive) return <Banner Icon={ShieldQuestion}>Account &amp; session management runs against the live server. In this offline demo there are no login accounts to manage.</Banner>;
+  return (
+    <>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={Users} label="Login accounts" value={accounts ? accounts.length : "…"} meta="can sign in" tone="brand" />
+        <StatCard Icon={ShieldCheck} label="Your session" value={expiry ? "Active" : "—"} meta={expiry ? `expires ${fmtSessionExpiry(expiry)}` : "no expiry info"} tone="success" />
+        <StatCard Icon={Clock} label="Idle sign-out" value="30 min" meta="of inactivity" tone="warning" />
+      </div>
+      <Banner Icon={ShieldCheck}>These are the staff who can sign in. <b>Revoke</b> ends every active session for that person (bump their session key) — useful when a device is lost or someone leaves. They can sign in again afterwards unless you also remove or disable their login.</Banner>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Name", render: (a) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{a.name || "—"}{a.empId === myEmpId ? " (you)" : ""}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{a.email}</div></div> },
+            { label: "Role", render: (a) => <Pill tone={roleTone[a.role] || "muted"}>{a.role || "staff"}</Pill> },
+            { label: "Last sign-in", render: (a) => <span style={{ color: a.lastLoginAt ? "var(--text)" : "var(--muted)" }}>{a.lastLoginAt ? fmtDateTime(a.lastLoginAt) : "never"}</span> },
+            { label: "", render: (a) => (
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Btn size="sm" variant="danger" disabled={busy === a.empId} onClick={() => revoke(a)} title="End all sessions for this login"><LogOut size={13} />{busy === a.empId ? "Revoking…" : "Revoke"}</Btn>
+              </div>
+            ) },
+          ]}
+          rows={accounts || []}
+          empty={accounts ? "No login accounts yet. Create logins from an employee’s staff file." : "Loading accounts…"}
+        />
+      </Card>
+    </>
   );
 }
 
@@ -434,11 +543,12 @@ const DEMO_ACCOUNTS = [
   { id: "GLA-003", firstName: "Grace", lastName: "Auma", role: "finance", jobTitle: "Accountant", email: "g.auma@glassociates.co.ug" },
   { id: "GLA-006", firstName: "Peter", lastName: "Wanyama", role: "staff", jobTitle: "Field Service Technician", email: "p.wanyama@glassociates.co.ug" },
 ];
-function Login({ employees, live, authenticate }) {
+function Login({ employees, live, authenticate, notice }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(true);
   const resetToken = useMemo(() => { try { return new URLSearchParams(window.location.search).get("reset") || ""; } catch { return ""; } }, []);
   const [mode, setMode] = useState(resetToken ? "reset" : "signin"); // signin | forgot | reset
   const [info, setInfo] = useState("");
@@ -448,7 +558,7 @@ function Login({ employees, live, authenticate }) {
   const submit = async (em, password) => {
     if (busy) return;
     setErr(""); setBusy(true);
-    const res = await authenticate((em || "").trim(), password ?? pw);
+    const res = await authenticate((em || "").trim(), password ?? pw, remember);
     setBusy(false);
     if (!res.ok) setErr(res.error || "Sign-in failed.");
   };
@@ -528,8 +638,13 @@ function Login({ employees, live, authenticate }) {
 
             {mode === "signin" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                {notice && <div style={{ fontSize: 12, color: "var(--warning)", background: "var(--warning-dim)", padding: "8px 11px", borderRadius: 8 }}>{notice}</div>}
                 <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
                 <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)", cursor: "pointer", userSelect: "none" }}>
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#f0601f", cursor: "pointer" }} />
+                  Keep me signed in on this device
+                </label>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
                 {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
                 <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
@@ -1438,6 +1553,7 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
   };
   const add = addButtons[view];
   const roleLabel = { admin: "HR / Admin", hr: "HR Officer", finance: "Finance", staff: "Staff" }[ctx.auth && ctx.auth.role] || "Staff";
+  const sessExp = (authApi.expiresAt && authApi.expiresAt());
   return (
     <header style={{ position: "sticky", top: 0, zIndex: 20, background: "color-mix(in srgb, var(--bg) 85%, transparent)", backdropFilter: "blur(10px)", borderBottom: "1px solid var(--border)", padding: isMobile ? "12px 14px" : "16px 28px", display: "flex", alignItems: "center", gap: isMobile ? 12 : 16 }}>
       {isMobile && <MenuButton onClick={onMenu} />}
@@ -1454,7 +1570,7 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
           {ctx.currentEmp && <Avatar emp={ctx.currentEmp} size={32} />}
           {!isMobile && <div style={{ lineHeight: 1.15 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}` : roleLabel}</div>
-            <div style={{ fontSize: 11, color: "var(--muted)" }}>{roleLabel}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)" }} title={sessExp ? `Your session expires ${fmtSessionExpiry(sessExp)}` : undefined}>{roleLabel}{sessExp ? ` · session ${fmtSessionExpiry(sessExp)}` : ""}</div>
           </div>}
           <Btn variant="primary" size="sm" onClick={ctx.signOut} title="Sign out"><LogOut size={16} />{!isMobile && "Sign out"}</Btn>
         </div>

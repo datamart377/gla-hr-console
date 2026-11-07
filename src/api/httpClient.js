@@ -22,8 +22,21 @@ const _raw = import.meta.env && import.meta.env.VITE_API_BASE;
 const API_BASE = _raw === "/" ? "" : (_raw || "http://localhost:4000");
 const TOKEN_KEY = "ihrsm.token";
 
-const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
-const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } };
+// A "remember me" token lives in localStorage (survives browser restarts); a
+// normal session token lives in sessionStorage (cleared when the tab closes).
+const getToken = () => { try { return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const setToken = (t, remember) => {
+  try {
+    if (!t) { sessionStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_KEY); return; }
+    if (remember) { localStorage.setItem(TOKEN_KEY, t); sessionStorage.removeItem(TOKEN_KEY); }
+    else { sessionStorage.setItem(TOKEN_KEY, t); localStorage.removeItem(TOKEN_KEY); }
+  } catch { /* ignore */ }
+};
+// Decode the JWT expiry (ms epoch) without verifying — for the session indicator.
+const tokenExpiry = () => {
+  const t = getToken(); if (!t) return null;
+  try { const p = JSON.parse(atob(t.split(".")[1])); return p && p.exp ? p.exp * 1000 : null; } catch { return null; }
+};
 
 async function request(method, path, body) {
   const headers = { "Content-Type": "application/json" };
@@ -36,7 +49,15 @@ async function request(method, path, body) {
   });
   if (res.status === 204) return null;
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    // A 401 on a normal (non-auth) request means the session is gone (expired,
+    // revoked, or the signing key rotated). Clear it and let the app sign out.
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      setToken(null);
+      try { window.dispatchEvent(new CustomEvent("ihrsm:session-expired", { detail: { message: payload.error } })); } catch { /* ignore */ }
+    }
+    throw new Error(payload.error || `Request failed (${res.status})`);
+  }
   return payload;
 }
 
@@ -53,14 +74,15 @@ function makeCrud(resource) {
 
 // ---- Auth ----
 export const authApi = {
-  login: async (email, password) => {
-    const out = await request("POST", "/api/auth/login", { email, password });
-    if (out && out.token) setToken(out.token);
+  login: async (email, password, remember) => {
+    const out = await request("POST", "/api/auth/login", { email, password, remember: !!remember });
+    if (out && out.token) setToken(out.token, remember);
     return out; // { token, user }
   },
   me: () => request("GET", "/api/auth/me"),
   logout: () => setToken(null),
   token: getToken,
+  expiresAt: tokenExpiry,
   forgotPassword: (email) => request("POST", "/api/auth/forgot-password", { email }),
   resetPassword: (token, password) => request("POST", "/api/auth/reset-password", { token, password }),
 };
@@ -109,4 +131,5 @@ export const accountsApi = {
   invite: (empId) => request("POST", "/api/accounts/invite", { empId }),
   setPassword: (empId, password) => request("POST", "/api/accounts/set-password", { empId, password }),
   syncEmail: (empId) => request("POST", "/api/accounts/sync-email", { empId }),
+  revoke: (empId) => request("POST", `/api/accounts/${encodeURIComponent(empId)}/revoke`),
 };
