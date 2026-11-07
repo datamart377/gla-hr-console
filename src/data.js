@@ -245,7 +245,7 @@ data.ledgerColumns = [];
 data.payrollRuns = [];
 data.bankApprovals = []; // two-step digital sign-off records for bank reports
 
-// Procurement. Net = Sub total − 6% WHT + 18% VAT.
+// Procurement. Net = Sub total − 6% WHT (charged on the sub-total net of 18% VAT; VAT net-neutral).
 export const SUPPLIER_WHT_RATE = 0.06; // (−) 6% income withholding tax
 export const SUPPLIER_VAT_RATE = 0.18; // (+) 18% VAT
 export const SUPPLIER_CATEGORIES = [
@@ -275,13 +275,17 @@ data.supplierSchedule = [
 ];
 
 // Compute WHT / VAT / net for a schedule line.
+// The 18% VAT is deducted from the sub-total to form the base, the 6% withholding
+// is charged on that VAT-net base, and the VAT is then added back — so VAT is
+// net-neutral and only the withholding reduces the payment. Net = Sub-total − WHT.
+//   e.g. 1,200,000 − 18% = 984,000; 984,000 − 6% = 924,960; + 216,000 VAT = 1,140,960.
 export function deriveSupplier(s) {
   const subTotal = Number(s.subTotal) || 0;
   const applyWht = s.applyWht !== false; // 6% withholding — optional, on by default
   const applyVat = s.applyVat !== false; // 18% VAT — optional, on by default
-  const wht = applyWht ? Math.round(subTotal * ((data.settings?.payroll?.wht ?? 6) / 100)) : 0;
   const vat = applyVat ? Math.round(subTotal * ((data.settings?.payroll?.vat ?? 18) / 100)) : 0;
-  return { subTotal, applyWht, applyVat, wht, vat, net: subTotal - wht + vat };
+  const wht = applyWht ? Math.round((subTotal - vat) * ((data.settings?.payroll?.wht ?? 6) / 100)) : 0;
+  return { subTotal, applyWht, applyVat, wht, vat, net: subTotal - wht };
 }
 // Join a schedule line with its supplier master + computed amounts → a full row.
 export function resolveScheduleLine(line) {

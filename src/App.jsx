@@ -3036,7 +3036,7 @@ function SupplierSnapshot({ run, ctx }) {
   const exportCsv = () => {
     const out = ['"SUPPLIERS PAYMENT SCHEDULE (PROCESSED)"', `"Schedule date:","${run.scheduleDate}"`, `"Processed by:","${run.processedBy || "HR"}","on","${run.processedAt}"`,
       ...(cheque ? [`"Cheque No.:","${cheque}"`] : []), ""];
-    out.push(["No", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "(+)18% VAT", "Net Pay"].join(","));
+    out.push(["No", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "18% VAT (incl.)", "Net Pay"].join(","));
     rows.forEach((r) => out.push([r.no, r.name, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.net].map((x) => `"${x ?? ""}"`).join(",")));
     out.push(["", "TOTAL", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
     out.push(...signatoryCsvLines());
@@ -3049,7 +3049,7 @@ function SupplierSnapshot({ run, ctx }) {
     title: "Suppliers Payment Schedule",
     subtitle: `Schedule date: ${fmtDate(run.scheduleDate)} · processed`,
     meta: [`Processed by ${run.processedBy || "HR"} · ${fmtDate(run.processedAt)}`, ...(cheque ? [`Cheque No: ${cheque}`] : []), `Sub-total: UGX ${fmtN(t.subTotal)}   6% WHT: UGX ${fmtN(t.wht)}   18% VAT: UGX ${fmtN(t.vat)}   Net payable: UGX ${fmtN(t.net)}`],
-    head: ["#", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-) 6% WHT", "(+) 18% VAT", "Net Pay"],
+    head: ["#", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-) 6% WHT", "18% VAT (incl.)", "Net Pay"],
     body: rows.map((r) => [r.no, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.subTotal), r.applyWht ? fmtN(r.wht) : "n/a", r.applyVat ? fmtN(r.vat) : "n/a", fmtN(r.net)])
       .concat([["", "TOTAL", "", "", "", fmtN(t.subTotal), fmtN(t.wht), fmtN(t.vat), fmtN(t.net)]]),
     orientation: "landscape",
@@ -3088,7 +3088,7 @@ function SupplierSnapshot({ run, ctx }) {
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginBottom: 16 }}>
         <StatCard Icon={FileText} label="Sub-total (invoices)" value={ugxShort(t.subTotal)} meta={`${rows.length} suppliers`} tone="brand" />
         <StatCard Icon={TrendingUp} label="6% WHT (deducted)" value={ugxShort(t.wht)} meta="income withholding" tone="warning" />
-        <StatCard Icon={Plus} label="18% VAT (added)" value={ugxShort(t.vat)} meta="value-added tax" tone="accent" />
+        <StatCard Icon={Plus} label="18% VAT (net-neutral)" value={ugxShort(t.vat)} meta="collected & remitted" tone="accent" />
         <StatCard Icon={Check} label="Net payable" value={ugxShort(t.net)} meta="to suppliers" tone="success" />
       </div>
       <Banner Icon={ShieldCheck}>Processed supplier schedule for {fmtDate(run.scheduleDate)} — locked history record. Figures are a snapshot at processing and do not change if the draft is later edited.</Banner>
@@ -3117,7 +3117,7 @@ function SupplierSnapshot({ run, ctx }) {
               </tr>
               <tr>
                 <th style={sub}>Account Number</th><th style={sub}>Bank</th><th style={sub}>Branch</th>
-                <th style={subR}>Sub Total</th><th style={subR}>(−) 6% Withholding</th><th style={subR}>(+) 18% VAT</th>
+                <th style={subR}>Sub Total</th><th style={subR}>(−) 6% Withholding</th><th style={subR}>18% VAT (incl.)</th>
               </tr>
             </thead>
             <tbody>
@@ -3130,7 +3130,7 @@ function SupplierSnapshot({ run, ctx }) {
                   <td style={cell}>{dash(r.bankBranch)}</td>
                   <td style={cellR}>{fmtN(r.subTotal)}</td>
                   <td style={{ ...cellR, color: r.applyWht ? "var(--danger)" : "var(--muted)" }}>{r.applyWht ? (r.wht ? "−" + fmtN(r.wht) : "0") : "n/a"}</td>
-                  <td style={{ ...cellR, color: r.applyVat ? "var(--success)" : "var(--muted)" }}>{r.applyVat ? (r.vat ? "+" + fmtN(r.vat) : "0") : "n/a"}</td>
+                  <td style={{ ...cellR, color: "var(--text-2)" }}>{r.applyVat ? (r.vat ? fmtN(r.vat) : "0") : "n/a"}</td>
                   <td style={{ ...cellR, fontWeight: 700, color: "var(--success)" }}>{fmtN(r.net)}</td>
                   <td style={{ ...cell, textAlign: "center" }}>
                     <Btn size="sm" onClick={() => ctx && ctx.setModal(() => (cc) => <SupplierPaymentAdvice ctx={cc} run={run} row={r} />)} title="Payment advice"><FileText size={13} />Advice</Btn>
@@ -3282,7 +3282,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
     body: [
       ["Invoice sub-total", fmtN(row.subTotal)],
       ["Less: 6% income withholding tax", row.applyWht ? "(" + fmtN(row.wht) + ")" : "n/a"],
-      ["Add: 18% VAT", row.applyVat ? fmtN(row.vat) : "n/a"],
+      ["18% VAT (incl., net-neutral)", row.applyVat ? fmtN(row.vat) : "n/a"],
       ["NET PAID", fmtN(row.net)],
     ],
   });
@@ -3313,7 +3313,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
       <div class="box"><table class="amt">
         ${row2("Invoice sub-total", fmtN(row.subTotal))}
         ${row2("(−) 6% income withholding tax", row.applyWht ? "−" + fmtN(row.wht) : "n/a", row.applyWht ? "#b3261e" : "#999")}
-        ${row2("(+) 18% VAT", row.applyVat ? "+" + fmtN(row.vat) : "n/a", row.applyVat ? "#1b7a43" : "#999")}
+        ${row2("18% VAT (incl.)", row.applyVat ? fmtN(row.vat) : "n/a", "#555")}
         <tr class="net"><td style="padding-top:9px">NET PAID</td><td style="padding-top:9px;text-align:right;font-family:'Courier New',monospace;color:#1b7a43">UGX ${fmtN(row.net)}</td></tr>
       </table></div>
       <div class="sig">${(SIGNATORIES || []).map((s) => `<div><b>${s.name}</b><br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
@@ -3341,7 +3341,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
           <div style={{ marginTop: 12, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
             {amt("Invoice sub-total", fmtN(row.subTotal))}
             {amt("(−) 6% income withholding tax" + (row.applyWht ? "" : " · n/a"), row.applyWht ? "−" + fmtN(row.wht) : "—", row.applyWht ? "var(--danger)" : "var(--muted)")}
-            {amt("(+) 18% VAT" + (row.applyVat ? "" : " · n/a"), row.applyVat ? "+" + fmtN(row.vat) : "—", row.applyVat ? "var(--success)" : "var(--muted)")}
+            {amt("18% VAT (incl.)" + (row.applyVat ? "" : " · n/a"), row.applyVat ? fmtN(row.vat) : "—", "var(--text-2)")}
             <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed var(--border)", marginTop: 6, paddingTop: 8, fontWeight: 800 }}><span>Net paid</span><span className="mono" style={{ color: "var(--success)" }}>{ugx(row.net)}</span></div>
           </div>
         </div>
@@ -3418,7 +3418,7 @@ function SupplierDraft({ ctx, date, setDate }) {
     const out = [];
     out.push([`SUPPLIERS PAYMENT SCHEDULE : ${date}`].map((x) => `"${x}"`).join(","));
     if (chequeNo) out.push([`Cheque No.:,${chequeNo}`].map((x) => `"${x}"`).join(","));
-    out.push(["No", "Name", "TIN", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "(+)18% VAT", "Net Pay"].join(","));
+    out.push(["No", "Name", "TIN", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "18% VAT (incl.)", "Net Pay"].join(","));
     rows.forEach((r, i) => out.push([i + 1, r.name, r.tin, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.net].map((x) => `"${x ?? ""}"`).join(",")));
     out.push(["", "TOTAL", "", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
     out.push(...signatoryCsvLines());
@@ -3431,7 +3431,7 @@ function SupplierDraft({ ctx, date, setDate }) {
     title: "Suppliers Payment Schedule",
     subtitle: `Schedule date: ${fmtDate(date)} · ${rows.length} suppliers`,
     meta: [...(chequeNo ? [`Cheque No: ${chequeNo}`] : []), `Sub-total: UGX ${fmtN(t.subTotal)}   6% WHT: UGX ${fmtN(t.wht)}   18% VAT: UGX ${fmtN(t.vat)}   Net payable: UGX ${fmtN(t.net)}`],
-    head: ["#", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-) 6% WHT", "(+) 18% VAT", "Net Pay"],
+    head: ["#", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-) 6% WHT", "18% VAT (incl.)", "Net Pay"],
     body: rows.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.subTotal), r.applyWht ? fmtN(r.wht) : "n/a", r.applyVat ? fmtN(r.vat) : "n/a", fmtN(r.net)])
       .concat([["", "TOTAL", "", "", "", fmtN(t.subTotal), fmtN(t.wht), fmtN(t.vat), fmtN(t.net)]]),
     orientation: "landscape",
@@ -3473,10 +3473,10 @@ function SupplierDraft({ ctx, date, setDate }) {
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginBottom: 16 }}>
         <StatCard Icon={FileText} label="Sub-total (invoices)" value={ugxShort(t.subTotal)} meta={`${rows.length} suppliers`} tone="brand" />
         <StatCard Icon={TrendingUp} label="6% WHT (deducted)" value={ugxShort(t.wht)} meta="income withholding" tone="warning" />
-        <StatCard Icon={Plus} label="18% VAT (added)" value={ugxShort(t.vat)} meta="value-added tax" tone="accent" />
+        <StatCard Icon={Plus} label="18% VAT (net-neutral)" value={ugxShort(t.vat)} meta="collected & remitted" tone="accent" />
         <StatCard Icon={Check} label="Net payable" value={ugxShort(t.net)} meta="to suppliers" tone="success" />
       </div>
-      <Banner Icon={Landmark}>Suppliers Payment Schedule — lines are picked from the <b>Suppliers</b> register. Net Pay = Sub total − 6% income withholding tax + 18% VAT. Use <b>Manage suppliers</b> to add or remove suppliers, then enter each invoice amount on its row; bank details, the 6%, 18% and Net Pay fill in automatically.</Banner>
+      <Banner Icon={Landmark}>Suppliers Payment Schedule — lines are picked from the <b>Suppliers</b> register. Net Pay = Sub total − 6% income withholding tax, where the 6% is charged on the sub-total net of 18% VAT (the VAT is deducted to form the base, then added back, so it is net-neutral and only the withholding reduces the payment). Use <b>Manage suppliers</b> to add or remove suppliers, then enter each invoice amount on its row; bank details, the 6%, 18% and Net Pay fill in automatically.</Banner>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: "var(--text-2)" }}>Schedule date</span>
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
@@ -3506,7 +3506,7 @@ function SupplierDraft({ ctx, date, setDate }) {
               </tr>
               <tr>
                 <th style={sub}>Account Number</th><th style={sub}>Bank</th><th style={sub}>Branch</th>
-                <th style={subR}>Sub Total</th><th style={subR}>(−) 6% Withholding</th><th style={subR}>(+) 18% VAT</th>
+                <th style={subR}>Sub Total</th><th style={subR}>(−) 6% Withholding</th><th style={subR}>18% VAT (incl.)</th>
               </tr>
             </thead>
             <tbody>
@@ -3519,7 +3519,7 @@ function SupplierDraft({ ctx, date, setDate }) {
                   <td style={cell}>{dash(r.bankBranch)}</td>
                   <td style={cellR}>{fmtN(r.subTotal)}</td>
                   <td style={{ ...cellR, color: r.applyWht ? "var(--danger)" : "var(--muted)" }}>{r.applyWht ? (r.wht ? "−" + fmtN(r.wht) : "0") : "n/a"}</td>
-                  <td style={{ ...cellR, color: r.applyVat ? "var(--success)" : "var(--muted)" }}>{r.applyVat ? (r.vat ? "+" + fmtN(r.vat) : "0") : "n/a"}</td>
+                  <td style={{ ...cellR, color: "var(--text-2)" }}>{r.applyVat ? (r.vat ? fmtN(r.vat) : "0") : "n/a"}</td>
                   <td style={{ ...cellR, fontWeight: 700, color: "var(--success)" }}>{fmtN(r.net)}</td>
                   <td style={{ ...cell, textAlign: "right" }}>
                     <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
@@ -3605,11 +3605,11 @@ function ScheduleLineForm({ ctx, id }) {
           <FieldsetTitle>Invoice</FieldsetTitle>
           <Field label="Sub total (UGX)" full hint="Invoice amount before tax"><Input type="number" value={f.subTotal} onChange={set("subTotal")} /></Field>
           <Field label="6% income withholding"><Toggle on={f.applyWht} onClick={toggle("applyWht")} label={f.applyWht ? "Applied (−6%)" : "Not applied"} hint="Optional — deducted" /></Field>
-          <Field label="18% VAT"><Toggle on={f.applyVat} onClick={toggle("applyVat")} label={f.applyVat ? "Applied (+18%)" : "Not applied"} hint="Optional — added" /></Field>
+          <Field label="18% VAT"><Toggle on={f.applyVat} onClick={toggle("applyVat")} label={f.applyVat ? "Applied (net-neutral)" : "Not applied"} hint="Reduces the 6% base, then added back" /></Field>
           <div style={{ gridColumn: "1 / -1", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px" }}>
             <div style={previewRow}><span style={{ color: "var(--text-2)" }}>Sub total</span><span className="mono">{ugx(d.subTotal)}</span></div>
             <div style={previewRow}><span style={{ color: "var(--text-2)" }}>(−) 6% income withholding{f.applyWht ? "" : " · off"}</span><span className="mono" style={{ color: f.applyWht ? "var(--danger)" : "var(--muted)" }}>{f.applyWht ? "−" + ugx(d.wht) : "—"}</span></div>
-            <div style={previewRow}><span style={{ color: "var(--text-2)" }}>(+) 18% VAT{f.applyVat ? "" : " · off"}</span><span className="mono" style={{ color: f.applyVat ? "var(--success)" : "var(--muted)" }}>{f.applyVat ? "+" + ugx(d.vat) : "—"}</span></div>
+            <div style={previewRow}><span style={{ color: "var(--text-2)" }}>18% VAT (incl.){f.applyVat ? "" : " · off"}</span><span className="mono" style={{ color: f.applyVat ? "var(--text-2)" : "var(--muted)" }}>{f.applyVat ? ugx(d.vat) : "—"}</span></div>
             <div style={{ ...previewRow, borderTop: "1px dashed var(--border)", marginTop: 4, paddingTop: 8, fontWeight: 700 }}><span>Net Pay</span><span className="mono" style={{ color: "var(--success)" }}>{ugx(d.net)}</span></div>
           </div>
         </div>
