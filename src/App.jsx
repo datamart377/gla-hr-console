@@ -2998,7 +2998,8 @@ function SupplierSchedule({ ctx }) {
   const processSchedule = async () => {
     const lines = store.supplierSchedule || [];
     if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Add line” to pick a supplier from the register and enter the invoice amount."); return; }
-    const resolved = lines.map((line) => resolveScheduleLine(line));
+    const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
+    const resolved = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
     const held = resolved.filter((r) => r.held);
     const payableLines = resolved.filter((r) => !r.held);
     if (!payableLines.length) { alert("Every line on this schedule is a frozen supplier (payment held), so there is nothing to pay.\n\nReactivate a supplier in the register, or add a payable line, before processing."); return; }
@@ -3413,7 +3414,9 @@ function ManageScheduleSuppliers({ ctx }) {
 function SupplierDraft({ ctx, date, setDate }) {
   const { store, setModal, reload } = ctx;
   const lines = store.supplierSchedule || [];
-  const rows = lines.map((line) => resolveScheduleLine(line));
+  // Freeze status lives in the live store, not the seed resolveScheduleLine() reads, so decide held here.
+  const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
+  const rows = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
   const payable = rows.filter((r) => !r.held); // frozen suppliers' lines are held out of payment
   const heldRows = rows.filter((r) => r.held);
   const t = payable.reduce((a, r) => ({ subTotal: a.subTotal + r.subTotal, wht: a.wht + r.wht, vat: a.vat + r.vat, net: a.net + r.net }), { subTotal: 0, wht: 0, vat: 0, net: 0 });
