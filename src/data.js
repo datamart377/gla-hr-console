@@ -245,7 +245,7 @@ data.ledgerColumns = [];
 data.payrollRuns = [];
 data.bankApprovals = []; // two-step digital sign-off records for bank reports
 
-// Procurement. Net = Sub total − 6% WHT (charged on the sub-total net of 18% VAT; VAT net-neutral).
+// Procurement. Net = Sub total − 6% WHT (VAT-inclusive sub-total ÷ 1.18 is the WHT base; VAT net-neutral).
 export const SUPPLIER_WHT_RATE = 0.06; // (−) 6% income withholding tax
 export const SUPPLIER_VAT_RATE = 0.18; // (+) 18% VAT
 export const SUPPLIER_CATEGORIES = [
@@ -275,16 +275,20 @@ data.supplierSchedule = [
 ];
 
 // Compute WHT / VAT / net for a schedule line.
-// The 18% VAT is deducted from the sub-total to form the base, the 6% withholding
-// is charged on that VAT-net base, and the VAT is then added back — so VAT is
-// net-neutral and only the withholding reduces the payment. Net = Sub-total − WHT.
-//   e.g. 1,200,000 − 18% = 984,000; 984,000 − 6% = 924,960; + 216,000 VAT = 1,140,960.
+// The sub-total is VAT-inclusive: divide by 1.18 to get the VAT-exclusive base,
+// the difference is the 18% VAT, the 6% withholding is charged on that VAT-exclusive
+// base, and the VAT is added back — so VAT is net-neutral and only the withholding
+// reduces the payment. Net = Sub-total − WHT.
+//   e.g. 1,200,000 / 1.18 = 1,016,949 (VAT 183,051); 1,016,949 − 6% = 955,932; + VAT = 1,138,983.
 export function deriveSupplier(s) {
   const subTotal = Number(s.subTotal) || 0;
   const applyWht = s.applyWht !== false; // 6% withholding — optional, on by default
   const applyVat = s.applyVat !== false; // 18% VAT — optional, on by default
-  const vat = applyVat ? Math.round(subTotal * ((data.settings?.payroll?.vat ?? 18) / 100)) : 0;
-  const wht = applyWht ? Math.round((subTotal - vat) * ((data.settings?.payroll?.wht ?? 6) / 100)) : 0;
+  const vatRate = data.settings?.payroll?.vat ?? 18;
+  // VAT extracted from the inclusive sub-total: subTotal × 18/118.
+  const vat = applyVat ? Math.round(subTotal * (vatRate / (100 + vatRate))) : 0;
+  const base = subTotal - vat; // VAT-exclusive amount
+  const wht = applyWht ? Math.round(base * ((data.settings?.payroll?.wht ?? 6) / 100)) : 0;
   return { subTotal, applyWht, applyVat, wht, vat, net: subTotal - wht };
 }
 // Join a schedule line with its supplier master + computed amounts → a full row.

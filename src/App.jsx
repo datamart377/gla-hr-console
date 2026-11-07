@@ -3476,7 +3476,7 @@ function SupplierDraft({ ctx, date, setDate }) {
         <StatCard Icon={Plus} label="18% VAT (net-neutral)" value={ugxShort(t.vat)} meta="collected & remitted" tone="accent" />
         <StatCard Icon={Check} label="Net payable" value={ugxShort(t.net)} meta="to suppliers" tone="success" />
       </div>
-      <Banner Icon={Landmark}>Suppliers Payment Schedule — lines are picked from the <b>Suppliers</b> register. Net Pay = Sub total − 6% income withholding tax, where the 6% is charged on the sub-total net of 18% VAT (the VAT is deducted to form the base, then added back, so it is net-neutral and only the withholding reduces the payment). Use <b>Manage suppliers</b> to add or remove suppliers, then enter each invoice amount on its row; bank details, the 6%, 18% and Net Pay fill in automatically.</Banner>
+      <Banner Icon={Landmark}>Suppliers Payment Schedule — lines are picked from the <b>Suppliers</b> register. Net Pay = Sub total − 6% income withholding tax. The sub-total is VAT-inclusive: it is divided by 1.18 to get the VAT-exclusive base, the 6% is charged on that base, and the 18% VAT is added back — so VAT is net-neutral and only the withholding reduces the payment. Use <b>Manage suppliers</b> to add or remove suppliers, then enter each invoice amount on its row; bank details, the 6%, 18% and Net Pay fill in automatically.</Banner>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: "var(--text-2)" }}>Schedule date</span>
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
