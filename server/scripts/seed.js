@@ -54,7 +54,8 @@ export async function doSeed() {
     console.log("seeded   1  settings");
 
     const hash = await bcrypt.hash(config.seedPassword, 10);
-    await client.query("TRUNCATE users RESTART IDENTITY");
+    // CASCADE so the password_resets foreign key doesn't abort the reseed.
+    await client.query("TRUNCATE users RESTART IDENTITY CASCADE");
     let users = 0;
     for (const e of data.employees || []) {
       if (!e.email) continue;
