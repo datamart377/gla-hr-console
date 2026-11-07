@@ -7,7 +7,7 @@ import {
   HeartHandshake, Baby, IdCard, FileCheck, Contact,
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
-  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw,
+  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
