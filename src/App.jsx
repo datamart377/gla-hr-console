@@ -335,7 +335,7 @@ export default function App() {
     }
   };
 
-  const ctx = { store, empById, reload, setModal, auth, currentEmp: auth ? empById(auth.empId) : null, signOut };
+  const ctx = { store, setStore, empById, reload, setModal, auth, currentEmp: auth ? empById(auth.empId) : null, signOut };
 
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
@@ -3649,11 +3649,24 @@ function Suppliers({ ctx }) {
   const onSchedule = new Set((store.supplierSchedule || []).map((l) => l.supplierId)).size;
   const statusTone = (s) => (s === "Inactive" ? "muted" : s === "Frozen" ? "warning" : "success");
   const addToSchedule = async (s) => { await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }); await ctx.reload(); };
+  // Optimistic status change: flip the badge immediately, persist, then reload;
+  // revert and explain if the server call fails (expired session, cold server, etc.).
+  const setStatus = async (s, status) => {
+    const prev = s.status || "Active";
+    ctx.setStore((st) => ({ ...st, suppliers: (st.suppliers || []).map((x) => (x.id === s.id ? { ...x, status } : x)) }));
+    try {
+      await suppliersApi.update(s.id, { status });
+      await ctx.reload();
+    } catch (e) {
+      ctx.setStore((st) => ({ ...st, suppliers: (st.suppliers || []).map((x) => (x.id === s.id ? { ...x, status: prev } : x)) }));
+      alert(`Couldn't ${status === "Frozen" ? "freeze" : "reactivate"} “${s.name}”.\n\n${e && e.message ? e.message : "The server didn't respond. If you've been idle a while, sign out and back in, then try again."}`);
+    }
+  };
   const toggleFreeze = async (s) => {
-    if (s.status === "Frozen") { await suppliersApi.update(s.id, { status: "Active" }); await ctx.reload(); return; }
+    if (s.status === "Frozen") { await setStatus(s, "Active"); return; }
     const onDraft = scheduleCount(s.id) > 0;
     if (window.confirm(`Freeze payments for “${s.name}”?\n\nThey stay in the register but cannot be paid: they can't be added to a schedule${onDraft ? ", and their line already on the current draft will be held (excluded from the net payable, bank report and processing)" : ""}. You can reactivate them any time.`)) {
-      await suppliersApi.update(s.id, { status: "Frozen" }); await ctx.reload();
+      await setStatus(s, "Frozen");
     }
   };
   return (
