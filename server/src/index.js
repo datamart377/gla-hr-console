@@ -17,6 +17,18 @@ import notifyRoutes from "./routes/notify.js";
 import accountsRoutes from "./routes/accounts.js";
 import { crudRouter } from "./routes/crud.js";
 
+// Refuse to run in production with the built-in insecure JWT signing key —
+// otherwise anyone who knows the default could forge admin tokens.
+const INSECURE_JWT = "dev-insecure-secret-change-me";
+if (config.jwt.secret === INSECURE_JWT) {
+  const msg = "JWT_SECRET is not set — the built-in insecure default is in use. Set a strong, random JWT_SECRET in the environment (e.g. a 32+ byte hex string).";
+  if (process.env.NODE_ENV === "production") {
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  }
+  console.warn(`WARNING: ${msg}`);
+}
+
 const app = express();
 
 // ---- Security & platform middleware ----
