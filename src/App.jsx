@@ -248,19 +248,19 @@ function Rating({ value }) {
 
 /* ================================== APP =================================== */
 const NAV = [
-  { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
-  { id: "employees", label: "Employees", Icon: Users },
-  { id: "approvals", label: "Profile Approvals", Icon: ClipboardCheck },
-  { id: "leave", label: "Leave", Icon: CalendarDays },
-  { id: "attendance", label: "Attendance", Icon: Clock },
-  { id: "payroll", label: "Payroll", Icon: Wallet },
-  { id: "advances", label: "Salary Advances", Icon: Banknote },
-  { id: "suppliers", label: "Suppliers", Icon: Building2 },
-  { id: "stock", label: "Stock", Icon: Boxes },
-  { id: "appraisals", label: "Appraisals", Icon: Star },
-  { id: "reports", label: "Reports", Icon: BarChart3 },
-  { id: "sessions", label: "Sessions", Icon: ShieldCheck },
-  { id: "settings", label: "Settings", Icon: SettingsIcon },
+  { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "Overview" },
+  { id: "employees", label: "Employees", Icon: Users, section: "People" },
+  { id: "approvals", label: "Profile Approvals", Icon: ClipboardCheck, section: "People" },
+  { id: "attendance", label: "Attendance", Icon: Clock, section: "People" },
+  { id: "leave", label: "Leave", Icon: CalendarDays, section: "People" },
+  { id: "appraisals", label: "Appraisals", Icon: Star, section: "People" },
+  { id: "payroll", label: "Payroll", Icon: Wallet, section: "Finance" },
+  { id: "advances", label: "Salary Advances", Icon: Banknote, section: "Finance" },
+  { id: "suppliers", label: "Suppliers", Icon: Building2, section: "Finance" },
+  { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
+  { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
+  { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
+  { id: "settings", label: "Settings", Icon: SettingsIcon, section: "Admin" },
 ];
 // Current user's role definition (from Settings). Admins default to full access.
 function currentRole(ctx) {
@@ -1517,12 +1517,15 @@ function Sidebar({ view, setView, store, nav = NAV }) {
         </div>
       </div>
       <nav style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: "14px 12px 6px" }}>Main</div>
-        {nav.map(({ id, label, Icon }) => {
+        {nav.map((item, i) => {
+          const { id, label, Icon, section } = item;
           const active = view === id;
           const count = counts[id];
+          const showHeader = section && (i === 0 || nav[i - 1].section !== section);
           return (
-            <button key={id} onClick={() => setView(id)}
+            <React.Fragment key={id}>
+              {showHeader && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: i === 0 ? "6px 12px 6px" : "16px 12px 6px" }}>{section}</div>}
+            <button onClick={() => setView(id)}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 9, border: "none", width: "100%", textAlign: "left", fontWeight: 500, fontSize: 13.5, color: active ? "var(--sidebar-active-fg)" : "var(--sidebar-fg)", background: active ? "var(--sidebar-active-bg)" : "transparent", transition: "background .12s, color .12s" }}
               onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,.05)"; }}
               onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}>
@@ -1532,6 +1535,7 @@ function Sidebar({ view, setView, store, nav = NAV }) {
                 <span className="mono" style={{ marginLeft: "auto", fontSize: 11, background: "rgba(255,255,255,.09)", color: "var(--sidebar-fg)", padding: "1px 7px", borderRadius: 20 }}>{count}</span>
               )}
             </button>
+            </React.Fragment>
           );
         })}
       </nav>
