@@ -675,7 +675,7 @@ function Login({ employees, live, authenticate, notice }) {
 
           <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.62)", marginTop: 18, lineHeight: 1.75 }}>
             <div>Tirupati Mazima Mall &middot; Ggaba Road &middot; Kampala, Uganda</div>
-            <div style={{ fontFamily: "var(--font-mono)", letterSpacing: ".04em", marginTop: 2 }}>glassociates.co.ug &middot; People &middot; Payroll &middot; Leave &middot; Stores</div>
+            <div style={{ fontFamily: "var(--font-mono)", letterSpacing: ".04em", marginTop: 2 }}>glassociates.co.ug</div>
           </div>
         </div>
       </div>
