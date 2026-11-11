@@ -7,15 +7,15 @@
    ------------------------------------------------------------------------- */
 import ExcelJS from "exceljs";
 import { COMPANY, SIGNATORIES } from "./reportPdf.js";
-import { GLA_LOGO } from "./logo.js";
+import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 
 const argb = (hex) => "FF" + hex;
-const NAVY = argb("103754");
-const ORANGE = argb("E86C2B");
+const NAVY = argb("5A3A2A");      // deep brown (rebrand — dark bars, from the logo)
+const ORANGE = argb("B08070");    // logo clay accent
 const INK = argb("10131A");
 const BODY = argb("464E58");
 const MUTED = argb("8C949D");
-const ZEBRA = argb("F4F7F9");
+const ZEBRA = argb("F7F3F0");     // warm alternate-row tint
 const RULE = argb("D6DCE2");
 const WHITE = argb("FFFFFF");
 const GREEN = argb("155A3C");
@@ -68,16 +68,16 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     if (height) row.height = height; return row;
   };
 
-  // Branded letterhead — logo top-left, address lines right-aligned, orange/navy split rule.
+  // Master header banner (logo + company name + tagline + address, baked in) across
+  // the top, then a brown/clay split rule. The banner image already carries the address.
   const letterhead = () => {
     const first = ws.rowCount + 1;
-    COMPANY.lines.forEach((ln) => bandRow(ln, { font: fnt({ size: 9, color: { argb: MUTED } }), alignment: { horizontal: "right", vertical: "middle" }, height: 15 }));
-    while (ws.rowCount < first + 3) bandRow("", { height: 15 });
+    const bannerW = 640, bannerH = Math.round(bannerW / GLA_HEADER_RATIO);
+    const rowH = 15, nRows = Math.ceil(bannerH / rowH);
+    for (let i = 0; i < nRows; i++) bandRow("", { height: rowH });
     const ruleRow = ws.addRow([""]); merge(ruleRow.number, 1, NCOLS);
     for (let c = 1; c <= NCOLS; c++) ruleRow.getCell(c).border = { bottom: { style: "medium", color: { argb: c <= 2 ? ORANGE : NAVY } } };
-    // One-cell anchor at native 2.5:1 (320×128 logo → 175×70). No editAs — that
-    // attribute is only valid on a two-cell anchor and makes Excel mis-render the image.
-    try { const id = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(id, { tl: { col: 0.05, row: first - 1 + 0.15 }, ext: { width: 175, height: 70 } }); } catch (e) { /* logo optional */ }
+    try { const id = wb.addImage({ base64: GLA_HEADER, extension: "png" }); ws.addImage(id, { tl: { col: 0.05, row: first - 1 + 0.1 }, ext: { width: bannerW, height: bannerH } }); } catch (e) { /* header optional */ }
   };
 
   letterhead();
@@ -211,11 +211,13 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
   const merge = (r) => ws.mergeCells(r, 1, r, N);
   const band = (text, style) => { const row = ws.addRow([text]); merge(row.number); const c = row.getCell(1); if (style?.font) c.font = style.font; c.alignment = style?.alignment || { horizontal: "left" }; if (style?.height) row.height = style.height; return row.number; };
 
-  COMPANY.lines.forEach((ln) => band(ln, { font: fnt({ size: 9, color: { argb: MUTED } }), alignment: { horizontal: "right" }, height: 15 }));
-  while (ws.rowCount < 4) band("", { height: 15 });
+  // Master header banner (logo + company name + tagline + address) across the top.
+  const bannerW = 680, bannerH = Math.round(bannerW / GLA_HEADER_RATIO);
+  const nRows = Math.ceil(bannerH / 15);
+  for (let i = 0; i < nRows; i++) band("", { height: 15 });
   const rule = ws.addRow([""]); merge(rule.number);
-  for (let c = 1; c <= N; c++) rule.getCell(c).border = { bottom: { style: "medium", color: { argb: NAVY } } };
-  try { const imgId = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(imgId, { tl: { col: 0.05, row: 0.15 }, ext: { width: 175, height: 70 } }); } catch (e) {}
+  for (let c = 1; c <= N; c++) rule.getCell(c).border = { bottom: { style: "medium", color: { argb: c <= 2 ? ORANGE : NAVY } } };
+  try { const imgId = wb.addImage({ base64: GLA_HEADER, extension: "png" }); ws.addImage(imgId, { tl: { col: 0.05, row: 0.1 }, ext: { width: bannerW, height: bannerH } }); } catch (e) {}
 
   ws.addRow([]);
   band(eyebrow, { font: fnt({ size: 9, bold: true, color: { argb: ORANGE } }) });

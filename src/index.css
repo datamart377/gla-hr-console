@@ -24,11 +24,11 @@
   /* Accents */
   --ink: #16181d;           /* primary buttons, dark bars */
   --ink-fg: #ffffff;
-  --brand: #2f6f9f;         /* informational blue — icons, rails, links */
-  --brand-2: #245a83;
-  --accent: #e3ac2b;        /* gold — brand mark / secondary accent */
-  --accent-ink: #2a1e02;
-  --accent-dim: #fbf1d2;
+  --brand: #8a5640;         /* logo brown — icons, rails, links */
+  --brand-2: #6b4230;
+  --accent: #b08070;        /* logo clay — brand mark / secondary accent */
+  --accent-ink: #2e1d14;
+  --accent-dim: #f3e8e2;
 
   /* Semantic (light pastel bg + saturated fg) */
   --success: #12894e; --success-dim: #e4f4ec;

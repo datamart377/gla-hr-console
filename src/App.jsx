@@ -13,7 +13,7 @@ import {
 import L from "leaflet";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
-import { GLA_LOGO } from "./logo.js";
+import { GLA_HEADER } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
@@ -460,7 +460,7 @@ function IdleWarning({ onStay, onSignOut }) {
         <div style={{ fontSize: 13, lineHeight: 1.35 }}>You’ll be signed out shortly due to inactivity.</div>
         <div style={{ flex: 1 }} />
         <button onClick={onSignOut} style={{ background: "transparent", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "7px 11px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Sign out</button>
-        <button onClick={onStay} style={{ background: "#f0601f", border: "none", color: "#fff", borderRadius: 8, padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Stay signed in</button>
+        <button onClick={onStay} style={{ background: "#8a5640", border: "none", color: "#fff", borderRadius: 8, padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Stay signed in</button>
       </div>
     </div>
   );
@@ -586,7 +586,7 @@ function Login({ employees, live, authenticate, notice }) {
     } catch (e) { setErr(e.message || "Could not reset the password. The link may have expired — request a new one."); }
     setBusy(false);
   };
-  const linkStyle = { background: "none", border: "none", padding: 0, color: "#f0601f", fontWeight: 600, fontSize: 12.5, cursor: "pointer" };
+  const linkStyle = { background: "none", border: "none", padding: 0, color: "#8a5640", fontWeight: 600, fontSize: 12.5, cursor: "pointer" };
   const source = (employees && employees.length) ? employees : DEMO_ACCOUNTS;
   const pickByRole = (r) => source.find((e) => (e.role || "staff") === r);
   const consoleAccounts = ["admin", "hr", "finance"].map(pickByRole).filter(Boolean);
@@ -613,10 +613,10 @@ function Login({ employees, live, authenticate, notice }) {
   };
   const sectionLabel = (t) => <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 8px", fontFamily: "var(--font-mono)", letterSpacing: ".08em", textTransform: "uppercase" }}>{t}</div>;
   return (
-<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1200px 620px at 50% -22%, #0a4f6a, transparent 55%), linear-gradient(162deg, #00334655 0%, #002b3d 0%, #013243 55%, #00202c 100%)" }}>
+<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1200px 620px at 50% -22%, #6b4a36, transparent 55%), linear-gradient(162deg, #2a1a1255 0%, #241510 0%, #2a1912 55%, #180e09 100%)" }}>
         <svg viewBox="0 0 1440 240" preserveAspectRatio="none" aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: "100%", height: 200, pointerEvents: "none" }}>
-          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#f0601f" fillOpacity="0.10" />
-          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#f0601f" fillOpacity="0.20" />
+          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#8a5640" fillOpacity="0.10" />
+          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#8a5640" fillOpacity="0.20" />
         </svg>
 
         <div style={{ width: "100%", maxWidth: 440, position: "relative", zIndex: 1 }}>
@@ -627,10 +627,10 @@ function Login({ employees, live, authenticate, notice }) {
 
           <Card style={{ padding: "28px 26px", borderRadius: 16, border: "1px solid rgba(255,255,255,.10)", boxShadow: "0 28px 64px -22px rgba(0,0,0,.6)" }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
-              <img src={GLA_LOGO} alt="Global Link Associates" style={{ width: 212, maxWidth: "80%", height: "auto", display: "block" }} />
+              <img src={GLA_HEADER} alt="Global Link Associates Ltd" style={{ width: 320, maxWidth: "92%", height: "auto", display: "block" }} />
             </div>
             <div style={{ height: 1, background: "linear-gradient(90deg, transparent, var(--border), transparent)", margin: "16px 0 20px" }} />
-            <h2 style={{ fontSize: 19, fontWeight: 800, color: "#002b3d" }}>{mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Sign in to your portal"}</h2>
+            <h2 style={{ fontSize: 19, fontWeight: 800, color: "#241510" }}>{mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Sign in to your portal"}</h2>
             <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 4, marginBottom: 18 }}>
               {mode === "forgot" ? "Enter your work email and we'll send you a link to set a new password."
                 : mode === "reset" ? "Set a new password for your account. Minimum 8 characters."
@@ -648,12 +648,12 @@ function Login({ employees, live, authenticate, notice }) {
                   </button>
                 </div></Field>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)", cursor: "pointer", userSelect: "none" }}>
-                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#f0601f", cursor: "pointer" }} />
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#8a5640", cursor: "pointer" }} />
                   Keep me signed in on this device
                 </label>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
                 {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
-                <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("forgot"); clearMsgs(); }}>Forgot password?</button></div>
               </div>
             )}
@@ -663,7 +663,7 @@ function Login({ employees, live, authenticate, notice }) {
                 <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && sendReset()} /></Field>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
                 {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
-                <Btn variant="primary" disabled={busy} onClick={sendReset} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><Mail size={16} />{busy ? "Sending…" : "Send reset link"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={sendReset} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><Mail size={16} />{busy ? "Sending…" : "Send reset link"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
               </div>
             )}
@@ -673,7 +673,7 @@ function Login({ employees, live, authenticate, notice }) {
                 <Field label="New password"><Input type="password" value={np} onChange={(e) => { setNp(e.target.value); clearMsgs(); }} placeholder="At least 8 characters" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
                 <Field label="Confirm new password"><Input type="password" value={np2} onChange={(e) => { setNp2(e.target.value); clearMsgs(); }} placeholder="Re-enter new password" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
-                <Btn variant="primary" disabled={busy} onClick={doReset} style={{ justifyContent: "center", padding: "13px", background: "#f0601f", borderColor: "#f0601f", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(240,96,31,.65)" }}><ShieldCheck size={16} />{busy ? "Updating…" : "Update password"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={doReset} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><ShieldCheck size={16} />{busy ? "Updating…" : "Update password"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
               </div>
             )}
@@ -1010,8 +1010,8 @@ function MyPortal({ ctx, setSv }) {
 
       {/* Prominent clock-in — the first and primary action on the staff landing page. */}
       <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16, border: `1.5px solid ${today ? "var(--success)" : "var(--brand)"}` }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "20px 22px", background: today ? "rgba(18,137,78,.06)" : "rgba(47,111,159,.07)" }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, flex: "none", display: "grid", placeItems: "center", background: today ? "rgba(18,137,78,.14)" : "rgba(47,111,159,.14)", color: today ? "var(--success)" : "var(--brand)" }}><LocateFixed size={26} /></div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "20px 22px", background: today ? "rgba(18,137,78,.06)" : "rgba(138,86,64,.07)" }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, flex: "none", display: "grid", placeItems: "center", background: today ? "rgba(18,137,78,.14)" : "rgba(138,86,64,.14)", color: today ? "var(--success)" : "var(--brand)" }}><LocateFixed size={26} /></div>
           <div style={{ minWidth: 200, flex: 1 }}>
             <div style={{ fontWeight: 800, fontSize: 17, color: "var(--text)" }}>{today ? "You're clocked in today" : "Clock in for today"}</div>
             <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 3 }}>{today ? `Recorded at ${today.clockIn || "—"}${today.site ? ` · ${today.site}` : ""}` : "Tap below — your GPS location is checked against the nearest site geofence."}</div>
@@ -1066,7 +1066,7 @@ function MyClockIn({ ctx }) {
     <>
       <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "18px 20px" }}>
-          <div style={{ width: 46, height: 46, borderRadius: 12, flex: "none", display: "grid", placeItems: "center", background: "rgba(47,111,159,.12)", color: "var(--brand)" }}><Smartphone size={22} /></div>
+          <div style={{ width: 46, height: 46, borderRadius: 12, flex: "none", display: "grid", placeItems: "center", background: "rgba(138,86,64,.12)", color: "var(--brand)" }}><Smartphone size={22} /></div>
           <div style={{ minWidth: 220, flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>Clock in with your location</div>
             <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 2 }}>Your GPS point is checked against the nearest site geofence.</div>
@@ -2322,7 +2322,7 @@ function ClockInCard({ ctx }) {
   return (
     <Card style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "18px 20px" }}>
-        <div style={{ width: 46, height: 46, borderRadius: 12, flex: "none", display: "grid", placeItems: "center", background: "rgba(47,111,159,.12)", color: "var(--brand)" }}><Smartphone size={22} /></div>
+        <div style={{ width: 46, height: 46, borderRadius: 12, flex: "none", display: "grid", placeItems: "center", background: "rgba(138,86,64,.12)", color: "var(--brand)" }}><Smartphone size={22} /></div>
         <div style={{ minWidth: 220, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Clock in with your location</div>
           <div style={{ color: "var(--text-2)", fontSize: 12.5, marginTop: 2 }}>Staff capture attendance on their phone; the GPS point is verified against the site geofence.</div>
@@ -2424,7 +2424,7 @@ function ClockInModal({ ctx, empId }) {
       {/* LOCATION */}
       {(phase === "geo" || phase === "error") && (
         <div style={{ textAlign: "center", padding: "4px 0" }}>
-          <div style={{ width: 60, height: 60, borderRadius: 16, margin: "0 auto 14px", display: "grid", placeItems: "center", background: "rgba(47,111,159,.12)", color: "var(--brand)" }}><LocateFixed size={28} /></div>
+          <div style={{ width: 60, height: 60, borderRadius: 16, margin: "0 auto 14px", display: "grid", placeItems: "center", background: "rgba(138,86,64,.12)", color: "var(--brand)" }}><LocateFixed size={28} /></div>
           <div style={{ fontWeight: 600, color: "var(--text)" }}>Clock in with your GPS location</div>
           <div style={{ fontSize: 12.5, color: "var(--text-2)", margin: "6px auto 16px", maxWidth: 360 }}>Your phone's coordinates are checked against the nearest site geofence and stamped on the attendance record.</div>
           <Btn variant="primary" onClick={useLocation} style={{ margin: "0 auto" }}><Navigation size={16} />Use my current location</Btn>
@@ -4989,7 +4989,7 @@ function MovementForm({ ctx, type, itemId }) {
 }
 
 /* ============================= HR Reports =============================== */
-const CAT = ["#2f6f9f", "#e3ac2b", "#12894e", "#8a5cc8", "#c85a7d", "#3ba39a", "#b9791a", "#5a7fd6"];
+const CAT = ["#8a5640", "#b08070", "#12894e", "#8a5cc8", "#c85a7d", "#3ba39a", "#b9791a", "#5a7fd6"];
 const yearsBetween = (iso, to = TODAY) => { if (!iso) return null; const a = new Date(iso + "T00:00:00"), b = new Date(to + "T00:00:00"); if (isNaN(a) || isNaN(b)) return null; return (b - a) / (365.25 * 24 * 3600 * 1000); };
 const avgOf = (arr) => (arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0);
 
@@ -6123,9 +6123,9 @@ function GeoMapReport({ ctx }) {
 
     // Site geofence circles (metres) + a small centre dot.
     getGeofences().forEach((g) => {
-      L.circle([g.lat, g.lng], { radius: g.radius, color: "#2f6f9f", weight: 1.5, opacity: 0.75, fillColor: "#2f6f9f", fillOpacity: 0.07, dashArray: "5 4" })
+      L.circle([g.lat, g.lng], { radius: g.radius, color: "#8a5640", weight: 1.5, opacity: 0.75, fillColor: "#8a5640", fillOpacity: 0.07, dashArray: "5 4" })
         .addTo(map).bindPopup(`<b>${g.name}</b><br>Site geofence · ${g.radius} m radius`);
-      L.circleMarker([g.lat, g.lng], { radius: 3, color: "#2f6f9f", fillColor: "#2f6f9f", fillOpacity: 1, weight: 1 }).addTo(map);
+      L.circleMarker([g.lat, g.lng], { radius: 3, color: "#8a5640", fillColor: "#8a5640", fillOpacity: 1, weight: 1 }).addTo(map);
       // Note: site geofences are NOT added to `bounds` — with hundreds of sites
       // nationwide, the map focuses on the actual clock-ins instead.
     });
@@ -6197,7 +6197,7 @@ function GeoMapReport({ ctx }) {
             {legendDot("#12894e", "Within site geofence")}
             {legendDot("#c23a29", "Outside any geofence")}
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)" }}>
-              <span style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px dashed #2f6f9f", background: "rgba(47,111,159,.1)" }} />Site geofence
+              <span style={{ width: 14, height: 14, borderRadius: "50%", border: "1.5px dashed #8a5640", background: "rgba(138,86,64,.1)" }} />Site geofence
             </span>
             <span style={{ fontSize: 11.5, color: "var(--muted)", marginLeft: "auto" }}>Map data © OpenStreetMap contributors</span>
           </div>

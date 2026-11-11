@@ -13,7 +13,7 @@
    ------------------------------------------------------------------------- */
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { GLA_LOGO } from "./logo.js";
+import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 
 export const COMPANY = {
   name: "Global Link Associates Ltd",
@@ -47,14 +47,14 @@ export const SIGNATORIES = [
 const INK = [16, 24, 33];        // near-black headings
 const BODY = [70, 78, 88];       // grey body text
 const MUTED = [140, 148, 157];   // captions / footer
-const BRAND = [16, 55, 84];      // deep navy (from the logo)
-const ORANGE = [232, 108, 43];   // logo orange
+const BRAND = [90, 58, 42];      // deep brown (from the logo)
+const ORANGE = [176, 128, 112];  // logo clay accent (#B08070)
 const RULE = [214, 220, 226];    // hairlines
-const ZEBRA = [244, 247, 249];   // alternate rows
-const KVFILL = [239, 243, 246];  // key-column shading
+const ZEBRA = [247, 243, 240];   // alternate rows (warm tint)
+const KVFILL = [245, 239, 235];  // key-column shading (warm tint)
 
 const MARGIN = 42;
-const LOGO_W = 132, LOGO_H = LOGO_W / 2.5; // native 320×128 → 2.5:1
+const HEADER_MAX_H = 96;         // cap the letterhead banner height
 
 const todayLong = () =>
   new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
@@ -67,20 +67,19 @@ const refCode = () => {
 /* ------------------------------ letterhead ------------------------------- */
 function drawLetterhead(doc) {
   const pageW = doc.internal.pageSize.getWidth();
-  const top = 34;
-  try { doc.addImage(GLA_LOGO, "PNG", MARGIN, top, LOGO_W, LOGO_H); } catch (e) { /* logo optional */ }
+  const top = 30;
+  // Master header banner (logo + company name + tagline + address), capped in height
+  // and left-aligned so it stays compact on both portrait and landscape pages.
+  let w = pageW - MARGIN * 2;
+  let h = w / GLA_HEADER_RATIO;
+  if (h > HEADER_MAX_H) { h = HEADER_MAX_H; w = h * GLA_HEADER_RATIO; }
+  try { doc.addImage(GLA_HEADER, "PNG", MARGIN, top, w, h); } catch (e) { /* header optional */ }
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  doc.setTextColor(...BODY);
-  let cy = top + 6;
-  COMPANY.lines.forEach((ln) => { doc.text(ln, pageW - MARGIN, cy, { align: "right" }); cy += 11.5; });
-
-  const ruleY = Math.max(top + LOGO_H, cy) + 9;
+  const ruleY = top + h + 9;
   doc.setDrawColor(...BRAND);
   doc.setLineWidth(2);
   doc.line(MARGIN, ruleY, pageW - MARGIN, ruleY);
-  doc.setDrawColor(...ORANGE);      // short accent segment under the logo side
+  doc.setDrawColor(...ORANGE);      // short clay accent segment under the logo side
   doc.setLineWidth(2);
   doc.line(MARGIN, ruleY, MARGIN + 150, ruleY);
   return ruleY + 22;
