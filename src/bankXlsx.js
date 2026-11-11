@@ -75,7 +75,9 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     while (ws.rowCount < first + 3) bandRow("", { height: 15 });
     const ruleRow = ws.addRow([""]); merge(ruleRow.number, 1, NCOLS);
     for (let c = 1; c <= NCOLS; c++) ruleRow.getCell(c).border = { bottom: { style: "medium", color: { argb: c <= 2 ? ORANGE : NAVY } } };
-    try { const id = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(id, { tl: { col: 0.05, row: first - 1 + 0.15 }, ext: { width: 176, height: 70 }, editAs: "oneCell" }); } catch (e) { /* logo optional */ }
+    // One-cell anchor at native 2.5:1 (320×128 logo → 175×70). No editAs — that
+    // attribute is only valid on a two-cell anchor and makes Excel mis-render the image.
+    try { const id = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(id, { tl: { col: 0.05, row: first - 1 + 0.15 }, ext: { width: 175, height: 70 } }); } catch (e) { /* logo optional */ }
   };
 
   letterhead();
@@ -147,9 +149,9 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
   }
   tRow.height = 20;
 
-  // Page 2 — repeated letterhead + approved-signatory block (matches the PDF).
-  tRow.addPageBreak();
-  letterhead();
+  // Approved-signatory block — directly after the table on the same page, like the PDF
+  // (no forced page break or repeated letterhead, which stacked a second logo on screen).
+  ws.addRow([]);
   ws.addRow([]);
   bandRow("Approved Signatory", { font: fnt({ size: 11, bold: true, color: { argb: INK } }) });
   ws.addRow([]);
@@ -213,7 +215,7 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
   while (ws.rowCount < 4) band("", { height: 15 });
   const rule = ws.addRow([""]); merge(rule.number);
   for (let c = 1; c <= N; c++) rule.getCell(c).border = { bottom: { style: "medium", color: { argb: NAVY } } };
-  try { const imgId = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(imgId, { tl: { col: 0.05, row: 0.15 }, ext: { width: 176, height: 70 }, editAs: "oneCell" }); } catch (e) {}
+  try { const imgId = wb.addImage({ base64: GLA_LOGO, extension: "png" }); ws.addImage(imgId, { tl: { col: 0.05, row: 0.15 }, ext: { width: 175, height: 70 } }); } catch (e) {}
 
   ws.addRow([]);
   band(eyebrow, { font: fnt({ size: 9, bold: true, color: { argb: ORANGE } }) });
