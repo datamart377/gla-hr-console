@@ -3123,8 +3123,17 @@ function SupplierSchedule({ ctx }) {
 
   const processSchedule = async () => {
     const supplierIdSet = new Set((store.suppliers || []).map((s) => s.id));
-    const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
-    if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Add line” to pick a supplier from the register and enter the invoice amount."); return; }
+    const liveLines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
+    // One line per supplier: merge any duplicate lines (sum sub-totals) so a supplier
+    // is never paid twice in a single processed run.
+    const bySupplier = new Map();
+    for (const l of liveLines) {
+      const prev = bySupplier.get(l.supplierId);
+      if (prev) prev.subTotal = (Number(prev.subTotal) || 0) + (Number(l.subTotal) || 0);
+      else bySupplier.set(l.supplierId, { ...l, subTotal: Number(l.subTotal) || 0 });
+    }
+    const lines = [...bySupplier.values()];
+    if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Manage suppliers” to pick a supplier from the register and enter the invoice amount."); return; }
     const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
     const resolved = lines.map((line) => { const r = resolveScheduleLine(line, store.suppliers); return { ...r, held: frozenIds.has(r.supplierId) }; });
     const held = resolved.filter((r) => r.held);
@@ -3542,7 +3551,36 @@ function SupplierDraft({ ctx, date, setDate }) {
   const { store, setModal, reload } = ctx;
   // Drop lines whose supplier no longer exists (deleted supplier) so they never show or get paid.
   const supplierIdSet = new Set((store.suppliers || []).map((s) => s.id));
-  const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
+  const liveLines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
+  // One line per supplier: the schedule relates to the register one-to-one. If a
+  // supplier somehow has more than one line (e.g. added twice), merge them — sum the
+  // sub-totals, keep the earliest line as the canonical row, and record the extra
+  // ids so the duplicates can be cleaned out of storage.
+  const bySupplier = new Map();
+  for (const l of liveLines) {
+    const prev = bySupplier.get(l.supplierId);
+    if (prev) { prev.subTotal = (Number(prev.subTotal) || 0) + (Number(l.subTotal) || 0); prev._extraIds.push(l.id); }
+    else bySupplier.set(l.supplierId, { ...l, subTotal: Number(l.subTotal) || 0, _extraIds: [] });
+  }
+  const lines = [...bySupplier.values()];
+  // Reconcile storage to one line per supplier, once, when duplicates are present —
+  // so the per-row edit/delete act on a single line and the saved data matches the
+  // view. A failed cleanup is non-fatal: the in-memory merge above already shows one
+  // row per supplier.
+  const deduping = useRef(false);
+  useEffect(() => {
+    const extras = lines.reduce((a, l) => a.concat(l._extraIds), []);
+    if (!extras.length || deduping.current) return;
+    deduping.current = true;
+    (async () => {
+      try {
+        for (const l of lines) { if (l._extraIds.length) await supplierScheduleApi.update(l.id, { subTotal: l.subTotal }); }
+        for (const id of extras) await supplierScheduleApi.remove(id);
+        await reload();
+      } catch { /* leave the duplicates; the merged view is still correct */ }
+      finally { deduping.current = false; }
+    })();
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   // Resolve each line against the LIVE register (store.suppliers) so names, bank,
   // TIN and freeze state match the current Suppliers list, not the module seed.
   const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
@@ -3722,7 +3760,12 @@ function ScheduleLineForm({ ctx, id }) {
   const submit = async () => {
     if (!f.supplierId) return alert("Pick a supplier. Add one in the Suppliers module first if the list is empty.");
     const payload = { supplierId: f.supplierId, subTotal: Number(f.subTotal) || 0, applyWht: !!f.applyWht, applyVat: !!f.applyVat };
-    if (adding) await supplierScheduleApi.create(payload); else await supplierScheduleApi.update(id, payload);
+    // One line per supplier: if adding for a supplier already on the schedule, update
+    // their existing line instead of creating a duplicate.
+    const existingForSupplier = (ctx.store.supplierSchedule || []).find((l) => l.supplierId === f.supplierId);
+    if (!adding) await supplierScheduleApi.update(id, payload);
+    else if (existingForSupplier) await supplierScheduleApi.update(existingForSupplier.id, payload);
+    else await supplierScheduleApi.create(payload);
     await ctx.reload(); ctx.setModal(null);
   };
   const Toggle = ({ on, onClick, label, hint }) => (
@@ -3749,7 +3792,7 @@ function ScheduleLineForm({ ctx, id }) {
             <div><b style={{ color: "var(--text)" }}>{sup.name || "—"}</b>{sup.tin ? ` · TIN ${sup.tin}` : ""}</div>
             <div style={{ marginTop: 2 }}>{[sup.bankName, sup.bankAccount, sup.bankBranch].filter(Boolean).join(" · ") || "No bank details on file"}</div>
           </div>
-          {dupe && <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8, background: "var(--warning-dim)", color: "var(--warning)", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}><AlertTriangle size={15} />This supplier is already on the current schedule — adding will create a second invoice line for them.</div>}
+          {dupe && <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 8, background: "var(--warning-dim)", color: "var(--warning)", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}><AlertTriangle size={15} />This supplier is already on the current schedule — saving will update their existing line (one line per supplier).</div>}
           <FieldsetTitle>Invoice</FieldsetTitle>
           <Field label="Sub total (UGX)" full hint="Invoice amount before tax"><Input type="number" value={f.subTotal} onChange={set("subTotal")} /></Field>
           <Field label="6% income withholding"><Toggle on={f.applyWht} onClick={toggle("applyWht")} label={f.applyWht ? "Applied (−6%)" : "Not applied"} hint="Optional — deducted" /></Field>
@@ -3782,7 +3825,12 @@ function Suppliers({ ctx }) {
   const supplierIdSet = new Set(all.map((s) => s.id));
   const onSchedule = new Set((store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId)).map((l) => l.supplierId)).size;
   const statusTone = (s) => (s === "Inactive" ? "muted" : s === "Frozen" ? "warning" : "success");
-  const addToSchedule = async (s) => { await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }); await ctx.reload(); };
+  const addToSchedule = async (s) => {
+    // One line per supplier — never create a second line for a supplier already on the schedule.
+    if ((store.supplierSchedule || []).some((l) => l.supplierId === s.id)) { await ctx.reload(); return; }
+    await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false });
+    await ctx.reload();
+  };
   // Optimistic status change: flip the badge immediately, persist, then reload;
   // revert and explain if the server call fails (expired session, cold server, etc.).
   const setStatus = async (s, status) => {
