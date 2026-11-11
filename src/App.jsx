@@ -7,7 +7,7 @@ import {
   HeartHandshake, Baby, IdCard, FileCheck, Contact,
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
-  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban,
+  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
@@ -549,6 +549,7 @@ function Login({ employees, live, authenticate, notice }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [showPw, setShowPw] = useState(false);
   const resetToken = useMemo(() => { try { return new URLSearchParams(window.location.search).get("reset") || ""; } catch { return ""; } }, []);
   const [mode, setMode] = useState(resetToken ? "reset" : "signin"); // signin | forgot | reset
   const [info, setInfo] = useState("");
@@ -640,7 +641,12 @@ function Login({ employees, live, authenticate, notice }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
                 {notice && <div style={{ fontSize: 12, color: "var(--warning)", background: "var(--warning-dim)", padding: "8px 11px", borderRadius: 8 }}>{notice}</div>}
                 <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
-                <Field label="Password"><Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} /></Field>
+                <Field label="Password"><div style={{ position: "relative" }}>
+                  <Input type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" onKeyDown={(e) => e.key === "Enter" && submit(email, pw)} style={{ paddingRight: 40 }} />
+                  <button type="button" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, padding: 0, border: "none", background: "none", color: "var(--text-2)", cursor: "pointer" }}>
+                    {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div></Field>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)", cursor: "pointer", userSelect: "none" }}>
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#f0601f", cursor: "pointer" }} />
                   Keep me signed in on this device
