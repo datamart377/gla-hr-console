@@ -23,7 +23,7 @@ import {
   data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
-  deriveSupplier, resolveScheduleLine, supplierById, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
+  deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
   PERMISSION_MODULES, PERMISSION_ACTIONS, roleById,
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
@@ -3126,7 +3126,7 @@ function SupplierSchedule({ ctx }) {
     const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
     if (!lines.length) { alert("Add at least one line before processing the schedule.\n\nUse “Add line” to pick a supplier from the register and enter the invoice amount."); return; }
     const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
-    const resolved = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
+    const resolved = lines.map((line) => { const r = resolveScheduleLine(line, store.suppliers); return { ...r, held: frozenIds.has(r.supplierId) }; });
     const held = resolved.filter((r) => r.held);
     const payableLines = resolved.filter((r) => !r.held);
     if (!payableLines.length) { alert("Every line on this schedule is a frozen supplier (payment held), so there is nothing to pay.\n\nReactivate a supplier in the register, or add a payable line, before processing."); return; }
@@ -3543,9 +3543,10 @@ function SupplierDraft({ ctx, date, setDate }) {
   // Drop lines whose supplier no longer exists (deleted supplier) so they never show or get paid.
   const supplierIdSet = new Set((store.suppliers || []).map((s) => s.id));
   const lines = (store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId));
-  // Freeze status lives in the live store, not the seed resolveScheduleLine() reads, so decide held here.
+  // Resolve each line against the LIVE register (store.suppliers) so names, bank,
+  // TIN and freeze state match the current Suppliers list, not the module seed.
   const frozenIds = new Set((store.suppliers || []).filter((s) => s.status === "Frozen").map((s) => s.id));
-  const rows = lines.map((line) => { const r = resolveScheduleLine(line); return { ...r, held: frozenIds.has(r.supplierId) }; });
+  const rows = lines.map((line) => { const r = resolveScheduleLine(line, store.suppliers); return { ...r, held: frozenIds.has(r.supplierId) }; });
   const payable = rows.filter((r) => !r.held); // frozen suppliers' lines are held out of payment
   const heldRows = rows.filter((r) => r.held);
   const t = payable.reduce((a, r) => ({ subTotal: a.subTotal + r.subTotal, wht: a.wht + r.wht, vat: a.vat + r.vat, net: a.net + r.net }), { subTotal: 0, wht: 0, vat: 0, net: 0 });
@@ -3704,11 +3705,14 @@ function ScheduleLineForm({ ctx, id }) {
   const [f, setF] = useState(existing
     ? { supplierId: existing.supplierId, subTotal: existing.subTotal, applyWht: existing.applyWht !== false, applyVat: existing.applyVat !== false }
     : { supplierId: suppliers[0]?.id || "", subTotal: 0, applyWht: suppliers[0]?.whtDefault !== false, applyVat: suppliers[0]?.vatDefault !== false });
-  const sup = supplierById(f.supplierId) || {};
+  // Resolve against the LIVE register (ctx.store.suppliers), not the module seed,
+  // so the preview name/TIN/bank and the tax defaults match the current supplier.
+  const liveSupplier = (supplierId) => (ctx.store.suppliers || []).find((s) => s.id === supplierId) || {};
+  const sup = liveSupplier(f.supplierId);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggle = (k) => () => setF({ ...f, [k]: !f[k] });
   const pickSupplier = (supplierId) => {
-    const s = supplierById(supplierId) || {};
+    const s = liveSupplier(supplierId);
     setF((cur) => ({ ...cur, supplierId, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false }));
   };
   // Suppliers already on the current draft — flag so users don't add a duplicate line unknowingly.

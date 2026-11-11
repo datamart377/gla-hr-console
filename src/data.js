@@ -294,8 +294,14 @@ export function deriveSupplier(s) {
   return { subTotal, applyWht, applyVat, wht, vat, net: subTotal - wht };
 }
 // Join a schedule line with its supplier master + computed amounts → a full row.
-export function resolveScheduleLine(line) {
-  const s = supplierById(line.supplierId) || {};
+// Pass the LIVE supplier list (store.suppliers) so the row reflects the current
+// register — a renamed/edited supplier, correct bank + TIN, current freeze state.
+// Without it, the lookup falls back to the module seed, which is only right in the
+// standalone/offline build (no live store).
+export function resolveScheduleLine(line, suppliers) {
+  const s = (Array.isArray(suppliers)
+    ? suppliers.find((x) => x.id === line.supplierId)
+    : supplierById(line.supplierId)) || {};
   return {
     ...line,
     supplierId: line.supplierId,
