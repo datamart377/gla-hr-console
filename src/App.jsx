@@ -13,7 +13,7 @@ import {
 import L from "leaflet";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
-import { GLA_LOGOTYPE } from "./header.js";
+import { GLA_LOGOTYPE, GLA_MARK } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
@@ -938,7 +938,7 @@ function StaffSidebar({ emp, sv, setSv, onSignOut }) {
   return (
     <aside style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
       <div style={{ padding: "20px 20px 16px", display: "flex", gap: 12, alignItems: "center", borderBottom: "1px solid var(--sidebar-border)" }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, flex: "none", display: "grid", placeItems: "center", fontFamily: "var(--font-display)", fontWeight: 800, color: "#fff", fontSize: 15, background: "#1b1e25", boxShadow: "inset 0 2.5px 0 var(--accent), inset 0 0 0 1px rgba(255,255,255,.08)" }}>GL</div>
+        <img src={GLA_MARK} alt="Global Link Associates" style={{ width: 40, height: 40, borderRadius: 10, flex: "none", objectFit: "cover", background: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }} />
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "#fff", lineHeight: 1.15 }}>
           Global Link<br />Associates
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 400, fontSize: 10, letterSpacing: ".12em", color: "var(--sidebar-muted)", textTransform: "uppercase", marginTop: 4 }}>Staff Portal</div>
@@ -1516,7 +1516,7 @@ function Sidebar({ view, setView, store, nav = NAV }) {
   return (
     <aside style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
       <div style={{ padding: "20px 20px 16px", display: "flex", gap: 12, alignItems: "center", borderBottom: "1px solid var(--sidebar-border)" }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, flex: "none", display: "grid", placeItems: "center", fontFamily: "var(--font-display)", fontWeight: 800, color: "#fff", fontSize: 15, background: "#1b1e25", boxShadow: "inset 0 2.5px 0 var(--accent), inset 0 0 0 1px rgba(255,255,255,.08)" }}>GL</div>
+        <img src={GLA_MARK} alt="Global Link Associates" style={{ width: 40, height: 40, borderRadius: 10, flex: "none", objectFit: "cover", background: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }} />
         <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, color: "#fff", lineHeight: 1.15 }}>
           Global Link<br />Associates
           <div title="Integrated HR and Supplier Management System" style={{ fontFamily: "var(--font-mono)", fontWeight: 400, fontSize: 10, letterSpacing: ".12em", color: "var(--sidebar-muted)", textTransform: "uppercase", marginTop: 4 }}>IHRSM</div>
