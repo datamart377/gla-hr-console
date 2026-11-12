@@ -13,7 +13,7 @@ import {
 import L from "leaflet";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
-import { GLA_HEADER } from "./header.js";
+import { GLA_LOGOTYPE } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
@@ -627,7 +627,7 @@ function Login({ employees, live, authenticate, notice }) {
 
           <Card style={{ padding: "28px 26px", borderRadius: 16, border: "1px solid rgba(255,255,255,.10)", boxShadow: "0 28px 64px -22px rgba(0,0,0,.6)" }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
-              <img src={GLA_HEADER} alt="Global Link Associates Ltd" style={{ width: 320, maxWidth: "92%", height: "auto", display: "block" }} />
+              <img src={GLA_LOGOTYPE} alt="Global Link Associates Ltd" style={{ width: 330, maxWidth: "92%", height: "auto", display: "block" }} />
             </div>
             <div style={{ height: 1, background: "linear-gradient(90deg, transparent, var(--border), transparent)", margin: "16px 0 20px" }} />
             <h2 style={{ fontSize: 19, fontWeight: 800, color: "#241510" }}>{mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Sign in to your portal"}</h2>
