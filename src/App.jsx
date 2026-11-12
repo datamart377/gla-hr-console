@@ -613,19 +613,19 @@ function Login({ employees, live, authenticate, notice }) {
   };
   const sectionLabel = (t) => <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 8px", fontFamily: "var(--font-mono)", letterSpacing: ".08em", textTransform: "uppercase" }}>{t}</div>;
   return (
-<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1100px 560px at 50% -16%, #8a5230, transparent 60%), radial-gradient(820px 460px at 82% 112%, #3a2012, transparent 55%), linear-gradient(165deg, #2e1c12 0%, #241510 45%, #180e09 100%)" }}>
+<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1100px 560px at 50% -16%, #f7eee7, transparent 60%), radial-gradient(820px 460px at 82% 112%, #f0e4da, transparent 55%), linear-gradient(165deg, #fbf6f2 0%, #f4ebe3 50%, #ede2d8 100%)" }}>
         <svg viewBox="0 0 1440 240" preserveAspectRatio="none" aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: "100%", height: 200, pointerEvents: "none" }}>
-          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.12" />
-          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.22" />
+          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.08" />
+          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.14" />
         </svg>
 
         <div style={{ width: "100%", maxWidth: 440, position: "relative", zIndex: 1 }}>
           <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 11, letterSpacing: ".26em", textTransform: "uppercase", color: "#f3a983", fontWeight: 700 }}>Engineering &amp; Contracting &middot; Kampala</div>
-            <div style={{ color: "rgba(255,255,255,.74)", fontSize: 12.5, marginTop: 9 }}>Integrated HR &amp; Supplier Management System</div>
+            <div style={{ fontSize: 11, letterSpacing: ".26em", textTransform: "uppercase", color: "#a4542c", fontWeight: 700 }}>Engineering &amp; Contracting &middot; Kampala</div>
+            <div style={{ color: "#6b5a4e", fontSize: 12.5, marginTop: 9 }}>Integrated HR &amp; Supplier Management System</div>
           </div>
 
-          <Card style={{ padding: "28px 26px", borderRadius: 16, border: "1px solid rgba(255,255,255,.10)", boxShadow: "0 28px 64px -22px rgba(0,0,0,.6)" }}>
+          <Card style={{ padding: "28px 26px", borderRadius: 16, border: "1px solid #ebe1d9", boxShadow: "0 28px 64px -24px rgba(90,58,42,.22)" }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
               <img src={GLA_LOGOTYPE} alt="Global Link Associates Ltd" style={{ width: 330, maxWidth: "92%", height: "auto", display: "block" }} />
             </div>
@@ -679,7 +679,7 @@ function Login({ employees, live, authenticate, notice }) {
             )}
           </Card>
 
-          <div style={{ textAlign: "center", fontSize: 11, color: "rgba(255,255,255,.62)", marginTop: 18, lineHeight: 1.75 }}>
+          <div style={{ textAlign: "center", fontSize: 11, color: "#8a7a6e", marginTop: 18, lineHeight: 1.75 }}>
             <div>Tirupati Mazima Mall &middot; Ggaba Road &middot; Kampala, Uganda</div>
             <div style={{ fontFamily: "var(--font-mono)", letterSpacing: ".04em", marginTop: 2 }}>glassociates.co.ug</div>
           </div>
