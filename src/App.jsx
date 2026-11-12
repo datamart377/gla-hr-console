@@ -586,7 +586,7 @@ function Login({ employees, live, authenticate, notice }) {
     } catch (e) { setErr(e.message || "Could not reset the password. The link may have expired — request a new one."); }
     setBusy(false);
   };
-  const linkStyle = { background: "none", border: "none", padding: 0, color: "#8a5640", fontWeight: 600, fontSize: 12.5, cursor: "pointer" };
+  const linkStyle = { background: "none", border: "none", padding: 0, color: "#a4542c", fontWeight: 600, fontSize: 12.5, cursor: "pointer" };
   const source = (employees && employees.length) ? employees : DEMO_ACCOUNTS;
   const pickByRole = (r) => source.find((e) => (e.role || "staff") === r);
   const consoleAccounts = ["admin", "hr", "finance"].map(pickByRole).filter(Boolean);
@@ -613,10 +613,10 @@ function Login({ employees, live, authenticate, notice }) {
   };
   const sectionLabel = (t) => <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 8px", fontFamily: "var(--font-mono)", letterSpacing: ".08em", textTransform: "uppercase" }}>{t}</div>;
   return (
-<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1200px 620px at 50% -22%, #6b4a36, transparent 55%), linear-gradient(162deg, #2a1a1255 0%, #241510 0%, #2a1912 55%, #180e09 100%)" }}>
+<div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1100px 560px at 50% -16%, #8a5230, transparent 60%), radial-gradient(820px 460px at 82% 112%, #3a2012, transparent 55%), linear-gradient(165deg, #2e1c12 0%, #241510 45%, #180e09 100%)" }}>
         <svg viewBox="0 0 1440 240" preserveAspectRatio="none" aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: "100%", height: 200, pointerEvents: "none" }}>
-          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#8a5640" fillOpacity="0.10" />
-          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#8a5640" fillOpacity="0.20" />
+          <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.12" />
+          <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.22" />
         </svg>
 
         <div style={{ width: "100%", maxWidth: 440, position: "relative", zIndex: 1 }}>
@@ -648,12 +648,12 @@ function Login({ employees, live, authenticate, notice }) {
                   </button>
                 </div></Field>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-2)", cursor: "pointer", userSelect: "none" }}>
-                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#8a5640", cursor: "pointer" }} />
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: "#b05e38", cursor: "pointer" }} />
                   Keep me signed in on this device
                 </label>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
                 {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
-                <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={() => submit(email, pw)} style={{ justifyContent: "center", padding: "13px", background: "linear-gradient(135deg, #c06a3c 0%, #a4542c 100%)", borderColor: "#a4542c", color: "#fff", fontWeight: 700, boxShadow: "0 12px 26px -8px rgba(176,92,50,.6)" }}><LogIn size={16} />{busy ? "Signing in…" : "Sign in"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("forgot"); clearMsgs(); }}>Forgot password?</button></div>
               </div>
             )}
@@ -663,7 +663,7 @@ function Login({ employees, live, authenticate, notice }) {
                 <Field label="Work email"><Input type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearMsgs(); }} placeholder="name@glassociates.co.ug" onKeyDown={(e) => e.key === "Enter" && sendReset()} /></Field>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
                 {info && <div style={{ fontSize: 12, color: "var(--success)", background: "var(--success-dim, #e9f7ef)", padding: "8px 11px", borderRadius: 8 }}>{info}</div>}
-                <Btn variant="primary" disabled={busy} onClick={sendReset} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><Mail size={16} />{busy ? "Sending…" : "Send reset link"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={sendReset} style={{ justifyContent: "center", padding: "13px", background: "linear-gradient(135deg, #c06a3c 0%, #a4542c 100%)", borderColor: "#a4542c", color: "#fff", fontWeight: 700, boxShadow: "0 12px 26px -8px rgba(176,92,50,.6)" }}><Mail size={16} />{busy ? "Sending…" : "Send reset link"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
               </div>
             )}
@@ -673,7 +673,7 @@ function Login({ employees, live, authenticate, notice }) {
                 <Field label="New password"><Input type="password" value={np} onChange={(e) => { setNp(e.target.value); clearMsgs(); }} placeholder="At least 8 characters" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
                 <Field label="Confirm new password"><Input type="password" value={np2} onChange={(e) => { setNp2(e.target.value); clearMsgs(); }} placeholder="Re-enter new password" onKeyDown={(e) => e.key === "Enter" && doReset()} /></Field>
                 {err && <div style={{ fontSize: 12, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
-                <Btn variant="primary" disabled={busy} onClick={doReset} style={{ justifyContent: "center", padding: "13px", background: "#8a5640", borderColor: "#8a5640", color: "#fff", fontWeight: 700, boxShadow: "0 10px 22px -10px rgba(138,86,64,.65)" }}><ShieldCheck size={16} />{busy ? "Updating…" : "Update password"}</Btn>
+                <Btn variant="primary" disabled={busy} onClick={doReset} style={{ justifyContent: "center", padding: "13px", background: "linear-gradient(135deg, #c06a3c 0%, #a4542c 100%)", borderColor: "#a4542c", color: "#fff", fontWeight: 700, boxShadow: "0 12px 26px -8px rgba(176,92,50,.6)" }}><ShieldCheck size={16} />{busy ? "Updating…" : "Update password"}</Btn>
                 <div style={{ textAlign: "center", marginTop: 2 }}><button type="button" style={linkStyle} onClick={() => { setMode("signin"); clearMsgs(); }}>Back to sign in</button></div>
               </div>
             )}
