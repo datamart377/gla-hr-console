@@ -13,7 +13,7 @@ import {
 import L from "leaflet";
 import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
-import { GLA_LOGOTYPE, GLA_MARK } from "./header.js";
+import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
@@ -614,6 +614,8 @@ function Login({ employees, live, authenticate, notice }) {
   const sectionLabel = (t) => <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 8px", fontFamily: "var(--font-mono)", letterSpacing: ".08em", textTransform: "uppercase" }}>{t}</div>;
   return (
 <div style={{ minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "44px 20px", overflow: "hidden", background: "radial-gradient(1100px 560px at 50% -16%, #f7eee7, transparent 60%), radial-gradient(820px 460px at 82% 112%, #f0e4da, transparent 55%), linear-gradient(165deg, #fbf6f2 0%, #f4ebe3 50%, #ede2d8 100%)" }}>
+        <img src={GLA_MARK_BG} alt="" aria-hidden="true" style={{ position: "absolute", top: -54, right: -54, width: 320, opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />
+        <img src={GLA_MARK_BG} alt="" aria-hidden="true" style={{ position: "absolute", bottom: -54, left: -54, width: 320, opacity: 0.08, pointerEvents: "none", userSelect: "none" }} />
         <svg viewBox="0 0 1440 240" preserveAspectRatio="none" aria-hidden="true" style={{ position: "absolute", left: 0, bottom: 0, width: "100%", height: 200, pointerEvents: "none" }}>
           <path d="M0,130 C320,210 520,50 760,96 C1000,142 1180,214 1440,126 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.08" />
           <path d="M0,160 C360,230 560,78 820,126 C1080,174 1240,226 1440,158 L1440,240 L0,240 Z" fill="#b5633a" fillOpacity="0.14" />
