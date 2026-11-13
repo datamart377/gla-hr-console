@@ -53,6 +53,11 @@ function canSuperviseRec(rec, empId, isSup) {
   return !!isSup;
 }
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+// Drop inline file bytes (dataUrl) from a requisition's documents for list views,
+// keeping only the metadata needed to show "N files" and the file names.
+const stripReqDocs = (r) => (Array.isArray(r.documents) && r.documents.length)
+  ? { ...r, documents: r.documents.map((d) => ({ name: d.name, size: d.size, type: d.type || "" })) }
+  : r;
 
 // Tables a staff user may read, limited to rows they own. "__self__" means the
 // employee record whose id equals their empId; otherwise the named doc field
@@ -107,7 +112,7 @@ async function createRequisition(req, res, next) {
       narrative: body.narrative || "",
       currency: body.currency || "UGX",
       lineItems: Array.isArray(body.lineItems) ? body.lineItems.map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })) : [],
-      documents: Array.isArray(body.documents) ? body.documents : [],
+      documents: Array.isArray(body.documents) ? body.documents.slice(0, 12).map((d) => ({ name: String(d.name || "file"), size: Number(d.size) || 0, type: String(d.type || ""), dataUrl: typeof d.dataUrl === "string" ? d.dataUrl : "" })) : [],
       supervisorIds: Array.isArray(e.supervisorIds) ? e.supervisorIds : [],   // approver pool from the requester's profile (authoritative)
       status,                             // only draft or pending_supervisor on create
       supervisor: null, admin: null, rejection: null,
@@ -188,6 +193,9 @@ export function crudRouter(table) {
           recs = []; // nothing of this collection is a staff user's business
         }
       }
+      // Keep requisition list payloads light: send attachment metadata only, not
+      // the inline file bytes. The detail view fetches the full record to view them.
+      if (table === "requisitions") recs = recs.map(stripReqDocs);
       res.json(recs);
     } catch (e) { next(e); }
   });

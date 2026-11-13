@@ -8,7 +8,7 @@ import {
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
-  Receipt, Send, MapPinned,
+  Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
@@ -1012,6 +1012,22 @@ function ReqForm({ ctx, onDone }) {
   const setItem = (i, k, v) => setItems((xs) => xs.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
   const addItem = () => setItems((xs) => [...xs, { description: "", qty: 1, rate: 0 }]);
   const rmItem = (i) => setItems((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs));
+  // Read each attachment into a data URL so the file travels with the requisition
+  // and an approver can view it later. Capped per file to keep payloads sane.
+  const MAX_DOC_MB = 8;
+  const pickDocs = async (fileList) => {
+    const files = Array.from(fileList || []);
+    const added = [];
+    for (const file of files) {
+      if (file.size > MAX_DOC_MB * 1024 * 1024) { alert(`"${file.name}" is ${(file.size / 1048576).toFixed(1)} MB — attachments must be ${MAX_DOC_MB} MB or less.`); continue; }
+      try {
+        const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(file); });
+        added.push({ name: file.name, size: file.size, type: file.type || "", dataUrl });
+      } catch { alert(`Couldn't read "${file.name}".`); }
+    }
+    if (added.length) setDocs((xs) => [...xs, ...added]);
+  };
+  const rmDoc = (i) => setDocs((xs) => xs.filter((_, j) => j !== i));
   const submit = async () => {
     if (!location || !location.name) return alert("Pick your location — search an existing station or add a new one.");
     if (!subject.trim()) return alert("Enter a subject for the request.");
@@ -1094,8 +1110,27 @@ function ReqForm({ ctx, onDone }) {
         <Card style={{ padding: 0 }}>
           <CardHead title="Supporting documents" sub="Quotations, invoices, activity plans, receipts" />
           <div style={{ padding: "16px 20px" }}>
-            <input type="file" multiple onChange={(e) => setDocs(Array.from(e.target.files || []).map((f) => ({ name: f.name, size: f.size })))} />
-            {docs.length > 0 && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>{docs.length} file{docs.length === 1 ? "" : "s"}: {docs.map((d) => d.name).join(", ")}</div>}
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 9, border: "1px dashed var(--border)", background: "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
+              <Paperclip size={15} style={{ color: "var(--brand)" }} />Attach files
+              <input type="file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" style={{ display: "none" }} onChange={(e) => { pickDocs(e.target.files); e.target.value = ""; }} />
+            </label>
+            <span style={{ marginLeft: 10, fontSize: 11.5, color: "var(--muted)" }}>Images, PDFs or office files · up to {MAX_DOC_MB} MB each</span>
+            {docs.length > 0 && (
+              <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {docs.map((d, i) => {
+                  const isImg = (d.type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(d.name || "");
+                  return (
+                    <div key={i} style={{ position: "relative", width: 104, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                      <button type="button" onClick={() => rmDoc(i)} title="Remove" style={{ position: "absolute", top: 4, right: 4, zIndex: 2, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,.55)", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center" }}><X size={12} /></button>
+                      <div style={{ height: 68, display: "grid", placeItems: "center", background: isImg ? "#000" : "var(--surface-2)" }}>
+                        {isImg ? <img src={d.dataUrl} alt={d.name} style={{ maxWidth: "100%", maxHeight: 68, objectFit: "cover" }} /> : <FileText size={26} style={{ color: "var(--muted)" }} />}
+                      </div>
+                      <div style={{ padding: "5px 7px", fontSize: 10.5, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={d.name}>{d.name}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </Card>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
@@ -1159,6 +1194,36 @@ function ReqDetail({ ctx, r, onClose }) {
   const total = reqTotal(r);
   const loc = r.location || {};
   const poolNames = (r.supervisorIds || []).map((id) => { const e = (ctx.store.employees || []).find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : id; });
+  // Attachments: the list endpoint strips inline file data to stay light, so
+  // fetch the full record on open to get the actual images/PDFs to view.
+  const [attachments, setAttachments] = useState(r.documents || []);
+  const [preview, setPreview] = useState(null); // image lightbox
+  useEffect(() => {
+    let alive = true;
+    setAttachments(r.documents || []);
+    if ((r.documents || []).some((d) => !d.dataUrl)) {
+      (async () => {
+        try { const full = await requisitionsApi.get(r.id); if (alive && full && Array.isArray(full.documents)) setAttachments(full.documents); }
+        catch { /* keep metadata-only list */ }
+      })();
+    }
+    return () => { alive = false; };
+  }, [r.id]);
+  const isImageDoc = (d) => (d.type || "").startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(d.name || "");
+  // Open a non-image attachment (e.g. PDF) in a new tab via a Blob URL — reliable
+  // for large files where navigating straight to a data: URL can be blocked.
+  const openDoc = (d) => {
+    if (!d.dataUrl) return;
+    try {
+      const [meta, b64] = String(d.dataUrl).split(",");
+      const mime = (meta.match(/data:([^;]+)/) || [])[1] || d.type || "application/octet-stream";
+      const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([u8], { type: mime }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch { window.open(d.dataUrl, "_blank", "noopener"); }
+  };
   const act = async (status) => {
     setBusy(true);
     try {
@@ -1201,6 +1266,33 @@ function ReqDetail({ ctx, r, onClose }) {
               </tbody>
             </table>
           </Card>
+          {attachments.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Paperclip size={13} />Supporting documents <span style={{ color: "var(--text-2)" }}>({attachments.length})</span></div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {attachments.map((d, i) => {
+                  const img = isImageDoc(d);
+                  const ready = !!d.dataUrl;
+                  return (
+                    <div key={i} style={{ width: 132, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                      <button type="button" disabled={!ready} title={ready ? (img ? "View image" : "Open file") : "Loading…"} onClick={() => (img ? setPreview(d) : openDoc(d))}
+                        style={{ display: "block", width: "100%", border: "none", padding: 0, cursor: ready ? "pointer" : "default", background: img ? "#000" : "var(--surface-2)" }}>
+                        <div style={{ height: 88, display: "grid", placeItems: "center", position: "relative" }}>
+                          {img && ready ? <img src={d.dataUrl} alt={d.name} style={{ maxWidth: "100%", maxHeight: 88, objectFit: "cover" }} /> : <FileText size={30} style={{ color: "var(--muted)" }} />}
+                          {ready && <span style={{ position: "absolute", bottom: 5, right: 5, background: "rgba(0,0,0,.55)", color: "#fff", borderRadius: 6, padding: "2px 5px", display: "inline-flex" }}>{img ? <Eye size={12} /> : <Eye size={12} />}</span>}
+                        </div>
+                      </button>
+                      <div style={{ padding: "6px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                        <span style={{ fontSize: 10.5, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={d.name}>{d.name}</span>
+                        {ready && <a href={d.dataUrl} download={d.name} title="Download" onClick={(e) => e.stopPropagation()} style={{ color: "var(--brand)", flex: "none", display: "grid", placeItems: "center" }}><Download size={14} /></a>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {attachments.some((d) => !d.dataUrl) && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Loading attachments…</div>}
+            </div>
+          )}
           {rejecting && <Field label="Reason for rejection" required><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} style={{ ...controlStyle, minHeight: 60 }} placeholder="Explain why this is being returned" /></Field>}
           {canAct && !rejecting && <Field label="Approval note (optional)"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note for the record" /></Field>}
           {(r.history || []).length > 0 && (
@@ -1219,6 +1311,16 @@ function ReqDetail({ ctx, r, onClose }) {
         </div>
         <div><ReqWorkflowMap r={r} /></div>
       </div>
+      {preview && (
+        <div onClick={() => setPreview(null)} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(0,0,0,.88)", display: "grid", placeItems: "center", padding: 24 }}>
+          <img src={preview.dataUrl} alt={preview.name} style={{ maxWidth: "95%", maxHeight: "86%", objectFit: "contain", borderRadius: 8 }} />
+          <div style={{ position: "fixed", top: 18, right: 22, display: "flex", gap: 12, alignItems: "center" }}>
+            <a href={preview.dataUrl} download={preview.name} onClick={(e) => e.stopPropagation()} style={{ color: "#fff", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, textDecoration: "none" }}><Download size={16} />Download</a>
+            <button onClick={(e) => { e.stopPropagation(); setPreview(null); }} style={{ background: "rgba(255,255,255,.16)", color: "#fff", border: "none", borderRadius: 8, padding: "6px 11px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600 }}><X size={16} />Close</button>
+          </div>
+          <div style={{ position: "fixed", bottom: 20, left: 0, right: 0, textAlign: "center", color: "rgba(255,255,255,.82)", fontSize: 12.5 }}>{preview.name}</div>
+        </div>
+      )}
     </Modal>
   );
 }

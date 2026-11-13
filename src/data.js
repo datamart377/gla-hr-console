@@ -495,6 +495,9 @@ export function normalizeRequisition(r = {}) {
   };
 }
 
+// A tiny sample quotation image so the "Supporting documents" viewer is
+// demonstrable in the standalone demo (approvers can open/zoom it).
+const SAMPLE_QUOTE_DOC = { name: "Supplier quotation.svg", size: 1978, type: "image/svg+xml", dataUrl: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NDAiIGhlaWdodD0iNDQwIiB2aWV3Qm94PSIwIDAgNjQwIDQ0MCI+PHJlY3Qgd2lkdGg9IjY0MCIgaGVpZ2h0PSI0NDAiIGZpbGw9IiNmZmZmZmYiLz48cmVjdCB3aWR0aD0iNjQwIiBoZWlnaHQ9IjY0IiBmaWxsPSIjNUEzQTJBIi8+PHRleHQgeD0iMjgiIHk9IjQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjIiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNmZmZmZmYiPkFSVUEgRlVFTCAmYW1wOyBTUEFSRVMgTFREPC90ZXh0Pjx0ZXh0IHg9IjI4IiB5PSIxMTAiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNSIgZmlsbD0iIzMzMyI+UVVPVEFUSU9OICDCtyAgTm8uIEFGUy0yMDQxPC90ZXh0Pjx0ZXh0IHg9IjI4IiB5PSIxMzQiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMyIgZmlsbD0iIzY2NiI+RGF0ZTogMTEgTm92IDIwMjYgICAgIFRvOiBHbG9iYWwgTGluayBBc3NvY2lhdGVzPC90ZXh0PjxsaW5lIHgxPSIyOCIgeTE9IjE1NiIgeDI9IjYxMiIgeTI9IjE1NiIgc3Ryb2tlPSIjY2NjIi8+PHRleHQgeD0iMjgiIHk9IjE5MiIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjMjIyIj5EaXNwZW5zZXIgbm96emxlIHNldCAoeDIpPC90ZXh0Pjx0ZXh0IHg9IjUyMCIgeT0iMTkyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiMyMjIiPjE3MCwwMDA8L3RleHQ+PHRleHQgeD0iMjgiIHk9IjIyNCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjMjIyIj5Mb2NhbCB0cmFuc3BvcnQgKGJvZGEgKyBmdWVsKTwvdGV4dD48dGV4dCB4PSI1MjAiIHk9IjIyNCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjMjIyIj42MCwwMDA8L3RleHQ+PGxpbmUgeDE9IjI4IiB5MT0iMjUwIiB4Mj0iNjEyIiB5Mj0iMjUwIiBzdHJva2U9IiNjY2MiLz48dGV4dCB4PSIyOCIgeT0iMjg2IiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM1QTNBMkEiPlRPVEFMIChVR1gpPC90ZXh0Pjx0ZXh0IHg9IjUwMCIgeT0iMjg2IiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM1QTNBMkEiPjIzMCwwMDA8L3RleHQ+PHRleHQgeD0iMjgiIHk9IjM2MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjODg4Ij5QcmljZXMgdmFsaWQgMTQgZGF5cy4gVGhhbmsgeW91IGZvciB5b3VyIGJ1c2luZXNzLjwvdGV4dD48dGV4dCB4PSIyOCIgeT0iNDA4IiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM4ODgiPlNpZ25hdHVyZTogX19fX19fX19fX19fX19fX19fX18gICBTdGFtcDwvdGV4dD48L3N2Zz4=" };
 // Seed demo requisitions (mock build only — the live table starts empty).
 data.requisitions = [
   normalizeRequisition({
@@ -503,6 +506,7 @@ data.requisitions = [
     subject: "Fuel pump spares & transport — Arua site", narrative: "Emergency replacement parts and local transport to reach the Arua station callout.",
     lineItems: [{ description: "Dispenser nozzle set", qty: 2, rate: 85000 }, { description: "Local transport (boda + fuel)", qty: 1, rate: 60000 }],
     supervisorIds: ["GLA-004", "GLA-008"],
+    documents: [SAMPLE_QUOTE_DOC],
     status: "pending_supervisor", createdAt: "2026-11-11T08:20:00Z",
     history: [{ at: "2026-11-11T08:20:00Z", by: "GLA-006", byName: "Peter Wanyama", action: "submitted", note: "" }],
   }),
@@ -512,6 +516,7 @@ data.requisitions = [
     subject: "Site survey allowance — Nakaseke", narrative: "Per-diem and airtime for a two-day new-site survey.",
     lineItems: [{ description: "Field per-diem (2 days)", qty: 2, rate: 70000 }, { description: "Airtime & data", qty: 1, rate: 20000 }],
     supervisorIds: ["GLA-004", "GLA-008"],
+    documents: [SAMPLE_QUOTE_DOC],
     status: "pending_admin", createdAt: "2026-11-10T06:40:00Z",
     supervisor: { id: "GLA-004", name: "David Mugisha", at: "2026-11-10T09:15:00Z" },
     history: [

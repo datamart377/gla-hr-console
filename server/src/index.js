@@ -37,7 +37,7 @@ app.set("trust proxy", 1);
 // renders when served from this same service; other helmet protections stay on.
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "25mb" })); // room for requisition attachments (images/PDFs stored inline as data URLs)
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // Throttle abuse: 300 requests / 15 min per IP across the API.
