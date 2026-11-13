@@ -226,6 +226,11 @@ export function normalizeEmployee(e) {
   if (!m.fileNumber) m.fileNumber = e.id;
   if (!m.contact.email) m.contact.email = e.email || "";
   if (!m.contact.telephone) m.contact.telephone = e.phone || "";
+  // Requisition supervision: isSupervisor marks who MAY approve; supervisorIds is
+  // the specific pool assigned to this employee (any one of them can approve, so
+  // a request is never held up by a single absent supervisor).
+  m.isSupervisor = !!m.isSupervisor;
+  if (!Array.isArray(m.supervisorIds)) m.supervisorIds = [];
   return m;
 }
 
@@ -235,6 +240,13 @@ data.employees = data.employees.map(normalizeEmployee);
 // approved salary advance below (auto-fed into payroll), not a manual entry.
 [["GLA-004", 300000]].forEach(([id, v]) => { const e = data.employees.find((x) => x.id === id); if (e) e.advanceDeductions = v; });
 [["GLA-001", "Garden City"], ["GLA-002", "Kampala Road"], ["GLA-003", "Garden City"], ["GLA-004", "Kireka"]].forEach(([id, b]) => { const e = data.employees.find((x) => x.id === id); if (e) e.bankBranch = b; });
+
+// Requisition supervisors. GLA-004 (David Mugisha) and GLA-008 (Isaac Tumwine)
+// both supervise the field team, so a requisition still clears first-level
+// approval when one of them is away — David is On Leave, yet Isaac can approve.
+{ const e = data.employees.find((x) => x.id === "GLA-008"); if (e) e.isSupervisor = true; }
+[["GLA-006", ["GLA-004", "GLA-008"]], ["GLA-009", ["GLA-004", "GLA-008"]], ["GLA-005", ["GLA-004", "GLA-008"]], ["GLA-007", ["GLA-004", "GLA-008"]]]
+  .forEach(([id, sv]) => { const e = data.employees.find((x) => x.id === id); if (e) e.supervisorIds = sv; });
 
 // Custom ledger columns — HR adds these from the Payroll ledger via "Add column".
 data.ledgerColumns = [];
@@ -427,6 +439,36 @@ export const REQ_STAGES = [
 // Index into REQ_STAGES for a status (how far it has progressed). -1 => rejected.
 export const reqStageIndex = (status) => ({ draft: 0, pending_supervisor: 1, pending_admin: 2, approved: 3, rejected: -1 }[status] ?? 0);
 
+// ---- Supervisor pool (multi-supervisor first-level approval) ----------------
+// An employee flagged isSupervisor may act as a requisition approver.
+export const isSupervisorEmp = (e) => !!(e && e.isSupervisor);
+// Every employee eligible to be assigned as a supervisor.
+export const supervisorChoices = (employees = []) => (employees || []).filter(isSupervisorEmp);
+// The supervisors who may clear a given employee's requisitions: the specific
+// pool assigned to them, or — if none is assigned — every supervisor, so a
+// request is never stuck. The employee can't supervise their own request.
+export function supervisorsForEmployee(emp, employees = []) {
+  const selfId = emp && emp.id;
+  const ids = emp && Array.isArray(emp.supervisorIds) ? emp.supervisorIds : [];
+  const assigned = ids
+    .map((id) => (employees || []).find((e) => e.id === id))
+    .filter((e) => e && e.isSupervisor && e.id !== selfId);
+  if (assigned.length) return assigned;
+  return (employees || []).filter((e) => e.isSupervisor && e.id !== selfId);
+}
+// Ids snapshotted onto a requisition at submit time (the approver pool).
+export const supervisorPoolIds = (emp, employees = []) => supervisorsForEmployee(emp, employees).map((e) => e.id);
+// Can this signed-in employee give first-level approval on this requisition?
+// Uses the pool snapshotted on the requisition; falls back to "any supervisor"
+// for legacy requisitions that have no snapshot.
+export function canSuperviseReq(req, empId, employees = []) {
+  if (!empId || !req || req.requesterId === empId) return false;
+  const pool = Array.isArray(req.supervisorIds) ? req.supervisorIds : [];
+  if (pool.length) return pool.includes(empId);
+  const me = (employees || []).find((e) => e.id === empId);
+  return !!(me && me.isSupervisor);
+}
+
 export function normalizeRequisition(r = {}) {
   const lineItems = (Array.isArray(r.lineItems) && r.lineItems.length ? r.lineItems : [{ description: "", qty: 1, rate: 0 }])
     .map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 }));
@@ -442,6 +484,7 @@ export function normalizeRequisition(r = {}) {
     currency: r.currency || "UGX",
     lineItems,
     documents: Array.isArray(r.documents) ? r.documents : [],   // [{ name, size }]
+    supervisorIds: Array.isArray(r.supervisorIds) ? r.supervisorIds : [],   // approver pool snapshot
     status: REQ_STATUSES.includes(r.status) ? r.status : "pending_supervisor",
     history: Array.isArray(r.history) ? r.history : [],          // [{ at, by, byName, action, note }]
     createdAt: r.createdAt || new Date().toISOString(),
@@ -459,6 +502,7 @@ data.requisitions = [
     location: { stationId: "ST-0001", name: "Shell Arua (Pakwach Road)", area: "Arua", lat: 3.008484, lng: 30.911121, draft: false },
     subject: "Fuel pump spares & transport — Arua site", narrative: "Emergency replacement parts and local transport to reach the Arua station callout.",
     lineItems: [{ description: "Dispenser nozzle set", qty: 2, rate: 85000 }, { description: "Local transport (boda + fuel)", qty: 1, rate: 60000 }],
+    supervisorIds: ["GLA-004", "GLA-008"],
     status: "pending_supervisor", createdAt: "2026-11-11T08:20:00Z",
     history: [{ at: "2026-11-11T08:20:00Z", by: "GLA-006", byName: "Peter Wanyama", action: "submitted", note: "" }],
   }),
@@ -467,6 +511,7 @@ data.requisitions = [
     location: { stationId: null, name: "Rubis Nakaseke (new site survey)", area: "Nakaseke", draft: true },
     subject: "Site survey allowance — Nakaseke", narrative: "Per-diem and airtime for a two-day new-site survey.",
     lineItems: [{ description: "Field per-diem (2 days)", qty: 2, rate: 70000 }, { description: "Airtime & data", qty: 1, rate: 20000 }],
+    supervisorIds: ["GLA-004", "GLA-008"],
     status: "pending_admin", createdAt: "2026-11-10T06:40:00Z",
     supervisor: { id: "GLA-004", name: "David Mugisha", at: "2026-11-10T09:15:00Z" },
     history: [

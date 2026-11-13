@@ -42,6 +42,16 @@ async function actorIsSupervisor(req) {
     return !!(rows[0] && rows[0].doc && rows[0].doc.isSupervisor);
   } catch { return false; }
 }
+// Can this employee give first-level approval on this requisition? It uses the
+// approver pool snapshotted on the requisition (any one of several assigned
+// supervisors may act, so a request isn't stuck when one is away). When no pool
+// was recorded, it falls back to "any flagged supervisor". Never the requester.
+function canSuperviseRec(rec, empId, isSup) {
+  if (!empId || !rec || rec.requesterId === empId) return false;
+  const pool = Array.isArray(rec.supervisorIds) ? rec.supervisorIds : [];
+  if (pool.length) return pool.includes(empId);
+  return !!isSup;
+}
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 
 // Tables a staff user may read, limited to rows they own. "__self__" means the
@@ -98,6 +108,7 @@ async function createRequisition(req, res, next) {
       currency: body.currency || "UGX",
       lineItems: Array.isArray(body.lineItems) ? body.lineItems.map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })) : [],
       documents: Array.isArray(body.documents) ? body.documents : [],
+      supervisorIds: Array.isArray(e.supervisorIds) ? e.supervisorIds : [],   // approver pool from the requester's profile (authoritative)
       status,                             // only draft or pending_supervisor on create
       supervisor: null, admin: null, rejection: null,
       history: status === "pending_supervisor" ? [{ at: now, by: empId, byName: requesterName, action: "submitted", note: "" }] : [],
@@ -124,6 +135,7 @@ async function updateRequisition(req, res, next) {
     const hrAdmin = isHrAdmin(req);
     const owner = rec.requesterId === empId;
     const sup = await actorIsSupervisor(req);
+    const canSup = canSuperviseRec(rec, empId, sup);   // may give first-level approval on THIS request
     const target = body.status;
     const note = String(body.note || (body.rejection && body.rejection.reason) || "").slice(0, 1000);
     const editable = (b) => pick(b, ["subject", "narrative", "location", "lineItems", "documents", "currency"]);
@@ -134,9 +146,9 @@ async function updateRequisition(req, res, next) {
       patch = { ...editable(body), updatedAt: now };                                   // owner edits own draft
     } else if (owner && rec.status === "draft" && target === "pending_supervisor") {
       patch = { ...editable(body), status: "pending_supervisor", updatedAt: now, history: hist("submitted") }; // owner submits
-    } else if (sup && !owner && rec.status === "pending_supervisor" && target === "pending_admin") {
+    } else if (canSup && rec.status === "pending_supervisor" && target === "pending_admin") {
       patch = { status: "pending_admin", supervisor: { id: empId, name, at: now }, updatedAt: now, history: hist("supervisor_approved") };
-    } else if (sup && !owner && rec.status === "pending_supervisor" && target === "rejected") {
+    } else if (canSup && rec.status === "pending_supervisor" && target === "rejected") {
       patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage: "supervisor" }, updatedAt: now, history: hist("supervisor_rejected") };
     } else if (hrAdmin && rec.status === "pending_admin" && target === "approved") {
       patch = { status: "approved", admin: { id: empId, name, at: now }, updatedAt: now, history: hist("admin_approved") };
@@ -165,9 +177,11 @@ export function crudRouter(table) {
         if (table === "payroll_runs") {
           recs = recs.map((r) => shapeForStaff(table, r, empId)).filter((r) => (r.rows || []).length);
         } else if (table === "requisitions") {
-          // Own requests, plus (for supervisors) anything awaiting first-level approval.
+          // Own requests, plus anything awaiting first-level approval that THIS
+          // supervisor is assigned to clear (any one of a request's assigned
+          // supervisors can act on it).
           const sup = await actorIsSupervisor(req);
-          recs = recs.filter((r) => r.requesterId === empId || (sup && r.status === "pending_supervisor"));
+          recs = recs.filter((r) => r.requesterId === empId || (r.status === "pending_supervisor" && canSuperviseRec(r, empId, sup)));
         } else if (OWN_FIELD[table]) {
           recs = recs.filter((r) => owns(table, r, empId));
         } else if (!STAFF_CONFIG_READ.has(table)) {
@@ -189,7 +203,7 @@ export function crudRouter(table) {
         if (table === "payroll_runs") rec = shapeForStaff(table, rec, empId);
         else if (table === "requisitions") {
           const sup = await actorIsSupervisor(req);
-          if (!(rec.requesterId === empId || (sup && rec.status === "pending_supervisor")))
+          if (!(rec.requesterId === empId || (rec.status === "pending_supervisor" && canSuperviseRec(rec, empId, sup))))
             return res.status(403).json({ error: "You do not have permission to view this record." });
         }
         else if (!STAFF_CONFIG_READ.has(table) && !owns(table, rec, empId)) {

@@ -27,6 +27,7 @@ import {
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
   normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, REQ_STAGES, reqStageIndex,
+  supervisorChoices, supervisorsForEmployee, supervisorPoolIds, canSuperviseReq,
   PERMISSION_MODULES, PERMISSION_ACTIONS, roleById,
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
   itemValuation, avgCost, movementDelta, sortedMovements, suggestedOrderQty, avgDailyUsage, daysOfCover,
@@ -999,6 +1000,8 @@ function ReqForm({ ctx, onDone }) {
   const reqName = linked ? `${me.firstName || ""} ${me.lastName || ""}`.trim() : rqName;
   const reqDesig = linked ? (me.jobTitle || "") : rqDesig;
   const reqDept = linked ? (me.department || "") : rqDept;
+  // The supervisors this request will route to (any one of them can approve).
+  const supPool = supervisorsForEmployee(me, ctx.store.employees || []);
   const [location, setLocation] = useState(null);
   const [subject, setSubject] = useState("");
   const [narrative, setNarrative] = useState("");
@@ -1021,7 +1024,7 @@ function ReqForm({ ctx, onDone }) {
         designation: reqDesig, department: reqDept,
         location, subject: subject.trim(), narrative: narrative.trim(),
         lineItems: valid.map((it) => ({ description: it.description.trim(), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
-        documents: docs, status: "pending_supervisor",
+        documents: docs, supervisorIds: Array.isArray(me.supervisorIds) ? me.supervisorIds : [], status: "pending_supervisor",
       });
       await ctx.reload();
       if (onDone) onDone();
@@ -1040,6 +1043,15 @@ function ReqForm({ ctx, onDone }) {
             <Field label="Designation"><Input value={reqDesig} disabled={linked} onChange={linked ? undefined : (e) => setRqDesig(e.target.value)} placeholder="Your role / title" /></Field>
             <Field label="Department"><Input value={reqDept} disabled={linked} onChange={linked ? undefined : (e) => setRqDept(e.target.value)} placeholder="Your department" /></Field>
             <Field label="Currency"><Input value="UGX — Uganda Shilling" disabled /></Field>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>First-level approver{supPool.length === 1 ? "" : "s"}</div>
+              {supPool.length ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+                  {supPool.map((s) => <Pill key={s.id} tone="accent">{s.firstName} {s.lastName}</Pill>)}
+                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>— any one of them can approve, so it won't wait on a single person.</span>
+                </div>
+              ) : <div style={{ fontSize: 11.5, color: "var(--muted)" }}>No supervisor is assigned yet — any field supervisor can approve this request.</div>}
+            </div>
           </div>
         </Card>
         <Card style={{ padding: 0 }}>
@@ -1091,7 +1103,7 @@ function ReqForm({ ctx, onDone }) {
           <Btn variant="primary" disabled={busy} onClick={submit}><Send size={15} />{busy ? "Submitting…" : "Submit for approval"}</Btn>
         </div>
       </div>
-      <div style={{ position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "pending_supervisor" }} /></div>
+      <div style={{ position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "draft" }} /></div>
     </div>
   );
 }
@@ -1135,10 +1147,10 @@ function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
 function ReqDetail({ ctx, r, onClose }) {
   const me = ctx.currentEmp || {};
   const role = me.roleId || (ctx.auth && ctx.auth.role) || "staff";
-  const isSup = !!me.isSupervisor;
+  const myId = me.id || (ctx.auth && ctx.auth.empId);
   const hrAdmin = ["admin", "hr"].includes(role);
-  const owner = r.requesterId === (me.id || (ctx.auth && ctx.auth.empId));
-  const canL1 = isSup && r.status === "pending_supervisor" && !owner;
+  const owner = r.requesterId === myId;
+  const canL1 = r.status === "pending_supervisor" && canSuperviseReq(r, myId, ctx.store.employees || []);
   const canL2 = hrAdmin && r.status === "pending_admin";
   const canAct = canL1 || canL2;
   const [busy, setBusy] = useState(false);
@@ -1146,6 +1158,7 @@ function ReqDetail({ ctx, r, onClose }) {
   const [note, setNote] = useState("");
   const total = reqTotal(r);
   const loc = r.location || {};
+  const poolNames = (r.supervisorIds || []).map((id) => { const e = (ctx.store.employees || []).find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : id; });
   const act = async (status) => {
     setBusy(true);
     try {
@@ -1173,6 +1186,7 @@ function ReqDetail({ ctx, r, onClose }) {
             <ReqInfo label="Requester" value={<span>{r.requesterName || "—"}{r.designation ? ` · ${r.designation}` : ""}</span>} />
             <ReqInfo label="Department" value={r.department || "—"} />
             <ReqInfo label="Location" value={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{loc.name || "—"}{loc.area ? ` · ${loc.area}` : ""}{loc.draft ? <Pill tone="warning">Draft</Pill> : loc.stationId ? <Pill tone="info">Station</Pill> : null}</span>} />
+            <ReqInfo label="First-level approver(s)" value={r.supervisor ? <span>{r.supervisor.name} <Pill tone="success">Approved</Pill></span> : poolNames.length ? poolNames.map((n, i) => <Pill key={i} tone="accent">{n}</Pill>) : <span style={{ color: "var(--muted)" }}>Any field supervisor</span>} />
             <ReqInfo label="Status" value={<Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill>} />
           </div>
           {r.narrative && <div style={{ fontSize: 12.5, color: "var(--text-2)", background: "var(--surface)", borderRadius: 10, padding: "10px 12px" }}>{r.narrative}</div>}
@@ -1218,9 +1232,10 @@ function Requisitions({ ctx }) {
   const hrAdmin = ["admin", "hr"].includes(role);
   const canApprove = isSup || hrAdmin;
   const all = ctx.store.requisitions || [];
+  const employees = ctx.store.employees || [];
   const mine = all.filter((r) => r.requesterId === myId).slice().sort(byCreatedDesc);
   const queue = [
-    ...(isSup ? all.filter((r) => r.status === "pending_supervisor" && r.requesterId !== myId) : []),
+    ...(isSup ? all.filter((r) => r.status === "pending_supervisor" && canSuperviseReq(r, myId, employees)) : []),
     ...(hrAdmin ? all.filter((r) => r.status === "pending_admin") : []),
   ].sort(byCreatedDesc);
   const [tab, setTab] = useState("mine");
@@ -2312,6 +2327,33 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
         <Field label="Employer type (PAYE basis)" hint="Primary → progressive URA bands. Secondary → flat 40% (Global Link is not this person's main employer)."><Select value={f.employerType || "primary"} onChange={set("employerType")} options={[{ value: "primary", label: "Primary employer — progressive PAYE" }, { value: "secondary", label: "Secondary employer — 40% flat" }]} /></Field>
         <Field label="Field supervisor" hint="Gives first-level approval on staff requisitions."><Select value={f.isSupervisor ? "yes" : "no"} onChange={(e) => setF((s) => ({ ...s, isSupervisor: e.target.value === "yes" }))} options={[{ value: "no", label: "No" }, { value: "yes", label: "Yes — approves requisitions" }]} /></Field>
+        {(() => {
+          const choices = supervisorChoices(ctx.store.employees || []).filter((e) => e.id !== f.id);
+          const sel = Array.isArray(f.supervisorIds) ? f.supervisorIds : [];
+          const toggle = (sid) => setF((s) => { const cur = Array.isArray(s.supervisorIds) ? s.supervisorIds : []; return { ...s, supervisorIds: cur.includes(sid) ? cur.filter((x) => x !== sid) : [...cur, sid] }; });
+          return (
+            <Field label="Assigned supervisor(s)" full hint="Who approves this person's requisitions first. Assign two or more so a request isn't held up when one is away — any assigned supervisor can approve.">
+              {choices.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No field supervisors yet. Set “Field supervisor” to Yes on a staff record first, then assign them here.</div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {choices.map((e) => {
+                    const on = sel.includes(e.id);
+                    return (
+                      <button key={e.id} type="button" onClick={() => toggle(e.id)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999, cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "var(--brand)" : "var(--border)"), background: on ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)" }}>
+                        {on ? <Check size={14} style={{ color: "var(--brand)" }} /> : <Plus size={14} style={{ color: "var(--muted)" }} />}
+                        {e.firstName} {e.lastName}
+                        <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>{e.jobTitle || ""}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {sel.length > 0 && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-2)" }}>{sel.length} supervisor{sel.length === 1 ? "" : "s"} assigned — any one of them can approve. If none were assigned, every field supervisor would see the request.</div>}
+            </Field>
+          );
+        })()}
         <Field label="Position (full title)" full><Input value={f.position} onChange={set("position")} placeholder="e.g. Deputy Chief ICT Officer, Directorate of ICT" /></Field>
 
         {canManageLogin && <LoginAccessSection ctx={ctx} empId={id} />}
