@@ -370,7 +370,12 @@ export default function App() {
     }
   };
 
-  const ctx = { store, setStore, empById, reload, setModal, auth, currentEmp: auth ? empById(auth.empId) : null, signOut };
+  // Resolve the signed-in user's staff record by empId, falling back to an email
+  // match so accounts whose emp link is missing/mismatched still resolve.
+  const currentEmp = auth
+    ? (empById(auth.empId) || (auth.email ? (store.employees || []).find((e) => (e.email || "").toLowerCase() === String(auth.email).toLowerCase()) : null) || null)
+    : null;
+  const ctx = { store, setStore, empById, reload, setModal, auth, currentEmp, signOut };
 
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
@@ -987,6 +992,13 @@ function ReqLocationPicker({ value, onChange }) {
 
 function ReqForm({ ctx, onDone }) {
   const me = ctx.currentEmp || {};
+  const linked = !!ctx.currentEmp;                 // staff record resolved → fields auto-fill, read-only
+  const [rqName, setRqName] = useState((ctx.auth && ctx.auth.name) || "");
+  const [rqDesig, setRqDesig] = useState("");
+  const [rqDept, setRqDept] = useState("");
+  const reqName = linked ? `${me.firstName || ""} ${me.lastName || ""}`.trim() : rqName;
+  const reqDesig = linked ? (me.jobTitle || "") : rqDesig;
+  const reqDept = linked ? (me.department || "") : rqDept;
   const [location, setLocation] = useState(null);
   const [subject, setSubject] = useState("");
   const [narrative, setNarrative] = useState("");
@@ -1005,8 +1017,8 @@ function ReqForm({ ctx, onDone }) {
     setBusy(true);
     try {
       await requisitionsApi.create({
-        requesterId: me.id, requesterName: `${me.firstName || ""} ${me.lastName || ""}`.trim(),
-        designation: me.jobTitle || "", department: me.department || "",
+        requesterId: me.id, requesterName: reqName,
+        designation: reqDesig, department: reqDept,
         location, subject: subject.trim(), narrative: narrative.trim(),
         lineItems: valid.map((it) => ({ description: it.description.trim(), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
         documents: docs, status: "pending_supervisor",
@@ -1024,9 +1036,9 @@ function ReqForm({ ctx, onDone }) {
         <Card style={{ padding: 0 }}>
           <CardHead title="Requester" sub="From your profile" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Name"><Input value={`${me.firstName || ""} ${me.lastName || ""}`.trim()} disabled /></Field>
-            <Field label="Designation"><Input value={me.jobTitle || ""} disabled /></Field>
-            <Field label="Department"><Input value={me.department || ""} disabled /></Field>
+            <Field label="Name"><Input value={reqName} disabled={linked} onChange={linked ? undefined : (e) => setRqName(e.target.value)} placeholder="Your name" /></Field>
+            <Field label="Designation"><Input value={reqDesig} disabled={linked} onChange={linked ? undefined : (e) => setRqDesig(e.target.value)} placeholder="Your role / title" /></Field>
+            <Field label="Department"><Input value={reqDept} disabled={linked} onChange={linked ? undefined : (e) => setRqDept(e.target.value)} placeholder="Your department" /></Field>
             <Field label="Currency"><Input value="UGX — Uganda Shilling" disabled /></Field>
           </div>
         </Card>
