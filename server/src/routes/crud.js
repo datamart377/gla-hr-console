@@ -20,7 +20,7 @@ const PREFIXES = {
   ledger_columns: "col", payroll_runs: "PR", suppliers: "SUP",
   supplier_schedule: "SL", supplier_runs: "SPR", advances: "ADV",
   stock_items: "STK", stock_movements: "MOV", stock_closings: "CLS",
-  bank_approvals: "BAPP",
+  bank_approvals: "BAPP", requisitions: "REQ",
 };
 
 const genId = (table) => {
@@ -32,15 +32,26 @@ const genId = (table) => {
 // ---- Role / ownership policy ----------------------------------------------
 const MGMT = new Set(["admin", "hr", "finance"]);
 const isMgmt = (req) => MGMT.has(req.user && req.user.role);
+// Final (second-level) requisition approvers: HR & Admin only.
+const isHrAdmin = (req) => ["admin", "hr"].includes(req.user && req.user.role);
+// First-level requisition approver: any employee flagged isSupervisor (looked up live).
+async function actorIsSupervisor(req) {
+  if (!req.user || !req.user.empId) return false;
+  try {
+    const { rows } = await query(`SELECT doc FROM employees WHERE id = $1`, [req.user.empId]);
+    return !!(rows[0] && rows[0].doc && rows[0].doc.isSupervisor);
+  } catch { return false; }
+}
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 
 // Tables a staff user may read, limited to rows they own. "__self__" means the
 // employee record whose id equals their empId; otherwise the named doc field
 // must equal their empId.
-const OWN_FIELD = { employees: "__self__", leave: "empId", attendance: "empId", advances: "empId", appraisals: "empId" };
+const OWN_FIELD = { employees: "__self__", leave: "empId", attendance: "empId", advances: "empId", appraisals: "empId", requisitions: "requesterId" };
 // Non-sensitive configuration a staff user may read in full.
 const STAFF_CONFIG_READ = new Set(["ledger_columns"]);
 // Tables a staff user may create a row in (ownership is forced to their empId).
-const STAFF_CREATE = new Set(["leave", "attendance", "advances"]);
+const STAFF_CREATE = new Set(["leave", "attendance", "advances", "requisitions"]);
 // Fields a staff user may change on their OWN row. undefined => no updates
 // allowed; a Set => only those fields; null => any field on their own row.
 const STAFF_UPDATE_FIELDS = {
@@ -64,6 +75,82 @@ function shapeForStaff(table, rec, empId) {
   return rec;
 }
 
+// ---- Requisitions: dedicated create + approval-transition handlers ---------
+// Ownership and approval state are stamped server-side, never trusted from the
+// client, so no one can self-approve or forge another person's request.
+async function createRequisition(req, res, next) {
+  try {
+    const empId = req.user.empId;
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const emp = await query(`SELECT doc FROM employees WHERE id = $1`, [empId]);
+    const e = (emp.rows[0] && emp.rows[0].doc) || {};
+    const now = new Date().toISOString();
+    const status = body.status === "draft" ? "draft" : "pending_supervisor";
+    const requesterName = body.requesterName || `${e.firstName || ""} ${e.lastName || ""}`.trim();
+    const doc = {
+      requesterId: empId,                 // forced to the authenticated user
+      requesterName,
+      designation: body.designation || e.jobTitle || "",
+      department: body.department || e.department || "",
+      location: body.location || null,
+      subject: body.subject || "",
+      narrative: body.narrative || "",
+      currency: body.currency || "UGX",
+      lineItems: Array.isArray(body.lineItems) ? body.lineItems.map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })) : [],
+      documents: Array.isArray(body.documents) ? body.documents : [],
+      status,                             // only draft or pending_supervisor on create
+      supervisor: null, admin: null, rejection: null,
+      history: status === "pending_supervisor" ? [{ at: now, by: empId, byName: requesterName, action: "submitted", note: "" }] : [],
+      createdAt: now, updatedAt: now,
+    };
+    const id = body.id || genId("requisitions");
+    const { rows } = await query(`INSERT INTO requisitions (id, doc) VALUES ($1, $2) RETURNING id, doc`, [id, JSON.stringify(doc)]);
+    res.status(201).json(rowToRecord(rows[0]));
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "A requisition with that id already exists." });
+    next(e);
+  }
+}
+
+async function updateRequisition(req, res, next) {
+  try {
+    const { rows } = await query(`SELECT id, doc FROM requisitions WHERE id = $1`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Requisition not found." });
+    const rec = { ...rows[0].doc, id: rows[0].id };
+    const empId = req.user.empId;
+    const name = req.user.name || "";
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const now = new Date().toISOString();
+    const hrAdmin = isHrAdmin(req);
+    const owner = rec.requesterId === empId;
+    const sup = await actorIsSupervisor(req);
+    const target = body.status;
+    const note = String(body.note || (body.rejection && body.rejection.reason) || "").slice(0, 1000);
+    const editable = (b) => pick(b, ["subject", "narrative", "location", "lineItems", "documents", "currency"]);
+    const hist = (action) => [...(rec.history || []), { at: now, by: empId, byName: name, action, note: action === "submitted" ? "" : note }];
+
+    let patch = null;
+    if (owner && rec.status === "draft" && (!target || target === "draft")) {
+      patch = { ...editable(body), updatedAt: now };                                   // owner edits own draft
+    } else if (owner && rec.status === "draft" && target === "pending_supervisor") {
+      patch = { ...editable(body), status: "pending_supervisor", updatedAt: now, history: hist("submitted") }; // owner submits
+    } else if (sup && !owner && rec.status === "pending_supervisor" && target === "pending_admin") {
+      patch = { status: "pending_admin", supervisor: { id: empId, name, at: now }, updatedAt: now, history: hist("supervisor_approved") };
+    } else if (sup && !owner && rec.status === "pending_supervisor" && target === "rejected") {
+      patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage: "supervisor" }, updatedAt: now, history: hist("supervisor_rejected") };
+    } else if (hrAdmin && rec.status === "pending_admin" && target === "approved") {
+      patch = { status: "approved", admin: { id: empId, name, at: now }, updatedAt: now, history: hist("admin_approved") };
+    } else if (hrAdmin && rec.status === "pending_admin" && target === "rejected") {
+      patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage: "admin" }, updatedAt: now, history: hist("admin_rejected") };
+    }
+    if (!patch) return res.status(403).json({ error: "You can't make that change to this requisition." });
+    const merged = { ...rec, ...patch };
+    const { id: _omit, ...doc } = merged;
+    const out = await query(`UPDATE requisitions SET doc = $2::jsonb, updated_at = now() WHERE id = $1 RETURNING id, doc`, [req.params.id, JSON.stringify(doc)]);
+    res.json(rowToRecord(out.rows[0]));
+  } catch (e) { next(e); }
+}
+
 export function crudRouter(table) {
   const router = Router();
   router.use(requireAuth);
@@ -77,6 +164,10 @@ export function crudRouter(table) {
         const empId = req.user.empId;
         if (table === "payroll_runs") {
           recs = recs.map((r) => shapeForStaff(table, r, empId)).filter((r) => (r.rows || []).length);
+        } else if (table === "requisitions") {
+          // Own requests, plus (for supervisors) anything awaiting first-level approval.
+          const sup = await actorIsSupervisor(req);
+          recs = recs.filter((r) => r.requesterId === empId || (sup && r.status === "pending_supervisor"));
         } else if (OWN_FIELD[table]) {
           recs = recs.filter((r) => owns(table, r, empId));
         } else if (!STAFF_CONFIG_READ.has(table)) {
@@ -96,6 +187,11 @@ export function crudRouter(table) {
       if (!isMgmt(req)) {
         const empId = req.user.empId;
         if (table === "payroll_runs") rec = shapeForStaff(table, rec, empId);
+        else if (table === "requisitions") {
+          const sup = await actorIsSupervisor(req);
+          if (!(rec.requesterId === empId || (sup && rec.status === "pending_supervisor")))
+            return res.status(403).json({ error: "You do not have permission to view this record." });
+        }
         else if (!STAFF_CONFIG_READ.has(table) && !owns(table, rec, empId)) {
           return res.status(403).json({ error: "You do not have permission to view this record." });
         }
@@ -107,6 +203,7 @@ export function crudRouter(table) {
   // CREATE
   router.post("/", async (req, res, next) => {
     try {
+      if (table === "requisitions") return createRequisition(req, res, next);
       const body = req.body && typeof req.body === "object" ? { ...req.body } : {};
       if (!isMgmt(req)) {
         if (!STAFF_CREATE.has(table)) return res.status(403).json({ error: "You do not have permission to create this record." });
@@ -128,6 +225,7 @@ export function crudRouter(table) {
   // UPDATE (merge patch into the existing doc)
   const update = async (req, res, next) => {
     try {
+      if (table === "requisitions") return updateRequisition(req, res, next);
       let patch = req.body && typeof req.body === "object" ? { ...req.body } : {};
       delete patch.id;
       if (!isMgmt(req)) {

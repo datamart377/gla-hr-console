@@ -132,7 +132,7 @@ export const data = {
     { id: "GLA-003", firstName: "Grace", lastName: "Auma", gender: "Female", dob: "1990-07-19", nationalId: "CF900719077EF", phone: "+256 700 551 034", email: "g.auma@glassociates.co.ug", address: "Bukoto, Kampala", department: "Human Resources & Sales and Marketing Department", jobTitle: "Accountant", contractType: "Permanent", employmentDate: "2017-09-04", status: "Active", grossSalary: 2900000, nssfNumber: "NSSF-0351034", tin: "1000567812", bankName: "Stanbic Bank", bankAccount: "9030007788110", emergencyName: "Peter Auma", emergencyPhone: "+256 758 300 221", emergencyRelation: "Father", annualUsed: 3, sickUsed: 5,
       maritalStatus: "single",
       academicQualifications: [{ title: "ACCA", institution: "ACCA Global", awardDate: "2019-03-12", type: "CERTIFICATE", highest: "Yes", status: "Approved" }] },
-    { id: "GLA-004", firstName: "David", lastName: "Mugisha", gender: "Male", dob: "1986-01-28", nationalId: "CM860128033GH", phone: "+256 772 660 908", email: "d.mugisha@glassociates.co.ug", address: "Kireka, Wakiso", department: "Engineering Department", jobTitle: "Service Engineer", contractType: "Permanent", employmentDate: "2016-05-10", status: "On Leave", grossSalary: 2450000, nssfNumber: "NSSF-0460908", tin: "1000678123", bankName: "Absa Bank", bankAccount: "6009123400567", emergencyName: "Ruth Mugisha", emergencyPhone: "+256 703 880 552", emergencyRelation: "Spouse", annualUsed: 14, sickUsed: 1,
+    { id: "GLA-004", isSupervisor: true, firstName: "David", lastName: "Mugisha", gender: "Male", dob: "1986-01-28", nationalId: "CM860128033GH", phone: "+256 772 660 908", email: "d.mugisha@glassociates.co.ug", address: "Kireka, Wakiso", department: "Engineering Department", jobTitle: "Service Engineer", contractType: "Permanent", employmentDate: "2016-05-10", status: "On Leave", grossSalary: 2450000, nssfNumber: "NSSF-0460908", tin: "1000678123", bankName: "Absa Bank", bankAccount: "6009123400567", emergencyName: "Ruth Mugisha", emergencyPhone: "+256 703 880 552", emergencyRelation: "Spouse", annualUsed: 14, sickUsed: 1,
       maritalStatus: "married",
       nextOfKin: [{ surname: "Mugisha", otherNames: "Ruth", relationship: "SPOUSE", contact: "+256 703 880 552", address: "Kireka, Wakiso" }] },
     { id: "GLA-005", firstName: "Joseph", lastName: "Ssekandi", gender: "Male", dob: "1993-09-06", nationalId: "CM930906088IJ", phone: "+256 704 231 776", email: "j.ssekandi@glassociates.co.ug", address: "Nabweru, Wakiso", department: "Engineering Department", jobTitle: "Workshop Technician", contractType: "Fixed-term", employmentDate: "2021-03-01", status: "Active", grossSalary: 1650000, nssfNumber: "NSSF-0531776", tin: "1000789234", bankName: "Equity Bank", bankAccount: "1001234567890", emergencyName: "Mary Ssekandi", emergencyPhone: "+256 772 445 019", emergencyRelation: "Mother", annualUsed: 5, sickUsed: 0, maritalStatus: "single" },
@@ -401,6 +401,80 @@ export const roleById = (id) => (data.settings.roles || []).find((r) => r.id ===
 // Organisation structure helpers (driven by admin-editable settings.departments).
 export const deptList = () => (data.settings?.departments || []).map((d) => d.name);
 export const positionsFor = (name) => ((data.settings?.departments || []).find((d) => d.name === name)?.positions) || [];
+
+/* ===================== Requisitions (field fund requests) =====================
+   Any staff member can raise a requisition for funds while working in the field.
+   Two-level approval: a Supervisor reviews first, then HR & Admin give final
+   approval. The location is either an existing station (from GEOFENCES) or a
+   free-text "draft" location the requester types in. A Supervisor is any employee
+   flagged isSupervisor; HR & Admin are the hr/admin roles. */
+export const REQ_STATUSES = ["draft", "pending_supervisor", "pending_admin", "approved", "rejected"];
+export const reqStatusLabel = (s) => ({
+  draft: "Draft", pending_supervisor: "Awaiting Supervisor", pending_admin: "Awaiting HR & Admin",
+  approved: "Approved", rejected: "Rejected",
+}[s] || s);
+export const reqStatusTone = (s) => ({
+  draft: "muted", pending_supervisor: "warning", pending_admin: "accent", approved: "success", rejected: "danger",
+}[s] || "muted");
+export const reqTotal = (r) => (r?.lineItems || []).reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+// Approval workflow stages (drives the workflow map). "rejected" is an off-path terminal state.
+export const REQ_STAGES = [
+  { key: "submitted", label: "Submitted", who: "Requesting staff", desc: "Composes the fund request and attaches supporting documents." },
+  { key: "supervisor", label: "Supervisor approval", who: "Supervisor", desc: "First-level field review and approval." },
+  { key: "admin", label: "HR & Admin approval", who: "HR & Admin", desc: "Final approval of the request." },
+  { key: "approved", label: "Approved", who: "Finance / Accounts", desc: "Request approved — ready for disbursement." },
+];
+// Index into REQ_STAGES for a status (how far it has progressed). -1 => rejected.
+export const reqStageIndex = (status) => ({ draft: 0, pending_supervisor: 1, pending_admin: 2, approved: 3, rejected: -1 }[status] ?? 0);
+
+export function normalizeRequisition(r = {}) {
+  const lineItems = (Array.isArray(r.lineItems) && r.lineItems.length ? r.lineItems : [{ description: "", qty: 1, rate: 0 }])
+    .map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 }));
+  return {
+    id: r.id,
+    requesterId: r.requesterId || "",
+    requesterName: r.requesterName || "",
+    designation: r.designation || "",
+    department: r.department || "",
+    location: r.location || null,          // { stationId, name, area, lat, lng, draft }
+    subject: r.subject || "",
+    narrative: r.narrative || "",
+    currency: r.currency || "UGX",
+    lineItems,
+    documents: Array.isArray(r.documents) ? r.documents : [],   // [{ name, size }]
+    status: REQ_STATUSES.includes(r.status) ? r.status : "pending_supervisor",
+    history: Array.isArray(r.history) ? r.history : [],          // [{ at, by, byName, action, note }]
+    createdAt: r.createdAt || new Date().toISOString(),
+    updatedAt: r.updatedAt || new Date().toISOString(),
+    supervisor: r.supervisor || null,      // { id, name, at }
+    admin: r.admin || null,                // { id, name, at }
+    rejection: r.rejection || null,        // { by, byName, at, reason, stage }
+  };
+}
+
+// Seed demo requisitions (mock build only — the live table starts empty).
+data.requisitions = [
+  normalizeRequisition({
+    id: "REQ-1001", requesterId: "GLA-006", requesterName: "Peter Wanyama", designation: "Field Service Technician", department: "Engineering Department",
+    location: { stationId: "ST-0001", name: "Shell Arua (Pakwach Road)", area: "Arua", lat: 3.008484, lng: 30.911121, draft: false },
+    subject: "Fuel pump spares & transport — Arua site", narrative: "Emergency replacement parts and local transport to reach the Arua station callout.",
+    lineItems: [{ description: "Dispenser nozzle set", qty: 2, rate: 85000 }, { description: "Local transport (boda + fuel)", qty: 1, rate: 60000 }],
+    status: "pending_supervisor", createdAt: "2026-11-11T08:20:00Z",
+    history: [{ at: "2026-11-11T08:20:00Z", by: "GLA-006", byName: "Peter Wanyama", action: "submitted", note: "" }],
+  }),
+  normalizeRequisition({
+    id: "REQ-1002", requesterId: "GLA-009", requesterName: "Juma Katongole", designation: "Technical Support Staff", department: "Engineering Department",
+    location: { stationId: null, name: "Rubis Nakaseke (new site survey)", area: "Nakaseke", draft: true },
+    subject: "Site survey allowance — Nakaseke", narrative: "Per-diem and airtime for a two-day new-site survey.",
+    lineItems: [{ description: "Field per-diem (2 days)", qty: 2, rate: 70000 }, { description: "Airtime & data", qty: 1, rate: 20000 }],
+    status: "pending_admin", createdAt: "2026-11-10T06:40:00Z",
+    supervisor: { id: "GLA-004", name: "David Mugisha", at: "2026-11-10T09:15:00Z" },
+    history: [
+      { at: "2026-11-10T06:40:00Z", by: "GLA-009", byName: "Juma Katongole", action: "submitted", note: "" },
+      { at: "2026-11-10T09:15:00Z", by: "GLA-004", byName: "David Mugisha", action: "supervisor_approved", note: "Approved — survey is on the Q4 plan." },
+    ],
+  }),
+];
 
 // Salary advance requests. Staff request an amount + repayment months; HR/Admin
 // approves as-is, approves with modifications (adjusted amount/months), or rejects.

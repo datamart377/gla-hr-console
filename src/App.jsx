@@ -8,6 +8,7 @@ import {
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
+  Receipt, Send, MapPinned,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
@@ -16,7 +17,7 @@ import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
-  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi,
+  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi,
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
@@ -25,6 +26,7 @@ import {
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
+  normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, REQ_STAGES, reqStageIndex,
   PERMISSION_MODULES, PERMISSION_ACTIONS, roleById,
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
   itemValuation, avgCost, movementDelta, sortedMovements, suggestedOrderQty, avgDailyUsage, daysOfCover,
@@ -257,6 +259,7 @@ const NAV = [
   { id: "payroll", label: "Payroll", Icon: Wallet, section: "Finance" },
   { id: "advances", label: "Salary Advances", Icon: Banknote, section: "Finance" },
   { id: "suppliers", label: "Suppliers", Icon: Building2, section: "Finance" },
+  { id: "requisitions", label: "Requisitions", Icon: Receipt, section: "Finance" },
   { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
   { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
@@ -278,6 +281,7 @@ const VIEW_META = {
   payroll: ["Payroll", "Monthly PAYE & NSSF computation (URA rates)"],
   advances: ["Salary Advances", "Staff advance requests, approvals and repayment plans"],
   suppliers: ["Suppliers Register", "Vendor master — bank details, TIN, contacts and tax defaults"],
+  requisitions: ["Requisitions", "Field fund requests — Supervisor then HR & Admin approval"],
   stock: ["Stock Management", "Stock in / out with automatic month-end balancing"],
   appraisals: ["Performance Appraisals", "Competency reviews and ratings"],
   reports: ["HR Reports", "Staff analytics — attendance, workforce, leave and payroll"],
@@ -287,7 +291,7 @@ const VIEW_META = {
 };
 
 export default function App() {
-  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], settings: null });
+  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], settings: null });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [auth, setAuth] = useState(null); // { empId, role }
@@ -295,13 +299,13 @@ export default function App() {
   const [idleWarn, setIdleWarn] = useState(false); // inactivity warning banner
 
   const reload = async () => {
-    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, settings] = await Promise.all([
+    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, settings] = await Promise.all([
       employeesApi.list(), leaveApi.list(), attendanceApi.list(), appraisalsApi.list(),
-      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), settingsApi.get(),
+      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), settingsApi.get(),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
     setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
-    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, settings });
+    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, settings });
   };
   useEffect(() => {
     (async () => {
@@ -435,7 +439,7 @@ function AdminConsole({ ctx }) {
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView }[view];
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView }[view];
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -880,6 +884,7 @@ const STAFF_META = {
   myleave: ["My Leave", "Apply for and track your leave"],
   mypayslip: ["My Payslip", "Your monthly pay breakdown"],
   myadvance: ["Salary Advance", "Request an advance and track repayment"],
+  requisitions: ["Requisitions", "Request funds in the field and track approvals"],
   myfile: ["My File", "Your electronic staff record"],
 };
 const STAFF_NAV = [
@@ -889,9 +894,356 @@ const STAFF_NAV = [
   ["myleave", "My Leave", CalendarDays],
   ["mypayslip", "My Payslip", Wallet],
   ["myadvance", "Salary Advance", Banknote],
+  ["requisitions", "Requisitions", Receipt],
   ["myfile", "My File", IdCard],
 ];
 const byDateDesc = (a, b) => (b.date + (b.clockIn || "")).localeCompare(a.date + (a.clockIn || ""));
+
+/* ============================== Requisitions ==============================
+   Field fund requests. Any staff member can raise one; two-level approval —
+   Supervisor (first) then HR & Admin (final). The same component serves the
+   staff portal and the admin console; it adapts to the signed-in user's role. */
+const reqDate = (s) => (s ? new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+const reqDateTime = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+const byCreatedDesc = (a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+const reqActionLabel = (a) => ({ submitted: "Submitted", supervisor_approved: "Supervisor approved", supervisor_rejected: "Supervisor rejected", admin_approved: "HR & Admin approved", admin_rejected: "HR & Admin rejected" }[a] || a);
+
+function ReqInfo({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 12.5, color: "var(--text)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{value}</div>
+    </div>
+  );
+}
+
+function ReqWorkflowMap({ r }) {
+  const idx = reqStageIndex(r.status);
+  const rejected = r.status === "rejected";
+  return (
+    <Card style={{ padding: "16px 18px" }}>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Approval workflow</div>
+      {REQ_STAGES.map((st, i) => {
+        const done = !rejected && i < idx;
+        const current = !rejected && i === idx;
+        const last = i === REQ_STAGES.length - 1;
+        return (
+          <div key={st.key} style={{ display: "flex", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", flex: "none", display: "grid", placeItems: "center", background: done ? "var(--success)" : current ? "var(--accent)" : "var(--surface-2)", color: done || current ? "#fff" : "var(--muted)", fontSize: 11, fontWeight: 700 }}>{done ? <Check size={13} /> : i + 1}</div>
+              {!last && <div style={{ width: 2, flex: 1, minHeight: 24, background: done ? "var(--success)" : "var(--border)" }} />}
+            </div>
+            <div style={{ paddingBottom: last ? 0 : 16, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: current ? "var(--text)" : "var(--text-2)", display: "flex", alignItems: "center", gap: 7 }}>{st.label}{current && <Pill tone="accent">Current</Pill>}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{st.who}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-2)", marginTop: 3 }}>{st.desc}</div>
+            </div>
+          </div>
+        );
+      })}
+      {rejected && <div style={{ marginTop: 4, background: "var(--danger-dim)", color: "var(--danger)", padding: "9px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 600 }}>Rejected{r.rejection && r.rejection.reason ? ` — ${r.rejection.reason}` : ""}</div>}
+    </Card>
+  );
+}
+
+function ReqLocationPicker({ value, onChange }) {
+  const [mode, setMode] = useState(value && value.draft ? "new" : "station");
+  const [q, setQ] = useState("");
+  const [name, setName] = useState(value && value.draft ? value.name || "" : "");
+  const [area, setArea] = useState(value && value.draft ? value.area || "" : "");
+  const stations = getGeofences() || [];
+  const matches = q.trim() ? stations.filter((s) => `${s.name} ${s.area || ""}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8) : [];
+  const tabBtn = (m, label) => (
+    <button type="button" onClick={() => setMode(m)} style={{ flex: 1, padding: "8px 10px", borderRadius: 9, border: "1px solid " + (mode === m ? "var(--brand)" : "var(--border)"), background: mode === m ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>{label}</button>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8 }}>{tabBtn("station", "Search a station")}{tabBtn("new", "New location (draft)")}</div>
+      {mode === "station" ? (
+        <div>
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search station by name or area…" />
+          {value && !value.draft && value.name && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text)", background: "var(--success-dim)", padding: "8px 11px", borderRadius: 9 }}><MapPin size={14} style={{ color: "var(--success)" }} /><b>{value.name}</b>{value.area ? ` · ${value.area}` : ""}</div>}
+          {matches.length > 0 && (
+            <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", maxHeight: 220, overflowY: "auto" }}>
+              {matches.map((s) => (
+                <button key={s.id} type="button" onClick={() => { onChange({ stationId: s.id, name: s.name, area: s.area || "", lat: s.lat, lng: s.lng, draft: false }); setQ(""); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "9px 12px", border: "none", borderBottom: "1px solid var(--border)", background: "var(--bg-elevated)", cursor: "pointer" }}>
+                  <MapPin size={14} style={{ color: "var(--brand)", flex: "none" }} />
+                  <span style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{s.name}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{s.area || "—"}</div></span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Location name" required><Input value={name} onChange={(e) => { setName(e.target.value); onChange({ stationId: null, name: e.target.value, area, draft: true }); }} placeholder="e.g., Rubis Nakaseke (new site)" /></Field>
+          <Field label="Area / district"><Input value={area} onChange={(e) => { setArea(e.target.value); onChange({ stationId: null, name, area: e.target.value, draft: true }); }} placeholder="e.g., Nakaseke" /></Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReqForm({ ctx, onDone }) {
+  const me = ctx.currentEmp || {};
+  const [location, setLocation] = useState(null);
+  const [subject, setSubject] = useState("");
+  const [narrative, setNarrative] = useState("");
+  const [items, setItems] = useState([{ description: "", qty: 1, rate: 0 }]);
+  const [docs, setDocs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const total = items.reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+  const setItem = (i, k, v) => setItems((xs) => xs.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
+  const addItem = () => setItems((xs) => [...xs, { description: "", qty: 1, rate: 0 }]);
+  const rmItem = (i) => setItems((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs));
+  const submit = async () => {
+    if (!location || !location.name) return alert("Pick your location — search an existing station or add a new one.");
+    if (!subject.trim()) return alert("Enter a subject for the request.");
+    const valid = items.filter((it) => it.description.trim() && (Number(it.qty) || 0) > 0);
+    if (!valid.length) return alert("Add at least one line item with a description and quantity.");
+    setBusy(true);
+    try {
+      await requisitionsApi.create({
+        requesterId: me.id, requesterName: `${me.firstName || ""} ${me.lastName || ""}`.trim(),
+        designation: me.jobTitle || "", department: me.department || "",
+        location, subject: subject.trim(), narrative: narrative.trim(),
+        lineItems: valid.map((it) => ({ description: it.description.trim(), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
+        documents: docs, status: "pending_supervisor",
+      });
+      await ctx.reload();
+      if (onDone) onDone();
+    } catch (e) { alert("Couldn't submit the requisition.\n\n" + (e && e.message ? e.message : "")); }
+    finally { setBusy(false); }
+  };
+  const cellH = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 10px", textAlign: "left", borderBottom: "1px solid var(--border)" };
+  const cell = { padding: "6px 10px", borderBottom: "1px solid var(--border)" };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 18, alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Requester" sub="From your profile" />
+          <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Name"><Input value={`${me.firstName || ""} ${me.lastName || ""}`.trim()} disabled /></Field>
+            <Field label="Designation"><Input value={me.jobTitle || ""} disabled /></Field>
+            <Field label="Department"><Input value={me.department || ""} disabled /></Field>
+            <Field label="Currency"><Input value="UGX — Uganda Shilling" disabled /></Field>
+          </div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Location" sub="Where you are working — search a station or add a new location" />
+          <div style={{ padding: "16px 20px" }}><ReqLocationPicker value={location} onChange={setLocation} /></div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Request details" />
+          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Subject" required full><Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g., Fuel pump spares & transport — Arua site" /></Field>
+            <Field label="Description / narrative" full><textarea value={narrative} onChange={(e) => setNarrative(e.target.value)} placeholder="Justification and context" rows={3} style={{ ...controlStyle, resize: "vertical", minHeight: 76 }} /></Field>
+          </div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Line items</div>
+            <Btn size="sm" variant="primary" onClick={addItem}><Plus size={14} />Add item</Btn>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead><tr><th style={cellH}>Item description</th><th style={{ ...cellH, width: 86, textAlign: "right" }}>Qty</th><th style={{ ...cellH, width: 130, textAlign: "right" }}>Rate (UGX)</th><th style={{ ...cellH, width: 130, textAlign: "right" }}>Total</th><th style={{ ...cellH, width: 42 }}></th></tr></thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i}>
+                    <td style={cell}><Input value={it.description} onChange={(e) => setItem(i, "description", e.target.value)} placeholder="Specify…" /></td>
+                    <td style={cell}><Input type="number" value={it.qty} onChange={(e) => setItem(i, "qty", e.target.value)} style={{ textAlign: "right" }} /></td>
+                    <td style={cell}><Input type="number" value={it.rate} onChange={(e) => setItem(i, "rate", e.target.value)} style={{ textAlign: "right" }} /></td>
+                    <td style={{ ...cell, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN((Number(it.qty) || 0) * (Number(it.rate) || 0))}</td>
+                    <td style={{ ...cell, textAlign: "center" }}><button type="button" onClick={() => rmItem(i)} title="Remove" style={{ border: "none", background: "none", color: "var(--muted)", cursor: "pointer" }}><X size={15} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", background: "var(--ink)", color: "#fff" }}>
+            <span style={{ fontSize: 11.5, letterSpacing: ".04em", textTransform: "uppercase", color: "rgba(255,255,255,.75)" }}>Total requested (UGX)</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 16, color: "#34d399" }}>{ugx(total)}</span>
+          </div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Supporting documents" sub="Quotations, invoices, activity plans, receipts" />
+          <div style={{ padding: "16px 20px" }}>
+            <input type="file" multiple onChange={(e) => setDocs(Array.from(e.target.files || []).map((f) => ({ name: f.name, size: f.size })))} />
+            {docs.length > 0 && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }}>{docs.length} file{docs.length === 1 ? "" : "s"}: {docs.map((d) => d.name).join(", ")}</div>}
+          </div>
+        </Card>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          {onDone && <Btn onClick={onDone}>Cancel</Btn>}
+          <Btn variant="primary" disabled={busy} onClick={submit}><Send size={15} />{busy ? "Submitting…" : "Submit for approval"}</Btn>
+        </div>
+      </div>
+      <div style={{ position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "pending_supervisor" }} /></div>
+    </div>
+  );
+}
+
+function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
+  const th = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "10px 14px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)", whiteSpace: "nowrap" };
+  const td = { padding: "11px 14px", borderBottom: "1px solid var(--border)", fontSize: 12.5, color: "var(--text)" };
+  return (
+    <Card style={{ padding: 0 }}>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <th style={th}>Ref</th>
+            {showRequester && <th style={th}>Requester</th>}
+            <th style={th}>Subject</th>
+            <th style={th}>Location</th>
+            <th style={{ ...th, textAlign: "right" }}>Amount (UGX)</th>
+            <th style={th}>Status</th>
+            <th style={{ ...th, textAlign: "right" }}>Date</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} onClick={() => onOpen(r.id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 11.5, color: "var(--text-2)" }}>{r.id}</td>
+                {showRequester && <td style={td}><div style={{ fontWeight: 600 }}>{r.requesterName || "—"}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{r.designation || ""}</div></td>}
+                <td style={{ ...td, maxWidth: 240 }}><div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.subject || "—"}</div></td>
+                <td style={td}><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{(r.location && r.location.name) || "—"}{r.location && r.location.draft ? <Pill tone="warning">Draft</Pill> : null}</span></td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN(reqTotal(r))}</td>
+                <td style={td}><Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill></td>
+                <td style={{ ...td, textAlign: "right", color: "var(--text-2)", whiteSpace: "nowrap" }}>{reqDate(r.createdAt)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={showRequester ? 7 : 6} style={{ ...td, textAlign: "center", color: "var(--muted)", padding: "30px 14px" }}>{emptyLabel}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function ReqDetail({ ctx, r, onClose }) {
+  const me = ctx.currentEmp || {};
+  const role = me.roleId || (ctx.auth && ctx.auth.role) || "staff";
+  const isSup = !!me.isSupervisor;
+  const hrAdmin = ["admin", "hr"].includes(role);
+  const owner = r.requesterId === (me.id || (ctx.auth && ctx.auth.empId));
+  const canL1 = isSup && r.status === "pending_supervisor" && !owner;
+  const canL2 = hrAdmin && r.status === "pending_admin";
+  const canAct = canL1 || canL2;
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const total = reqTotal(r);
+  const loc = r.location || {};
+  const act = async (status) => {
+    setBusy(true);
+    try {
+      await requisitionsApi.update(r.id, { status, note });
+      await ctx.reload();
+      onClose();
+    } catch (e) { alert("Couldn't update the requisition.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
+  };
+  const approve = () => act(canL2 ? "approved" : "pending_admin");
+  const reject = () => { if (!note.trim()) return alert("Add a short reason for rejecting."); act("rejected"); };
+  const diTh = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 12px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)" };
+  const diTd = { padding: "9px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5 };
+  const greenBtn = { background: "var(--success)", color: "#fff", borderColor: "var(--success)" };
+  const redBtn = { background: "var(--danger)", color: "#fff", borderColor: "var(--danger)" };
+  return (
+    <Modal wide title={r.subject || "Requisition"} sub={`${r.id} · raised ${reqDate(r.createdAt)}`} onClose={onClose}
+      footer={canAct ? (
+        rejecting
+          ? <><Btn onClick={() => setRejecting(false)}>Back</Btn><Btn disabled={busy} onClick={reject} style={redBtn}><X size={15} />Confirm rejection</Btn></>
+          : <><Btn onClick={() => setRejecting(true)} style={redBtn}><X size={15} />Reject</Btn><Btn disabled={busy} onClick={approve} style={greenBtn}><Check size={15} />{canL2 ? "Approve (final)" : "Approve"}</Btn></>
+      ) : <Btn onClick={onClose}>Close</Btn>}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <ReqInfo label="Requester" value={<span>{r.requesterName || "—"}{r.designation ? ` · ${r.designation}` : ""}</span>} />
+            <ReqInfo label="Department" value={r.department || "—"} />
+            <ReqInfo label="Location" value={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{loc.name || "—"}{loc.area ? ` · ${loc.area}` : ""}{loc.draft ? <Pill tone="warning">Draft</Pill> : loc.stationId ? <Pill tone="info">Station</Pill> : null}</span>} />
+            <ReqInfo label="Status" value={<Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill>} />
+          </div>
+          {r.narrative && <div style={{ fontSize: 12.5, color: "var(--text-2)", background: "var(--surface)", borderRadius: 10, padding: "10px 12px" }}>{r.narrative}</div>}
+          <Card style={{ padding: 0 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><th style={diTh}>Item</th><th style={{ ...diTh, textAlign: "right", width: 70 }}>Qty</th><th style={{ ...diTh, textAlign: "right", width: 120 }}>Rate</th><th style={{ ...diTh, textAlign: "right", width: 120 }}>Total</th></tr></thead>
+              <tbody>
+                {(r.lineItems || []).map((li, i) => (
+                  <tr key={i}><td style={diTd}>{li.description}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{li.qty}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN(li.rate)}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN((Number(li.qty) || 0) * (Number(li.rate) || 0))}</td></tr>
+                ))}
+                <tr><td style={{ ...diTd, fontWeight: 700, borderBottom: "none" }}>Total</td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--success)", borderBottom: "none" }}>{fmtN(total)}</td></tr>
+              </tbody>
+            </table>
+          </Card>
+          {rejecting && <Field label="Reason for rejection" required><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} style={{ ...controlStyle, minHeight: 60 }} placeholder="Explain why this is being returned" /></Field>}
+          {canAct && !rejecting && <Field label="Approval note (optional)"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note for the record" /></Field>}
+          {(r.history || []).length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 8 }}>Activity</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                {r.history.slice().reverse().map((h, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, fontSize: 12 }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--brand)", marginTop: 5, flex: "none" }} />
+                    <div><span style={{ fontWeight: 600 }}>{reqActionLabel(h.action)}</span> · {h.byName} <span style={{ color: "var(--muted)" }}>· {reqDateTime(h.at)}</span>{h.note ? <div style={{ color: "var(--text-2)", marginTop: 1 }}>{h.note}</div> : null}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div><ReqWorkflowMap r={r} /></div>
+      </div>
+    </Modal>
+  );
+}
+
+function Requisitions({ ctx }) {
+  const me = ctx.currentEmp || {};
+  const myId = me.id || (ctx.auth && ctx.auth.empId) || "";
+  const role = me.roleId || (ctx.auth && ctx.auth.role) || "staff";
+  const isSup = !!me.isSupervisor;
+  const mgmt = ["admin", "hr", "finance"].includes(role);
+  const hrAdmin = ["admin", "hr"].includes(role);
+  const canApprove = isSup || hrAdmin;
+  const all = ctx.store.requisitions || [];
+  const mine = all.filter((r) => r.requesterId === myId).slice().sort(byCreatedDesc);
+  const queue = [
+    ...(isSup ? all.filter((r) => r.status === "pending_supervisor" && r.requesterId !== myId) : []),
+    ...(hrAdmin ? all.filter((r) => r.status === "pending_admin") : []),
+  ].sort(byCreatedDesc);
+  const [tab, setTab] = useState("mine");
+  const [openId, setOpenId] = useState(null);
+  const open = openId ? all.find((r) => r.id === openId) : null;
+  const tabs = [
+    ["mine", "My requests", mine.length],
+    ["new", "New request", null],
+    ...(canApprove ? [["approvals", "Approvals", queue.length]] : []),
+    ...(mgmt ? [["all", "All requisitions", all.length]] : []),
+  ];
+  const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
+  const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqTotal(r), 0);
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 16, marginBottom: 18 }}>
+        <StatCard Icon={Receipt} label="My requests" value={mine.length} meta={`${mine.filter((r) => r.status === "approved").length} approved`} tone="brand" />
+        <StatCard Icon={Clock} label="In progress" value={mine.filter((r) => r.status === "pending_supervisor" || r.status === "pending_admin").length} meta="awaiting approval" tone="warning" />
+        {canApprove && <StatCard Icon={ClipboardCheck} label="Awaiting my action" value={queue.length} meta={isSup && !hrAdmin ? "first-level review" : hrAdmin && !isSup ? "final approval" : "to review"} tone="accent" />}
+        <StatCard Icon={Coins} label="Approved value" value={ugxShort(approvedValue)} meta="your approved requests" tone="success" />
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        {tabs.map(([id, label, count]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 999, border: "1px solid " + (tab === id ? "var(--brand)" : "var(--border)"), background: tab === id ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+            {label}{count != null && count > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: id === "approvals" ? "var(--accent)" : "var(--surface-2)", color: id === "approvals" ? "#fff" : "var(--text-2)", borderRadius: 999, padding: "1px 7px" }}>{count}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "new"
+        ? <ReqForm ctx={ctx} onDone={() => setTab("mine")} />
+        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
+      {open && <ReqDetail ctx={ctx} r={open} onClose={() => setOpenId(null)} />}
+    </>
+  );
+}
 
 function StaffPortal({ ctx }) {
   const emp = ctx.currentEmp;
@@ -929,6 +1281,7 @@ function StaffPortal({ ctx }) {
           {sv === "myleave" && <MyLeave ctx={ctx} />}
           {sv === "mypayslip" && <MyPayslip ctx={ctx} />}
           {sv === "myadvance" && <MyAdvance ctx={ctx} />}
+          {sv === "requisitions" && <Requisitions ctx={ctx} />}
           {sv === "myfile" && <StaffFile ctx={ctx} id={emp.id} onBack={() => setSv("myportal")} backLabel="My Portal" />}
         </div>
       </div>
@@ -1946,6 +2299,7 @@ function EmployeeForm({ ctx, id }) {
         <Field label="Date joined"><Input type="date" value={f.employmentDate} onChange={set("employmentDate")} /></Field>
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
         <Field label="Employer type (PAYE basis)" hint="Primary → progressive URA bands. Secondary → flat 40% (Global Link is not this person's main employer)."><Select value={f.employerType || "primary"} onChange={set("employerType")} options={[{ value: "primary", label: "Primary employer — progressive PAYE" }, { value: "secondary", label: "Secondary employer — 40% flat" }]} /></Field>
+        <Field label="Field supervisor" hint="Gives first-level approval on staff requisitions."><Select value={f.isSupervisor ? "yes" : "no"} onChange={(e) => setF((s) => ({ ...s, isSupervisor: e.target.value === "yes" }))} options={[{ value: "no", label: "No" }, { value: "yes", label: "Yes — approves requisitions" }]} /></Field>
         <Field label="Position (full title)" full><Input value={f.position} onChange={set("position")} placeholder="e.g. Deputy Chief ICT Officer, Directorate of ICT" /></Field>
 
         {canManageLogin && <LoginAccessSection ctx={ctx} empId={id} />}

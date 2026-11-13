@@ -105,6 +105,7 @@ export const stockItemsApi = makeCrud("stock-items");
 export const stockMovementsApi = makeCrud("stock-movements");
 export const stockClosingsApi = makeCrud("stock-closings");
 export const bankApprovalsApi = makeCrud("bank-approvals");
+export const requisitionsApi = makeCrud("requisitions");
 
 // Payroll register is derived server-side from employees in a full build; here
 // it simply reads the employees collection to mirror the mock's shape.
