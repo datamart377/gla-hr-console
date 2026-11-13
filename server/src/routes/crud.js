@@ -182,11 +182,11 @@ export function crudRouter(table) {
         if (table === "payroll_runs") {
           recs = recs.map((r) => shapeForStaff(table, r, empId)).filter((r) => (r.rows || []).length);
         } else if (table === "requisitions") {
-          // Own requests, plus anything awaiting first-level approval that THIS
-          // supervisor is assigned to clear (any one of a request's assigned
-          // supervisors can act on it).
+          // Own requests, plus any request in this supervisor's pool across its
+          // whole lifecycle — so they can review pending ones AND reach approved
+          // ones to print the payment voucher.
           const sup = await actorIsSupervisor(req);
-          recs = recs.filter((r) => r.requesterId === empId || (r.status === "pending_supervisor" && canSuperviseRec(r, empId, sup)));
+          recs = recs.filter((r) => r.requesterId === empId || canSuperviseRec(r, empId, sup));
         } else if (OWN_FIELD[table]) {
           recs = recs.filter((r) => owns(table, r, empId));
         } else if (!STAFF_CONFIG_READ.has(table)) {
@@ -211,7 +211,7 @@ export function crudRouter(table) {
         if (table === "payroll_runs") rec = shapeForStaff(table, rec, empId);
         else if (table === "requisitions") {
           const sup = await actorIsSupervisor(req);
-          if (!(rec.requesterId === empId || (rec.status === "pending_supervisor" && canSuperviseRec(rec, empId, sup))))
+          if (!(rec.requesterId === empId || canSuperviseRec(rec, empId, sup)))
             return res.status(403).json({ error: "You do not have permission to view this record." });
         }
         else if (!STAFF_CONFIG_READ.has(table) && !owns(table, rec, empId)) {

@@ -524,6 +524,21 @@ data.requisitions = [
       { at: "2026-11-10T09:15:00Z", by: "GLA-004", byName: "David Mugisha", action: "supervisor_approved", note: "Approved — survey is on the Q4 plan." },
     ],
   }),
+  normalizeRequisition({
+    id: "REQ-1003", requesterId: "GLA-007", requesterName: "Mary Nabirye", designation: "Sales & Marketing Officer", department: "Human Resources & Sales and Marketing Department",
+    location: { stationId: "ST-0012", name: "TotalEnergies Makerere Service Station", area: "Kampala", draft: false },
+    subject: "Fuel-pump bulbs replacement — Makerere", narrative: "Replacement bulbs for the forecourt dispensers; fully approved and ready for disbursement.",
+    lineItems: [{ description: "Dispenser bulbs (LED, set of 4)", qty: 1, rate: 180000 }, { description: "Transport & fitting", qty: 1, rate: 70000 }],
+    supervisorIds: ["GLA-004", "GLA-008"],
+    status: "approved", createdAt: "2026-11-08T07:10:00Z",
+    supervisor: { id: "GLA-008", name: "Isaac Tumwine", at: "2026-11-08T10:05:00Z" },
+    admin: { id: "GLA-001", name: "Robert Okello", at: "2026-11-09T08:40:00Z" },
+    history: [
+      { at: "2026-11-08T07:10:00Z", by: "GLA-007", byName: "Mary Nabirye", action: "submitted", note: "" },
+      { at: "2026-11-08T10:05:00Z", by: "GLA-008", byName: "Isaac Tumwine", action: "supervisor_approved", note: "Approved." },
+      { at: "2026-11-09T08:40:00Z", by: "GLA-001", byName: "Robert Okello", action: "admin_approved", note: "Approved for disbursement." },
+    ],
+  }),
 ];
 
 // Salary advance requests. Staff request an amount + repayment months; HR/Admin

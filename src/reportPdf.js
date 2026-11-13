@@ -305,3 +305,113 @@ export function downloadDocumentPdf({ filename, eyebrow = "Document", title, sub
   drawFooters(doc);
   doc.save(filename);
 }
+
+/* ---------------------- requisition payment voucher ---------------------- */
+// Whole-number to words (for the "amount in words" line on the voucher).
+function numberToWords(n) {
+  n = Math.floor(Math.abs(Number(n) || 0));
+  if (n === 0) return "Zero";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const scales = ["", "Thousand", "Million", "Billion", "Trillion"];
+  const chunk = (x) => {
+    let s = "";
+    if (x >= 100) { s += ones[Math.floor(x / 100)] + " Hundred"; x %= 100; if (x) s += " "; }
+    if (x >= 20) { s += tens[Math.floor(x / 10)]; x %= 10; if (x) s += "-" + ones[x]; }
+    else if (x > 0) s += ones[x];
+    return s;
+  };
+  const parts = [];
+  let i = 0;
+  while (n > 0) { const c = n % 1000; if (c) parts.unshift(chunk(c) + (scales[i] ? " " + scales[i] : "")); n = Math.floor(n / 1000); i++; }
+  return parts.join(" ").trim();
+}
+const voMoney = (n) => Number(n || 0).toLocaleString("en-US");
+const voDate = (s) => { if (!s) return "—"; try { return new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); } catch { return String(s); } };
+
+// A row of signature boxes (no "Approved Signatory" heading), used twice on the
+// voucher: the approval trail, then the paid-by / received-by line.
+function drawVoucherSignRow(doc, startY, cols) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const lineY = startY + 34;
+  const colW = (pageW - MARGIN * 2) / cols.length;
+  cols.forEach((s, i) => {
+    const cx = MARGIN + colW * i + colW / 2;
+    if (s.signedText) {
+      doc.setFont("helvetica", "bolditalic"); doc.setFontSize(13); doc.setTextColor(20, 90, 60);
+      doc.text(String(s.signedText), cx, lineY - 5, { align: "center" });
+    }
+    doc.setDrawColor(...RULE); doc.setLineWidth(0.6);
+    doc.line(cx - colW * 0.34, lineY, cx + colW * 0.34, lineY);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...BRAND);
+    doc.text(String(s.title || ""), cx, lineY + 13, { align: "center" });
+    let yy = lineY + 13;
+    if (s.name) { yy += 12; doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(...INK); doc.text(String(s.name), cx, yy, { align: "center" }); }
+    if (s.meta) { yy += 11; doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...MUTED); doc.text(String(s.meta), cx, yy, { align: "center" }); }
+  });
+  return lineY + 52;
+}
+
+/**
+ * downloadRequisitionVoucherPdf(req) — a formal payment voucher for a fully
+ * approved field requisition. Carries the company letterhead, payee details,
+ * particulars, amount in words, and the full approval trail (requested →
+ * supervisor → HR & Admin) plus paid-by / received-by signature lines.
+ */
+export function downloadRequisitionVoucherPdf(req, opts = {}) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const guard = letterheadGuard();
+  const items = Array.isArray(req.lineItems) ? req.lineItems : [];
+  const total = items.reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+  const cur = req.currency || "UGX";
+  const voucherNo = "PV/" + String(req.id || "").replace(/^REQ-/, "");
+  const loc = req.location || {};
+
+  let y = drawLetterhead(doc);
+  y = drawTitleBlock(doc, y, { eyebrow: "Payment Voucher", title: "PAYMENT VOUCHER", subtitle: null, meta: [], reference: voucherNo });
+
+  const details = [
+    ["Voucher No.", voucherNo],
+    ["Requisition Ref.", req.id || "—"],
+    ["Date approved", voDate(req.admin && req.admin.at)],
+    ["Payee", req.requesterName || "—"],
+    ["Designation", req.designation || "—"],
+    ["Department", req.department || "—"],
+    ["Station / Location", [loc.name, loc.area].filter(Boolean).join(" · ") || "—"],
+  ];
+  y = runTable(doc, {
+    body: details, startY: y + 2, guard,
+    columnStyles: { 0: { cellWidth: (pageW - MARGIN * 2) * 0.32, fontStyle: "bold", textColor: INK, fillColor: KVFILL } },
+  });
+
+  y = drawSectionHeading(doc, y + 18, "Particulars");
+  const head = ["Item / Description", "Qty", `Rate (${cur})`, `Amount (${cur})`];
+  const body = items.map((li) => [li.description || "", String(li.qty || 0), voMoney(li.rate), voMoney((Number(li.qty) || 0) * (Number(li.rate) || 0))]);
+  body.push([{ content: "TOTAL", styles: { fontStyle: "bold", textColor: INK } }, "", "", { content: voMoney(total), styles: { fontStyle: "bold", textColor: INK } }]);
+  y = runTable(doc, { head, body, startY: y + 4, guard, columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } } });
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...INK);
+  doc.text("Amount in words:", MARGIN, y + 20);
+  doc.setFont("helvetica", "italic"); doc.setTextColor(...BODY);
+  const words = numberToWords(total) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
+  const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 95);
+  doc.text(wlines, MARGIN + 92, y + 20);
+  y += 20 + wlines.length * 12;
+
+  let sy = y + 30;
+  if (sy + 180 > pageH - 50) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 20; }
+  sy = drawVoucherSignRow(doc, sy, [
+    { title: "Requested by", name: req.requesterName || "—", meta: "Submitted " + voDate(req.createdAt) },
+    { title: "Supervisor (1st level)", name: req.supervisor ? req.supervisor.name : "—", signedText: req.supervisor ? req.supervisor.name : null, meta: req.supervisor ? "Approved " + voDate(req.supervisor.at) : "Pending" },
+    { title: "HR & Admin (final)", name: req.admin ? req.admin.name : "—", signedText: req.admin ? req.admin.name : null, meta: req.admin ? "Approved " + voDate(req.admin.at) : "Pending" },
+  ]);
+  drawVoucherSignRow(doc, sy + 10, [
+    { title: "Paid by (Finance / Accounts)", name: "", meta: "Signature & date" },
+    { title: "Received by (Payee)", name: req.requesterName || "", meta: "Signature & date" },
+  ]);
+
+  drawFooters(doc);
+  doc.save(`Payment-Voucher-${voucherNo.replace(/\//g, "-")}.pdf`);
+}

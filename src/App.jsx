@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
-import { downloadReportPdf, downloadDocumentPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -1185,9 +1185,19 @@ function ReqDetail({ ctx, r, onClose }) {
   const myId = me.id || (ctx.auth && ctx.auth.empId);
   const hrAdmin = ["admin", "hr"].includes(role);
   const owner = r.requesterId === myId;
+  const mgmt = ["admin", "hr", "finance"].includes(role);
   const canL1 = r.status === "pending_supervisor" && canSuperviseReq(r, myId, ctx.store.employees || []);
   const canL2 = hrAdmin && r.status === "pending_admin";
   const canAct = canL1 || canL2;
+  // Once HR & Admin give final approval, the supervisor(s) who handled it and
+  // management can print the payment voucher for disbursement.
+  const canVoucher = r.status === "approved" && (mgmt || canSuperviseReq(r, myId, ctx.store.employees || []));
+  const printVoucher = () => {
+    try {
+      setReportCompany(ctx.store.settings && ctx.store.settings.company);
+      downloadRequisitionVoucherPdf(r, { employees: ctx.store.employees || [] });
+    } catch (e) { alert("Couldn't generate the payment voucher.\n\n" + (e && e.message ? e.message : "")); }
+  };
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -1244,7 +1254,9 @@ function ReqDetail({ ctx, r, onClose }) {
         rejecting
           ? <><Btn onClick={() => setRejecting(false)}>Back</Btn><Btn disabled={busy} onClick={reject} style={redBtn}><X size={15} />Confirm rejection</Btn></>
           : <><Btn onClick={() => setRejecting(true)} style={redBtn}><X size={15} />Reject</Btn><Btn disabled={busy} onClick={approve} style={greenBtn}><Check size={15} />{canL2 ? "Approve (final)" : "Approve"}</Btn></>
-      ) : <Btn onClick={onClose}>Close</Btn>}>
+      ) : (
+        <>{canVoucher && <Btn variant="primary" onClick={printVoucher}><Printer size={15} />Print payment voucher</Btn>}<Btn onClick={onClose}>Close</Btn></>
+      )}>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 18 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -1340,6 +1352,10 @@ function Requisitions({ ctx }) {
     ...(isSup ? all.filter((r) => r.status === "pending_supervisor" && canSuperviseReq(r, myId, employees)) : []),
     ...(hrAdmin ? all.filter((r) => r.status === "pending_admin") : []),
   ].sort(byCreatedDesc);
+  // Fully-approved requests this person can act on — where the payment voucher
+  // is printed. A supervisor sees the ones in their pool; management sees all.
+  const approved = all.filter((r) => r.status === "approved" && (mgmt || canSuperviseReq(r, myId, employees))).slice().sort(byCreatedDesc);
+  const canSeeApproved = isSup || mgmt;
   const [tab, setTab] = useState("mine");
   const [openId, setOpenId] = useState(null);
   const open = openId ? all.find((r) => r.id === openId) : null;
@@ -1347,9 +1363,10 @@ function Requisitions({ ctx }) {
     ["mine", "My requests", mine.length],
     ["new", "New request", null],
     ...(canApprove ? [["approvals", "Approvals", queue.length]] : []),
+    ...(canSeeApproved ? [["approved", "Approved — vouchers", approved.length]] : []),
     ...(mgmt ? [["all", "All requisitions", all.length]] : []),
   ];
-  const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
+  const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
   const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqTotal(r), 0);
   return (
     <>
@@ -1368,7 +1385,7 @@ function Requisitions({ ctx }) {
       </div>
       {tab === "new"
         ? <ReqForm ctx={ctx} onDone={() => setTab("mine")} />
-        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
+        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "approved" ? "No approved requisitions yet — a payment voucher appears here once HR & Admin give final approval." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
       {open && <ReqDetail ctx={ctx} r={open} onClose={() => setOpenId(null)} />}
     </>
   );
