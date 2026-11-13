@@ -370,30 +370,38 @@ function drawQR(doc, text, x, y, size) {
   } catch (e) { /* QR optional — never block the voucher */ }
 }
 
-// Verification panel: a QR code of the voucher's key details beside the company
-// logo mark and contact details (the "logo details").
-function drawVerifyPanel(doc, y, { qrText }) {
+// Verification QR, placed in the top-right corner of the voucher (in the empty
+// space beside the letterhead banner). Encodes the voucher's key details.
+function drawVoucherQR(doc, qrText) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const size = 76, pad = 8;
+  const x = pageW - MARGIN - size, y = 34;
+  // White quiet-zone behind the code so scanners can read it reliably.
+  doc.setFillColor(255, 255, 255);
+  doc.rect(x - pad, y - pad, size + pad * 2, size + pad * 2, "F");
+  drawQR(doc, qrText, x, y, size);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(6.4); doc.setTextColor(...BRAND);
+  doc.text("SCAN TO VERIFY", x + size / 2, y + size + 11, { align: "center", charSpace: 0.5 });
+}
+
+// Company identity panel (the "logo details"): logo mark + name + contacts, with
+// a note pointing to the verification QR in the top-right corner.
+function drawVerifyPanel(doc, y) {
   const pageW = doc.internal.pageSize.getWidth();
   const x = MARGIN, w = pageW - MARGIN * 2;
-  const h = Math.max(104, 40 + COMPANY.lines.length * 11 + 16);
+  const h = Math.max(92, 34 + COMPANY.lines.length * 11 + 16);
   doc.setDrawColor(...RULE); doc.setLineWidth(0.8);
   doc.roundedRect(x, y, w, h, 6, 6);
 
-  const qrSize = 78;
-  const qx = x + 16, qy = y + (h - qrSize) / 2 - 5;
-  drawQR(doc, qrText, qx, qy, qrSize);
-  doc.setFont("helvetica", "bold"); doc.setFontSize(6.8); doc.setTextColor(...BRAND);
-  doc.text("SCAN TO VERIFY", qx + qrSize / 2, qy + qrSize + 11, { align: "center", charSpace: 0.6 });
-
-  const rx = qx + qrSize + 26;
-  let ry = y + 28;
+  const rx = x + 18;
+  let ry = y + 26;
   try { doc.addImage(GLA_MARK, "PNG", rx, ry - 20, 26, 26); } catch (e) { /* mark optional */ }
   doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...INK);
   doc.text(COMPANY.name, rx + 34, ry);
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.2); doc.setTextColor(...BODY);
   COMPANY.lines.forEach((ln) => { ry += 11; doc.text(String(ln), rx, ry); });
   doc.setFont("helvetica", "italic"); doc.setFontSize(7.2); doc.setTextColor(...MUTED);
-  doc.text("Scan the code to verify this voucher's reference, payee, amount and approvals.", rx, y + h - 9, { maxWidth: w - (rx - x) - 16 });
+  doc.text("System-generated payment voucher — scan the QR code in the top-right corner to verify its reference, payee, amount and approvals.", rx, y + h - 10, { maxWidth: w - 36 });
   return y + h;
 }
 
@@ -413,8 +421,21 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   const cur = req.currency || "UGX";
   const voucherNo = "PV/" + String(req.id || "").replace(/^REQ-/, "");
   const loc = req.location || {};
+  const emailLine = (COMPANY.lines || []).find((l) => /email/i.test(l)) || "";
+  const qrText = [
+    `${COMPANY.name} — PAYMENT VOUCHER`,
+    `Voucher: ${voucherNo}`,
+    `Requisition: ${req.id || "-"}`,
+    `Payee: ${req.requesterName || "-"}`,
+    `Amount: ${cur} ${voMoney(total)}`,
+    `Status: ${(req.status || "").toUpperCase()}`,
+    req.supervisor ? `Supervisor: ${req.supervisor.name} (${voDate(req.supervisor.at)})` : null,
+    req.admin ? `Approved by: ${req.admin.name} (${voDate(req.admin.at)})` : null,
+    emailLine,
+  ].filter(Boolean).join("\n");
 
   let y = drawLetterhead(doc);
+  drawVoucherQR(doc, qrText);   // verification QR, top-right corner
   y = drawTitleBlock(doc, y, { eyebrow: "Payment Voucher", title: "PAYMENT VOUCHER", subtitle: null, meta: [], reference: voucherNo });
 
   const details = [
@@ -457,23 +478,11 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
     { title: "Received by (Payee)", name: req.requesterName || "", meta: "Signature & date" },
   ]);
 
-  // Verification QR + company logo details.
-  const emailLine = (COMPANY.lines || []).find((l) => /email/i.test(l)) || "";
-  const qrText = [
-    `${COMPANY.name} — PAYMENT VOUCHER`,
-    `Voucher: ${voucherNo}`,
-    `Requisition: ${req.id || "-"}`,
-    `Payee: ${req.requesterName || "-"}`,
-    `Amount: ${cur} ${voMoney(total)}`,
-    `Status: ${(req.status || "").toUpperCase()}`,
-    req.supervisor ? `Supervisor: ${req.supervisor.name} (${voDate(req.supervisor.at)})` : null,
-    req.admin ? `Approved by: ${req.admin.name} (${voDate(req.admin.at)})` : null,
-    emailLine,
-  ].filter(Boolean).join("\n");
+  // Company identity panel (the "logo details").
   let py = sy2 + 22;
-  const panelH = Math.max(104, 40 + (COMPANY.lines || []).length * 11 + 16);
+  const panelH = Math.max(92, 34 + (COMPANY.lines || []).length * 11 + 16);
   if (py + panelH > pageH - 46) { doc.addPage(); guard(doc, doc.getNumberOfPages()); py = drawLetterhead(doc) + 10; }
-  drawVerifyPanel(doc, py, { qrText });
+  drawVerifyPanel(doc, py);
 
   drawFooters(doc);
   doc.save(`Payment-Voucher-${voucherNo.replace(/\//g, "-")}.pdf`);
