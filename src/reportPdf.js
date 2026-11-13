@@ -14,7 +14,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import qrcode from "qrcode-generator";
-import { GLA_HEADER, GLA_HEADER_RATIO, GLA_MARK } from "./header.js";
+import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 
 export const COMPANY = {
   name: "Global Link Associates Ltd",
@@ -384,27 +384,6 @@ function drawVoucherQR(doc, qrText) {
   doc.text("SCAN TO VERIFY", x + size / 2, y + size + 11, { align: "center", charSpace: 0.5 });
 }
 
-// Company identity panel (the "logo details"): logo mark + name + contacts, with
-// a note pointing to the verification QR in the top-right corner.
-function drawVerifyPanel(doc, y) {
-  const pageW = doc.internal.pageSize.getWidth();
-  const x = MARGIN, w = pageW - MARGIN * 2;
-  const h = Math.max(92, 34 + COMPANY.lines.length * 11 + 16);
-  doc.setDrawColor(...RULE); doc.setLineWidth(0.8);
-  doc.roundedRect(x, y, w, h, 6, 6);
-
-  const rx = x + 18;
-  let ry = y + 26;
-  try { doc.addImage(GLA_MARK, "PNG", rx, ry - 20, 26, 26); } catch (e) { /* mark optional */ }
-  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(...INK);
-  doc.text(COMPANY.name, rx + 34, ry);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8.2); doc.setTextColor(...BODY);
-  COMPANY.lines.forEach((ln) => { ry += 11; doc.text(String(ln), rx, ry); });
-  doc.setFont("helvetica", "italic"); doc.setFontSize(7.2); doc.setTextColor(...MUTED);
-  doc.text("System-generated payment voucher — scan the QR code in the top-right corner to verify its reference, payee, amount and approvals.", rx, y + h - 10, { maxWidth: w - 36 });
-  return y + h;
-}
-
 /**
  * downloadRequisitionVoucherPdf(req) — a formal payment voucher for a fully
  * approved field requisition. Carries the company letterhead, payee details,
@@ -438,51 +417,68 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   drawVoucherQR(doc, qrText);   // verification QR, top-right corner
   y = drawTitleBlock(doc, y, { eyebrow: "Payment Voucher", title: "PAYMENT VOUCHER", subtitle: null, meta: [], reference: voucherNo });
 
-  const details = [
-    ["Voucher No.", voucherNo],
-    ["Requisition Ref.", req.id || "—"],
-    ["Date approved", voDate(req.admin && req.admin.at)],
-    ["Payee", req.requesterName || "—"],
-    ["Designation", req.designation || "—"],
-    ["Department", req.department || "—"],
-    ["Station / Location", [loc.name, loc.area].filter(Boolean).join(" · ") || "—"],
+  // Compact details grid — two key/value pairs per row.
+  const kcell = { fontStyle: "bold", textColor: INK, fillColor: KVFILL };
+  const greenCell = { fontStyle: "bold", textColor: [20, 120, 70] };
+  const station = [loc.name, loc.area].filter(Boolean).join(" · ") || "—";
+  const detailRows = [
+    [{ content: "Voucher No.", styles: kcell }, voucherNo, { content: "Date approved", styles: kcell }, voDate(req.admin && req.admin.at)],
+    [{ content: "Requisition Ref.", styles: kcell }, req.id || "—", { content: "Payment status", styles: kcell }, { content: (req.status || "").toUpperCase() || "—", styles: greenCell }],
+    [{ content: "Payee", styles: kcell }, req.requesterName || "—", { content: "Designation", styles: kcell }, req.designation || "—"],
+    [{ content: "Department", styles: kcell }, req.department || "—", { content: "Station / Location", styles: kcell }, station],
+    [{ content: "Purpose", styles: kcell }, { content: req.subject || "—", colSpan: 3 }],
   ];
+  const keyW = 96, valW = (pageW - MARGIN * 2 - keyW * 2) / 2;
   y = runTable(doc, {
-    body: details, startY: y + 2, guard,
-    columnStyles: { 0: { cellWidth: (pageW - MARGIN * 2) * 0.32, fontStyle: "bold", textColor: INK, fillColor: KVFILL } },
+    body: detailRows, startY: y + 2, guard,
+    columnStyles: { 0: { cellWidth: keyW }, 1: { cellWidth: valW }, 2: { cellWidth: keyW }, 3: { cellWidth: valW } },
   });
 
-  y = drawSectionHeading(doc, y + 18, "Particulars");
+  // Particulars
+  y = drawSectionHeading(doc, y + 16, "Particulars");
   const head = ["Item / Description", "Qty", `Rate (${cur})`, `Amount (${cur})`];
   const body = items.map((li) => [li.description || "", String(li.qty || 0), voMoney(li.rate), voMoney((Number(li.qty) || 0) * (Number(li.rate) || 0))]);
   body.push([{ content: "TOTAL", styles: { fontStyle: "bold", textColor: INK } }, "", "", { content: voMoney(total), styles: { fontStyle: "bold", textColor: INK } }]);
   y = runTable(doc, { head, body, startY: y + 4, guard, columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } } });
 
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...INK);
-  doc.text("Amount in words:", MARGIN, y + 20);
-  doc.setFont("helvetica", "italic"); doc.setTextColor(...BODY);
+  // Amount in words — highlighted band.
   const words = numberToWords(total) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
-  const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 95);
-  doc.text(wlines, MARGIN + 92, y + 20);
-  y += 20 + wlines.length * 12;
+  const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 104);
+  const awY = y + 10, awH = Math.max(24, 9 + wlines.length * 12);
+  doc.setFillColor(...KVFILL);
+  doc.rect(MARGIN, awY, pageW - MARGIN * 2, awH, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...INK);
+  doc.text("Amount in words:", MARGIN + 8, awY + 15);
+  doc.setFont("helvetica", "bolditalic"); doc.setTextColor(...BRAND);
+  doc.text(wlines, MARGIN + 96, awY + 15);
+  y = awY + awH;
 
-  let sy = y + 30;
-  if (sy + 180 > pageH - 50) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 20; }
+  // Remarks / justification (from the requisition narrative), when present.
+  if (req.narrative && String(req.narrative).trim()) {
+    y = drawSectionHeading(doc, y + 16, "Remarks / Justification");
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY);
+    const nlines = doc.splitTextToSize(String(req.narrative).trim(), pageW - MARGIN * 2);
+    doc.text(nlines, MARGIN, y + 14);
+    y = y + 14 + nlines.length * 12;
+  }
+
+  // Signature block — anchored toward the lower page so the voucher reads as a
+  // complete, balanced document.
+  const SIG_H = 198;
+  let sy = y + 40;
+  if (sy < pageH - 124 - SIG_H) sy = pageH - 124 - SIG_H;
+  if (sy + SIG_H > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...BODY);
+  doc.text("Certified that the particulars above are correct and the payment is approved for disbursement.", MARGIN, sy - 12, { maxWidth: pageW - MARGIN * 2 });
   sy = drawVoucherSignRow(doc, sy, [
     { title: "Requested by", name: req.requesterName || "—", meta: "Submitted " + voDate(req.createdAt) },
     { title: "Supervisor (1st level)", name: req.supervisor ? req.supervisor.name : "—", signedText: req.supervisor ? req.supervisor.name : null, meta: req.supervisor ? "Approved " + voDate(req.supervisor.at) : "Pending" },
     { title: "HR & Admin (final)", name: req.admin ? req.admin.name : "—", signedText: req.admin ? req.admin.name : null, meta: req.admin ? "Approved " + voDate(req.admin.at) : "Pending" },
   ]);
-  let sy2 = drawVoucherSignRow(doc, sy + 10, [
+  drawVoucherSignRow(doc, sy + 14, [
     { title: "Paid by (Finance / Accounts)", name: "", meta: "Signature & date" },
     { title: "Received by (Payee)", name: req.requesterName || "", meta: "Signature & date" },
   ]);
-
-  // Company identity panel (the "logo details").
-  let py = sy2 + 22;
-  const panelH = Math.max(92, 34 + (COMPANY.lines || []).length * 11 + 16);
-  if (py + panelH > pageH - 46) { doc.addPage(); guard(doc, doc.getNumberOfPages()); py = drawLetterhead(doc) + 10; }
-  drawVerifyPanel(doc, py);
 
   drawFooters(doc);
   doc.save(`Payment-Voucher-${voucherNo.replace(/\//g, "-")}.pdf`);
