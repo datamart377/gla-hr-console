@@ -17,6 +17,7 @@ const BODY = argb("464E58");
 const MUTED = argb("8C949D");
 const ZEBRA = argb("F7F3F0");     // warm alternate-row tint
 const RULE = argb("D6DCE2");
+const GRID = argb("9BA1A8");      // full cell borders for the boxed table section
 const WHITE = argb("FFFFFF");
 const GREEN = argb("155A3C");
 const NCOLS = 6;
@@ -31,6 +32,8 @@ const todayLong = () =>
 
 const fnt = (o = {}) => ({ name: "Calibri", size: 10, color: { argb: BODY }, ...o });
 const solid = (c) => ({ type: "pattern", pattern: "solid", fgColor: { argb: c } });
+// Full thin border on all four sides — used only for the table (header + rows + total).
+const boxBorder = () => ({ top: { style: "thin", color: { argb: GRID } }, left: { style: "thin", color: { argb: GRID } }, right: { style: "thin", color: { argb: GRID } }, bottom: { style: "thin", color: { argb: GRID } } });
 
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -119,7 +122,7 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     cell.font = fnt({ bold: true, color: { argb: WHITE } });
     cell.fill = solid(NAVY);
     cell.alignment = { horizontal: col === 1 ? "center" : col === 6 ? "right" : "left", vertical: "middle" };
-    cell.border = { bottom: { style: "thin", color: { argb: NAVY } } };
+    cell.border = boxBorder();
   });
   hRow.height = 20;
 
@@ -130,7 +133,7 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     rr.eachCell((cell, col) => {
       cell.font = fnt({ color: { argb: INK } });
       cell.alignment = { horizontal: col === 1 ? "center" : col === 6 ? "right" : "left" };
-      cell.border = { bottom: { style: "hair", color: { argb: RULE } } };
+      cell.border = boxBorder();
       if (zebra) cell.fill = solid(ZEBRA);
       if (col === 6) cell.numFmt = "#,##0";
     });
@@ -145,6 +148,7 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     cell.font = fnt({ bold: true, size: 10.5, color: { argb: WHITE } });
     cell.fill = solid(INK);
     cell.alignment = { horizontal: c >= 6 ? "right" : c === 2 ? "left" : "center", vertical: "middle" };
+    cell.border = boxBorder();
     if (c === 6) cell.numFmt = "#,##0";
   }
   tRow.height = 20;
@@ -233,7 +237,7 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
     cell.font = fnt({ bold: true, color: { argb: WHITE } });
     cell.fill = solid(NAVY);
     cell.alignment = { horizontal: c.align || (c.money ? "right" : col === 1 ? "center" : "left"), vertical: "middle" };
-    cell.border = { bottom: { style: "thin", color: { argb: NAVY } } };
+    cell.border = boxBorder();
   });
   rows.forEach((r, i) => {
     const rr = ws.addRow(r);
@@ -242,7 +246,7 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
       const c = columns[col - 1];
       cell.font = fnt({ color: { argb: INK } });
       cell.alignment = { horizontal: c.align || (c.money ? "right" : col === 1 ? "center" : "left") };
-      cell.border = { bottom: { style: "hair", color: { argb: RULE } } };
+      cell.border = boxBorder();
       if (zebra) cell.fill = solid(ZEBRA);
       if (c.money) cell.numFmt = "#,##0";
     });
@@ -254,6 +258,7 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
       cell.font = fnt({ bold: true, size: 10.5, color: { argb: WHITE } });
       cell.fill = solid(INK);
       cell.alignment = { horizontal: c.align || (c.money ? "right" : col === 1 ? "center" : "left") };
+      cell.border = boxBorder();
       if (c.money) cell.numFmt = "#,##0";
     });
   }
