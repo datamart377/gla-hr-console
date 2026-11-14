@@ -3197,6 +3197,8 @@ function StaffSalaries({ ctx }) {
 function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPaid, onSetCheque, processBlocked, payBlocked }) {
   const [cheque, setCheque] = useState(run ? (run.chequeNo || "") : "");
   useEffect(() => { setCheque(run ? (run.chequeNo || "") : ""); }, [run && run.id]);
+  // PDF exports omit anyone with 0 gross pay (e.g. not paid this month).
+  const rowsPaid = (run && run.rows ? run.rows : []).filter((r) => (Number(r.gross) || 0) > 0);
   const statusPill = run
     ? (run.status === "Paid" ? <Pill tone="success">Paid · {fmtDate(run.paidAt)}</Pill> : <Pill tone="info">Processed · {fmtDate(run.processedAt)}</Pill>)
     : <Pill tone="warning">Draft — not processed</Pill>;
@@ -3223,7 +3225,7 @@ function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPai
     subtitle: `${monthLabel(run.month)} · processed run (${run.status})`,
     meta: [`Processed by ${run.processedBy || "HR"} · ${fmtDate(run.processedAt)}${run.status === "Paid" ? ` · Paid ${fmtDate(run.paidAt)}` : ""}`],
     head: ["#", "Name", "Account No.", "Bank", "Branch", "TIN", "NSSF No.", "Gross", "NSSF 5%", "PAYE", "Advance", ...cols.map((c) => c.label), "Net Pay", "10% Co."],
-    body: run.rows.map((r) => [r.no, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", r.tin || "", r.nssfNumber || "", fmtN(r.gross), fmtN(r.nssf5), fmtN(r.paye), fmtN(r.advance), ...cols.map((c) => c.kind === "text" ? ((r.custom || {})[c.id] || "") : fmtN(Number((r.custom || {})[c.id]) || 0)), fmtN(r.net), fmtN(r.contribution)]),
+    body: rowsPaid.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", r.tin || "", r.nssfNumber || "", fmtN(r.gross), fmtN(r.nssf5), fmtN(r.paye), fmtN(r.advance), ...cols.map((c) => c.kind === "text" ? ((r.custom || {})[c.id] || "") : fmtN(Number((r.custom || {})[c.id]) || 0)), fmtN(r.net), fmtN(r.contribution)]),
     orientation: "landscape",
   }); };
   const bankReportPdf = () => downloadReportPdf({
@@ -3232,10 +3234,10 @@ function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPai
     signatories: SIGNATORIES,
     title: "Staff Bank Payment Schedule Report",
     subtitle: `${monthLabel(run.month)} · net salaries payable`,
-    meta: [...(cheque ? [`Cheque No: ${cheque}`] : []), `Total net payable: UGX ${fmtN(run.rows.reduce((s, r) => s + r.net, 0))}`],
+    meta: [...(cheque ? [`Cheque No: ${cheque}`] : []), `Total net payable: UGX ${fmtN(rowsPaid.reduce((s, r) => s + r.net, 0))}`],
     head: ["#", "Name", "Account Number", "Bank", "Branch", "Net Pay (UGX)"],
-    body: run.rows.map((r) => [r.no, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.net)])
-      .concat([["", "TOTAL NET PAYABLE", "", "", "", fmtN(run.rows.reduce((s, r) => s + r.net, 0))]]),
+    body: rowsPaid.map((r, i) => [i + 1, r.name, r.bankAccount || "", r.bankName || "", r.bankBranch || "", fmtN(r.net)])
+      .concat([["", "TOTAL NET PAYABLE", "", "", "", fmtN(rowsPaid.reduce((s, r) => s + r.net, 0))]]),
   });
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
@@ -3388,6 +3390,11 @@ function LedgerLive({ ctx, prevMonthLabel }) {
     return acc;
   }, { g: 0, paye: 0, ne: 0, nr: 0, adv: 0, advAuto: 0, net: 0 });
   const colTotal = (c) => emps.reduce((s, e) => s + (Number((e.custom || {})[c.id]) || 0), 0);
+  // PDF exports omit anyone with 0 gross pay (e.g. not paid this month); totals
+  // are recomputed from the staff that remain.
+  const pdfEmps = emps.filter((e) => (derivePayslip(e).gross || 0) > 0);
+  const pt = pdfEmps.reduce((acc, e) => { const p = derivePayslip(e); acc.g += p.gross; acc.paye += p.paye; acc.ne += p.nssfEmp; acc.nr += p.nssfEr; acc.adv += p.advance; acc.net += ledgerNet(e, cols); return acc; }, { g: 0, paye: 0, ne: 0, nr: 0, adv: 0, net: 0 });
+  const pdfColTotal = (c) => pdfEmps.reduce((s, e) => s + (Number((e.custom || {})[c.id]) || 0), 0);
 
   const exportCsv = () => {
     const header = ["No", "Name", "Account Number", "Bank", "Branch", "TIN", "NIN", "NSSF No", "Gross Pay", "NSSF 5%", "PAYE", "Advance Deductions", ...cols.map((c) => c.label), "Net Pay", "10% Company Contribution"];
@@ -3423,11 +3430,11 @@ function LedgerLive({ ctx, prevMonthLabel }) {
     eyebrow: "Payroll",
     signatories: SIGNATORIES,
     title: "Monthly Salary Ledger",
-    subtitle: `${monthLabel(CURRENT_MONTH)} · ${emps.length} staff`,
-    meta: [`Gross: UGX ${fmtN(t.g)}   PAYE: UGX ${fmtN(t.paye)}   NSSF (5%): UGX ${fmtN(t.ne)}   Advance: UGX ${fmtN(t.adv)}   Net: UGX ${fmtN(t.net)}`],
+    subtitle: `${monthLabel(CURRENT_MONTH)} · ${pdfEmps.length} staff`,
+    meta: [`Gross: UGX ${fmtN(pt.g)}   PAYE: UGX ${fmtN(pt.paye)}   NSSF (5%): UGX ${fmtN(pt.ne)}   Advance: UGX ${fmtN(pt.adv)}   Net: UGX ${fmtN(pt.net)}`],
     head: ["#", "Name", "Account No.", "Bank", "Branch", "TIN", "NSSF No.", "Gross", "NSSF 5%", "PAYE", "Advance", ...cols.map((c) => c.label), "Net Pay", "10% Co."],
-    body: emps.map((e, i) => { const p = derivePayslip(e); return [i + 1, fullName(e), e.bankAccount || "", e.bankName || "", e.bankBranch || "", e.tin || "", e.nssfNumber || "", fmtN(p.gross), fmtN(p.nssfEmp), fmtN(p.paye), fmtN(p.advance), ...cols.map((c) => c.kind === "text" ? ((e.custom || {})[c.id] || "") : fmtN(Number((e.custom || {})[c.id]) || 0)), fmtN(ledgerNet(e, cols)), fmtN(p.nssfEr)]; })
-      .concat([["", "TOTALS", "", "", "", "", "", fmtN(t.g), fmtN(t.ne), fmtN(t.paye), fmtN(t.adv), ...cols.map((c) => c.kind === "text" ? "" : fmtN(colTotal(c))), fmtN(t.net), fmtN(t.nr)]]),
+    body: pdfEmps.map((e, i) => { const p = derivePayslip(e); return [i + 1, fullName(e), e.bankAccount || "", e.bankName || "", e.bankBranch || "", e.tin || "", e.nssfNumber || "", fmtN(p.gross), fmtN(p.nssfEmp), fmtN(p.paye), fmtN(p.advance), ...cols.map((c) => c.kind === "text" ? ((e.custom || {})[c.id] || "") : fmtN(Number((e.custom || {})[c.id]) || 0)), fmtN(ledgerNet(e, cols)), fmtN(p.nssfEr)]; })
+      .concat([["", "TOTALS", "", "", "", "", "", fmtN(pt.g), fmtN(pt.ne), fmtN(pt.paye), fmtN(pt.adv), ...cols.map((c) => c.kind === "text" ? "" : fmtN(pdfColTotal(c))), fmtN(pt.net), fmtN(pt.nr)]]),
     orientation: "landscape",
   });
   const bankReportPdf = (rec = bankRec) => downloadReportPdf({
@@ -3436,10 +3443,10 @@ function LedgerLive({ ctx, prevMonthLabel }) {
     signatories: bankSignatories(rec),
     title: "Staff Bank Payment Schedule Report",
     subtitle: `${monthLabel(CURRENT_MONTH)} · net salaries payable`,
-    meta: [...(chequeNo ? [`Cheque No: ${chequeNo}`] : []), `Total net payable: UGX ${fmtN(emps.reduce((s, e) => s + ledgerNet(e, cols), 0))}`, `Status: ${bankApprovalState(rec) === "authorized" ? "AUTHORIZED FOR THE BANK" : bankApprovalState(rec) === "certified" ? "CERTIFIED — awaiting Managing Director authorization" : "DRAFT — awaiting signatures"}`],
+    meta: [...(chequeNo ? [`Cheque No: ${chequeNo}`] : []), `Total net payable: UGX ${fmtN(pdfEmps.reduce((s, e) => s + ledgerNet(e, cols), 0))}`, `Status: ${bankApprovalState(rec) === "authorized" ? "AUTHORIZED FOR THE BANK" : bankApprovalState(rec) === "certified" ? "CERTIFIED — awaiting Managing Director authorization" : "DRAFT — awaiting signatures"}`],
     head: ["#", "Name", "Account Number", "Bank", "Branch", "Net Pay (UGX)"],
-    body: emps.map((e, i) => [i + 1, fullName(e), e.bankAccount || "", e.bankName || "", e.bankBranch || "", fmtN(ledgerNet(e, cols))])
-      .concat([["", "TOTAL NET PAYABLE", "", "", "", fmtN(emps.reduce((s, e) => s + ledgerNet(e, cols), 0))]]),
+    body: pdfEmps.map((e, i) => [i + 1, fullName(e), e.bankAccount || "", e.bankName || "", e.bankBranch || "", fmtN(ledgerNet(e, cols))])
+      .concat([["", "TOTAL NET PAYABLE", "", "", "", fmtN(pdfEmps.reduce((s, e) => s + ledgerNet(e, cols), 0))]]),
   });
 
   const grp = (bg, color) => ({ background: bg, color, fontWeight: 700, fontSize: 11.5, letterSpacing: ".04em", textTransform: "uppercase", textAlign: "center", padding: "8px 10px", borderBottom: "1px solid var(--border-strong)", borderRight: "1px solid var(--border-strong)" });
