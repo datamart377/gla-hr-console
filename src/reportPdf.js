@@ -56,6 +56,9 @@ const KVFILL = [245, 239, 235];  // key-column shading (warm tint)
 
 const MARGIN = 42;
 const HEADER_MAX_H = 96;         // cap the letterhead banner height
+// On continuation pages the letterhead is redrawn at the top, so a table must
+// resume just below it (top banner + rule + small gap) instead of at y=34.
+const CONT_TOP = 30 + HEADER_MAX_H + 24;
 
 const todayLong = () =>
   new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
@@ -234,7 +237,7 @@ function runTable(doc, { head, body, startY, guard, columnStyles }) {
     head: head ? [head] : undefined,
     body,
     startY,
-    margin: { left: MARGIN, right: MARGIN, top: 34, bottom: 42 },
+    margin: { left: MARGIN, right: MARGIN, top: CONT_TOP, bottom: 42 },
     styles: { font: "helvetica", fontSize: 8, cellPadding: 4.5, textColor: BODY, lineColor: RULE, lineWidth: 0.5, overflow: "linebreak", valign: "middle" },
     headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8, cellPadding: 5 },
     alternateRowStyles: { fillColor: ZEBRA },
