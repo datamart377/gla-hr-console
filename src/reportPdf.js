@@ -103,7 +103,7 @@ function drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference }) {
     doc.setFontSize(8);
     doc.setTextColor(...ORANGE);
     doc.text(String(eyebrow).toUpperCase(), MARGIN, y, { charSpace: 1.2 });
-    y += 13;
+    y += 21;   // breathing space between the eyebrow and the title
   }
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
