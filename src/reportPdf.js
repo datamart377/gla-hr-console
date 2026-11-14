@@ -248,8 +248,10 @@ function runTable(doc, { head, body, startY, guard, columnStyles }) {
 export function downloadReportPdf({ filename, eyebrow = "Report", title, subtitle, head, body, orientation = "portrait", meta = [], signatories = null }) {
   const doc = new jsPDF({ orientation, unit: "pt", format: "a4" });
   const guard = letterheadGuard();
+  const reference = refCode();
   let y = drawLetterhead(doc);
-  y = drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference: refCode() });
+  drawTopRightQR(doc, reportQrText({ title, subtitle, reference, generated: todayLong() }));
+  y = drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference });
   y = runTable(doc, { head, body, startY: y, guard, columnStyles: numericColumnStyles(head, body) });
 
   if (signatories && signatories.length) {
@@ -284,8 +286,10 @@ export function downloadDocumentPdf({ filename, eyebrow = "Document", title, sub
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const guard = letterheadGuard();
+  const reference = refCode();
   let y = drawLetterhead(doc);
-  y = drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference: refCode() });
+  drawTopRightQR(doc, reportQrText({ title, subtitle, reference, generated: todayLong() }));
+  y = drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference });
 
   sections.forEach((sec) => {
     // Keep a heading with at least a little of its content on the same page.
@@ -372,7 +376,9 @@ function drawQR(doc, text, x, y, size) {
 
 // Verification QR, placed in the top-right corner of the voucher (in the empty
 // space beside the letterhead banner). Encodes the voucher's key details.
-function drawVoucherQR(doc, qrText) {
+// A verification QR in the top-right corner (beside the letterhead banner),
+// used on every printable PDF: reports, the staff document, and the voucher.
+function drawTopRightQR(doc, qrText) {
   const pageW = doc.internal.pageSize.getWidth();
   const size = 76, pad = 8;
   const x = pageW - MARGIN - size, y = 34;
@@ -382,6 +388,19 @@ function drawVoucherQR(doc, qrText) {
   drawQR(doc, qrText, x, y, size);
   doc.setFont("helvetica", "bold"); doc.setFontSize(6.4); doc.setTextColor(...BRAND);
   doc.text("SCAN TO VERIFY", x + size / 2, y + size + 11, { align: "center", charSpace: 0.5 });
+}
+
+// Verification payload for a standard report / document PDF.
+function reportQrText({ title, subtitle, reference, generated }) {
+  const emailLine = (COMPANY.lines || []).find((l) => /email/i.test(l)) || "";
+  return [
+    COMPANY.name,
+    title || "Document",
+    subtitle || null,
+    `Ref: ${reference}`,
+    `Generated: ${generated}`,
+    emailLine,
+  ].filter(Boolean).join("\n");
 }
 
 /**
@@ -414,7 +433,7 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   ].filter(Boolean).join("\n");
 
   let y = drawLetterhead(doc);
-  drawVoucherQR(doc, qrText);   // verification QR, top-right corner
+  drawTopRightQR(doc, qrText);   // verification QR, top-right corner
   y = drawTitleBlock(doc, y, { eyebrow: "Payment Voucher", title: "PAYMENT VOUCHER", subtitle: null, meta: [], reference: voucherNo });
 
   // Compact details grid — two key/value pairs per row.
