@@ -1560,6 +1560,7 @@ function MyPortal({ ctx, setSv }) {
   return (
     <>
       <Announcements ctx={ctx} audience="staff" />
+      <ActionCenter ctx={ctx} navigate={(m) => setSv(m)} modules={["requisitions"]} title="Awaiting your approval" />
       {emp.profileStatus === "pending" && <Card style={{ padding: "12px 16px", marginBottom: 14, background: "var(--info-dim)", border: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}><Timer size={16} style={{ color: "var(--accent)" }} /><div style={{ fontSize: 12.5, color: "var(--text)" }}>Your submitted profile changes are awaiting admin approval.</div></Card>}
       <Card style={{ padding: "20px 22px", marginBottom: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <Avatar emp={emp} size={52} />
@@ -2168,6 +2169,76 @@ function StatCard({ Icon, label, value, meta, tone = "brand" }) {
   );
 }
 
+// Cross-module "awaiting your action" items for the signed-in user. Each item
+// names the module to open; the caller passes a navigate(moduleId) that maps to
+// the current shell (admin-console views or staff-portal views).
+function actionAlertsFor(ctx) {
+  const me = ctx.currentEmp || {};
+  const role = me.roleId || (ctx.auth && ctx.auth.role) || "staff";
+  const myId = me.id || (ctx.auth && ctx.auth.empId) || "";
+  const isSup = !!me.isSupervisor;
+  const hrAdmin = ["admin", "hr"].includes(role);
+  const isAdmin = role === "admin";
+  const store = ctx.store || {};
+  const employees = store.employees || [];
+  const out = [];
+  if (isSup) {
+    const n = (store.requisitions || []).filter((r) => r.status === "pending_supervisor" && canSuperviseReq(r, myId, employees)).length;
+    if (n) out.push({ key: "req_sup", module: "requisitions", Icon: Receipt, tone: "warning", title: "Requisitions to review", count: n, detail: "awaiting your first-level approval" });
+  }
+  if (hrAdmin) {
+    const n = (store.requisitions || []).filter((r) => r.status === "pending_admin").length;
+    if (n) out.push({ key: "req_admin", module: "requisitions", Icon: Receipt, tone: "accent", title: "Requisitions — final approval", count: n, detail: "awaiting HR & Admin sign-off" });
+  }
+  if (canDo(ctx, "approveLeave") && can(ctx, "leave")) {
+    const n = (store.leave || []).filter((l) => l.status === "Pending").length;
+    if (n) out.push({ key: "leave", module: "leave", Icon: CalendarDays, tone: "warning", title: "Leave requests", count: n, detail: "pending your approval" });
+  }
+  if (canDo(ctx, "manageAdvances") && can(ctx, "advances")) {
+    const n = (store.advances || []).filter((a) => a.status === "Pending").length;
+    if (n) out.push({ key: "advances", module: "advances", Icon: Banknote, tone: "warning", title: "Salary advances", count: n, detail: "awaiting your decision" });
+  }
+  if (isAdmin) {
+    const n = employees.filter((e) => e.profileStatus === "pending" && e.profileDraft).length;
+    if (n) out.push({ key: "profiles", module: "approvals", Icon: ClipboardCheck, tone: "accent", title: "Profile changes", count: n, detail: `staff update${n === 1 ? "" : "s"} to review` });
+  }
+  return out;
+}
+
+function ActionCenter({ ctx, navigate, modules, title = "Action required" }) {
+  let alerts = actionAlertsFor(ctx);
+  if (modules) alerts = alerts.filter((a) => modules.includes(a.module));
+  if (!alerts.length) return null;
+  const total = alerts.reduce((s, a) => s + a.count, 0);
+  const tones = { warning: ["var(--warning)", "var(--warning-dim)"], accent: ["var(--accent)", "var(--accent-dim)"], danger: ["var(--danger)", "var(--danger-dim)"] };
+  return (
+    <Card style={{ marginBottom: 16, padding: 0, borderColor: "var(--warning)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
+        <Bell size={16} style={{ color: "var(--warning)" }} />
+        <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>{title}</div>
+        <Pill tone="warning">{total}</Pill>
+        <div style={{ flex: 1 }} />
+        <div style={{ fontSize: 12, color: "var(--muted)" }} className="hide-sm">Items waiting for you to act on</div>
+      </div>
+      <div>
+        {alerts.map((a, i) => {
+          const [fg, bg] = tones[a.tone] || tones.warning;
+          return (
+            <div key={a.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px", borderBottom: i === alerts.length - 1 ? "none" : "1px solid var(--border)" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 9, flex: "none", display: "grid", placeItems: "center", background: bg, color: fg }}><a.Icon size={16} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>{a.title}</div>
+                <div style={{ fontSize: 12, color: "var(--text-2)" }}><b>{a.count}</b> {a.detail}</div>
+              </div>
+              <Btn size="sm" variant="primary" onClick={() => navigate(a.module)}>Review<ChevronRight size={14} /></Btn>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function Dashboard({ ctx }) {
   const { store, empById } = ctx;
   const emps = store.employees;
@@ -2193,6 +2264,7 @@ function Dashboard({ ctx }) {
   return (
     <>
       <Announcements ctx={ctx} audience="admin" />
+      <ActionCenter ctx={ctx} navigate={(m) => ctx.setView && ctx.setView(m)} />
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
         <StatCard Icon={Users} label="Total staff" value={emps.length} meta={`${active} active · ${emps.length - active} inactive`} tone="brand" />
         <StatCard Icon={Check} label="Present today" value={presentToday} meta={`of ${emps.length} on the register`} tone="success" />
