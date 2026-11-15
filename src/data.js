@@ -395,14 +395,14 @@ export function normalizePurchaseOrder(po = {}) {
 data.purchaseOrders = [
   normalizePurchaseOrder({
     id: "PO-1001", poNo: "Gla/Local/018/26", supplierId: "SUP-002", supplierName: "Nsubuga Technical Supplies Ltd",
-    supplierAddress: "Plot 44, Industrial Area, Kampala", contactPerson: "Ronald Nsubuga",
+    supplierAddress: "Plot 44, Industrial Area, Kampala", contactPerson: "Ronald Nsubuga", supplierTin: "1000771234",
     quoteNo: "CO-P-26-01958", date: "2026-11-12", currency: "UGX", vatMode: "inclusive", vatRate: 18,
     lineItems: [
       { code: "PVPI-IS-60900", description: "PV PIPE OD 200mm PN 10 ISO CSJ, GREY", qty: 115, unit: "Pieces", unitPrice: 231370 },
       { code: "PVPI-IS-60700", description: "PV PIPE OD 110mm PN 10 ISO CSJ, GREY", qty: 55, unit: "Pieces", unitPrice: 72500 },
       { code: "SOCM-FV-15810", description: "TANGIT SOLVENT CEMENT 500ML", qty: 3, unit: "Tins", unitPrice: 26520 },
     ],
-    status: "issued", issuedBy: "Abu-Baker Nsubuga",
+    status: "issued", issuedBy: "Grace Auma",
   }),
 ];
 

@@ -603,9 +603,13 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   let sy = y + 40;
   if (sy < pageH - 70 - SIG_H) sy = pageH - 70 - SIG_H;
   if (sy + SIG_H > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
+  // Approving authority is a configured signatory, always a different person
+  // from whoever prepared the PO (fall back to the senior signatory).
+  const preparer = (po.issuedBy || "").trim();
+  const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
   drawVoucherSignRow(doc, sy, [
     { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
-    { title: "Approved signatory", name: (SIGNATORIES[1] && SIGNATORIES[1].name) || "", meta: (SIGNATORIES[1] && SIGNATORIES[1].contact) || "" },
+    { title: "Approved signatory", name: approver.name || "", meta: approver.contact || "" },
   ]);
 
   drawFooters(doc);
