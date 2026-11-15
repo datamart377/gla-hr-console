@@ -277,6 +277,7 @@ data.suppliers = [
   { id: "SUP-003", name: "Kampala Hardware & Steel", tin: "1000889077", category: "Hardware & Steel", contactPerson: "Grace Nalwoga", phone: "+256 392 776 210", email: "info@klahardware.co.ug", bankAccount: "0102009887654", bankName: "Centenary Bank", bankBranch: "Kampala Road", address: "Kampala Road, Kampala", whtDefault: true, vatDefault: false, status: "Active", notes: "Not VAT-registered." },
   { id: "SUP-004", name: "Victoria Fuels (U) Ltd", tin: "1000456120", category: "Fuels & Lubricants", contactPerson: "Denis Ssembatya", phone: "+256 700 934 512", email: "accounts@victoriafuels.co.ug", bankAccount: "6009345120088", bankName: "Absa Bank", bankBranch: "Kireka", address: "Kireka, Wakiso", whtDefault: false, vatDefault: false, status: "Active", notes: "Fuel supplied on URA-exempt terms." },
   { id: "SUP-005", name: "CoolTech Supplies", tin: "1000512347", category: "HVAC Spares", contactPerson: "Aisha Namusoke", phone: "+256 752 330 145", email: "cooltech.ug@gmail.com", bankAccount: "1044120087765", bankName: "Equity Bank", bankBranch: "Ntinda", address: "Ntinda, Kampala", whtDefault: true, vatDefault: true, status: "Active", notes: "" },
+  { id: "SUP-006", name: "Al Zubair General Trading LLC", tin: "", category: "Electrical Materials", contactPerson: "Procurement Desk", phone: "+971 4 000 0000", email: "sales@alzubair.ae", bankAccount: "020-090106-101", bankName: "HSBC Bank Middle East", bankBranch: "", accountName: "AL ZUBAIR GENERAL TRADING LLC", bankAddress: "Bur-Dubai Branch, P.O. Box 66, Dubai, UAE", iban: "AE54 0200 0000 2009 0106 101", swiftCode: "BBMEAEAD", address: "Dubai, United Arab Emirates", whtDefault: false, vatDefault: false, status: "Active", notes: "International supplier — settled in USD." },
 ];
 export const supplierById = (id) => (data.suppliers || []).find((s) => s.id === id) || null;
 
@@ -377,6 +378,11 @@ export function normalizePurchaseOrder(po = {}) {
     bankName: po.bankName || "",
     bankAccount: po.bankAccount || "",
     bankBranch: po.bankBranch || "",
+    // International remittance details (used when the currency is not UGX).
+    accountName: po.accountName || "",
+    bankAddress: po.bankAddress || "",
+    iban: po.iban || "",
+    swiftCode: po.swiftCode || "",
     quoteNo: po.quoteNo || "",
     date: po.date || new Date().toISOString().slice(0, 10),
     currency: po.currency || "UGX",

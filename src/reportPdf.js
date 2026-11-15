@@ -574,7 +574,8 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   y = runTable(doc, { head, body, startY: y, guard, columnStyles: { 2: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } } });
 
   // Amount in words.
-  const words = numberToWords(grand) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
+  const CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
+  const words = numberToWords(grand) + " " + (CURRENCY_WORDS[cur] || cur) + " only";
   const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 104);
   const awY = y + 10, awH = Math.max(24, 9 + wlines.length * 12);
   doc.setFillColor(...KVFILL); doc.rect(MARGIN, awY, pageW - MARGIN * 2, awH, "F");
@@ -585,11 +586,24 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   y = awY + awH;
 
   // Supplier bank details (where Global Link settles the invoice), if on file.
-  if (po.bankAccount || po.bankName) {
-    y = drawSectionHeading(doc, y + 16, "Supplier bank details");
+  // International suppliers (non-UGX, or where IBAN/SWIFT is captured) get the
+  // full remittance block; local suppliers get the compact bank line.
+  const isIntl = (po.currency && po.currency !== "UGX") || po.iban || po.swiftCode || po.bankAddress;
+  const bankLines = isIntl
+    ? [
+        `Account name: ${po.accountName || po.supplierName || "—"}`,
+        po.bankName ? `Bank: ${po.bankName}` : null,
+        po.bankAddress ? `Bank address: ${po.bankAddress}` : null,
+        po.iban ? `IBAN: ${po.iban}` : null,
+        po.bankAccount ? `Account no: ${po.bankAccount}` : null,
+        po.swiftCode ? `SWIFT / BIC: ${po.swiftCode}` : null,
+      ].filter(Boolean)
+    : [[po.bankName ? `Bank: ${po.bankName}` : null, po.bankBranch ? `Branch: ${po.bankBranch}` : null, po.bankAccount ? `Account: ${po.bankAccount}` : null].filter(Boolean).join("    ")].filter(Boolean);
+  if (isIntl ? bankLines.length > 1 || po.bankName || po.bankAccount : (po.bankAccount || po.bankName)) {
+    y = drawSectionHeading(doc, y + 16, isIntl ? `Supplier bank details (${cur})` : "Supplier bank details");
     doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(...BODY);
-    const bank = [po.bankName ? `Bank: ${po.bankName}` : null, po.bankBranch ? `Branch: ${po.bankBranch}` : null, po.bankAccount ? `Account: ${po.bankAccount}` : null].filter(Boolean).join("    ");
-    doc.text(bank, MARGIN, y + 12); y += 18;
+    if (isIntl) { bankLines.forEach((ln, i) => doc.text(ln, MARGIN, y + 12 + i * 12)); y += 10 + bankLines.length * 12; }
+    else { doc.text(bankLines[0], MARGIN, y + 12); y += 18; }
   }
   if (po.notes && String(po.notes).trim()) {
     y = drawSectionHeading(doc, y + 14, "Notes");

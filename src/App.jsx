@@ -4647,9 +4647,9 @@ function PurchaseOrderForm({ ctx, id }) {
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const pickSupplier = (sid) => setF((s) => {
     const sup = suppliers.find((x) => x.id === sid) || {};
-    return { ...s, supplierId: sid, supplierName: sup.name || "", supplierAddress: sup.address || "", contactPerson: sup.contactPerson || "", supplierTin: sup.tin || "", bankName: sup.bankName || "", bankBranch: sup.bankBranch || "", bankAccount: sup.bankAccount || "" };
+    return { ...s, supplierId: sid, supplierName: sup.name || "", supplierAddress: sup.address || "", contactPerson: sup.contactPerson || "", supplierTin: sup.tin || "", bankName: sup.bankName || "", bankBranch: sup.bankBranch || "", bankAccount: sup.bankAccount || "", accountName: sup.accountName || sup.name || "", bankAddress: sup.bankAddress || "", iban: sup.iban || "", swiftCode: sup.swiftCode || "" };
   });
-  const setCurrency = (e) => { const currency = e.target.value; setF((s) => ({ ...s, currency, poNo: (!existing && s.poNo === nextPoNumber(store.purchaseOrders, s.currency)) ? nextPoNumber(store.purchaseOrders, currency) : s.poNo })); };
+  const setCurrency = (e) => { const currency = e.target.value; setF((s) => ({ ...s, currency, vatMode: currency === "UGX" ? (s.vatMode === "none" ? "inclusive" : s.vatMode) : "none", poNo: (!existing && s.poNo === nextPoNumber(store.purchaseOrders, s.currency)) ? nextPoNumber(store.purchaseOrders, currency) : s.poNo })); };
   const setItem = (i, k, v) => setF((s) => ({ ...s, lineItems: s.lineItems.map((it, j) => (j === i ? { ...it, [k]: v } : it)) }));
   const addItem = () => setF((s) => ({ ...s, lineItems: [...s.lineItems, { code: "", description: "", qty: 1, unit: "", unitPrice: 0 }] }));
   const rmItem = (i) => setF((s) => ({ ...s, lineItems: s.lineItems.length > 1 ? s.lineItems.filter((_, j) => j !== i) : s.lineItems }));
@@ -4719,6 +4719,23 @@ function PurchaseOrderForm({ ctx, id }) {
             <div style={{ fontSize: 13.5, fontWeight: 700 }}>Grand total: <span className="mono" style={{ color: "var(--brand)" }}>{cur} {fmtN(tot.grand)}</span></div>
           </div>
         </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Supplier bank details" sub={cur === "UGX" ? "Where Global Link settles the invoice — prints on the PO" : `International remittance details (${cur}) — prints on the PO`} />
+          <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {cur === "UGX" ? (<>
+              <Field label="Account number"><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
+              <Field label="Bank"><Input value={f.bankName} onChange={set("bankName")} placeholder="e.g. Stanbic Bank" /></Field>
+              <Field label="Branch" full><Input value={f.bankBranch} onChange={set("bankBranch")} placeholder="e.g. Garden City" /></Field>
+            </>) : (<>
+              <Field label="Account name"><Input value={f.accountName} onChange={set("accountName")} placeholder="Beneficiary / account holder" /></Field>
+              <Field label="Bank name"><Input value={f.bankName} onChange={set("bankName")} placeholder="e.g. HSBC Bank Middle East" /></Field>
+              <Field label="Bank address" full><Input value={f.bankAddress} onChange={set("bankAddress")} placeholder="e.g. Bur-Dubai Branch, P.O. Box 66, Dubai, UAE" /></Field>
+              <Field label="IBAN"><Input value={f.iban} onChange={set("iban")} placeholder="e.g. AE54 0200 0000 2009 0106 101" /></Field>
+              <Field label="Account number"><Input value={f.bankAccount} onChange={set("bankAccount")} placeholder="e.g. 020-090106-101" /></Field>
+              <Field label="SWIFT / BIC"><Input value={f.swiftCode} onChange={set("swiftCode")} placeholder="e.g. BBMEAEAD" /></Field>
+            </>)}
+          </div>
+        </Card>
         <Field label="Notes / delivery instructions" full><textarea value={f.notes} onChange={set("notes")} rows={2} style={{ ...controlStyle, minHeight: 54, resize: "vertical" }} placeholder="e.g. Delivery within 14 days; original VAT invoice required on delivery." /></Field>
       </div>
     </Modal>
@@ -4730,7 +4747,7 @@ function SupplierForm({ ctx, id }) {
   const existing = (ctx.store.suppliers || []).find((s) => s.id === id);
   const [f, setF] = useState(existing
     ? { whtDefault: existing.whtDefault !== false, vatDefault: existing.vatDefault !== false, ...existing }
-    : { id: nextSupplierId(ctx.store.suppliers), name: "", tin: "", category: SUPPLIER_CATEGORIES[0], contactPerson: "", phone: "", email: "", bankName: "", bankAccount: "", bankBranch: "", address: "", whtDefault: true, vatDefault: true, status: "Active", notes: "" });
+    : { id: nextSupplierId(ctx.store.suppliers), name: "", tin: "", category: SUPPLIER_CATEGORIES[0], contactPerson: "", phone: "", email: "", bankName: "", bankAccount: "", bankBranch: "", accountName: "", bankAddress: "", iban: "", swiftCode: "", address: "", whtDefault: true, vatDefault: true, status: "Active", notes: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggle = (k) => () => setF({ ...f, [k]: !f[k] });
   const submit = async () => {
@@ -4765,6 +4782,11 @@ function SupplierForm({ ctx, id }) {
         <Field label="Account number"><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
         <Field label="Bank"><Input value={f.bankName} onChange={set("bankName")} placeholder="e.g. Stanbic Bank" /></Field>
         <Field label="Branch" full><Input value={f.bankBranch} onChange={set("bankBranch")} placeholder="e.g. Garden City" /></Field>
+        <FieldsetTitle>International remittance <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)" }}>— for foreign-currency suppliers; optional</span></FieldsetTitle>
+        <Field label="Account name"><Input value={f.accountName || ""} onChange={set("accountName")} placeholder="Beneficiary (defaults to supplier name)" /></Field>
+        <Field label="SWIFT / BIC"><Input value={f.swiftCode || ""} onChange={set("swiftCode")} placeholder="e.g. BBMEAEAD" /></Field>
+        <Field label="IBAN" full><Input value={f.iban || ""} onChange={set("iban")} placeholder="e.g. AE54 0200 0000 2009 0106 101" /></Field>
+        <Field label="Bank address" full><Input value={f.bankAddress || ""} onChange={set("bankAddress")} placeholder="e.g. Bur-Dubai Branch, P.O. Box 66, Dubai, UAE" /></Field>
         <FieldsetTitle>Tax defaults</FieldsetTitle>
         <Field label="6% income withholding" hint="Default for new schedule lines"><Toggle on={f.whtDefault} onClick={toggle("whtDefault")} label={f.whtDefault ? "Applies (−6%)" : "Not applied"} hint="Deducted from payment" /></Field>
         <Field label="18% VAT" hint="Default for new schedule lines"><Toggle on={f.vatDefault} onClick={toggle("vatDefault")} label={f.vatDefault ? "Applies (+18%)" : "Not applied"} hint="Added to payment" /></Field>
