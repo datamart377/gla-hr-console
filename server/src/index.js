@@ -100,6 +100,7 @@ const COLLECTIONS = {
   "stock-closings": "stock_closings",
   "bank-approvals": "bank_approvals",
   requisitions: "requisitions",
+  "purchase-orders": "purchase_orders",
 };
 for (const [path, table] of Object.entries(COLLECTIONS)) {
   app.use(`/api/${path}`, crudRouter(table));

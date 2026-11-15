@@ -8,16 +8,16 @@ import {
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
-  Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive,
+  Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import L from "leaflet";
-import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
-  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi,
+  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi,
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
@@ -34,6 +34,7 @@ import {
   monthKeyOf, monthLabel, addMonth, prevMonthKey, CURRENT_MONTH, monthLedgerRow, monthIsClosed,
   GEOFENCES, matchGeofence, formatDistance, setGeofences, getGeofences,
   timeToMinutes, minutesToTime, LATE_THRESHOLD_MIN,
+  normalizePurchaseOrder, poTotals, nextPoNumber, PO_CURRENCIES, PO_VAT_MODES, poStatusLabel, poStatusTone,
 } from "./data.js";
 
 /* ============================ formatting helpers =========================== */
@@ -292,7 +293,7 @@ const VIEW_META = {
 };
 
 export default function App() {
-  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], settings: null });
+  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], purchaseOrders: [], settings: null });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [auth, setAuth] = useState(null); // { empId, role }
@@ -300,13 +301,13 @@ export default function App() {
   const [idleWarn, setIdleWarn] = useState(false); // inactivity warning banner
 
   const reload = async () => {
-    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, settings] = await Promise.all([
+    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings] = await Promise.all([
       employeesApi.list(), leaveApi.list(), attendanceApi.list(), appraisalsApi.list(),
-      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), settingsApi.get(),
+      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
     setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
-    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, settings });
+    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings });
   };
   useEffect(() => {
     (async () => {
@@ -4348,6 +4349,7 @@ function ScheduleLineForm({ ctx, id }) {
 /* ============================== Suppliers register ============================== */
 function Suppliers({ ctx }) {
   const { store, setModal } = ctx;
+  const [tab, setTab] = useState("register");
   const all = store.suppliers || [];
   const scheduleCount = (sid) => (store.supplierSchedule || []).filter((l) => l.supplierId === sid).length;
   const [q, setQ] = useState("");
@@ -4387,8 +4389,17 @@ function Suppliers({ ctx }) {
       await setStatus(s, "Frozen");
     }
   };
+  const poCount = (store.purchaseOrders || []).length;
   return (
     <>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        {[["register", "Supplier register", all.length], ["po", "Purchase orders", poCount]].map(([id, label, count]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 999, border: "1px solid " + (tab === id ? "var(--brand)" : "var(--border)"), background: tab === id ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+            {label}{count > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: "var(--surface-2)", color: "var(--text-2)", borderRadius: 999, padding: "1px 7px" }}>{count}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "po" ? <PurchaseOrders ctx={ctx} /> : (<>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
         <StatCard Icon={Building2} label="Suppliers" value={all.length} meta={`${active} active`} tone="brand" />
         <StatCard Icon={ClipboardCheck} label="On current schedule" value={onSchedule} meta="lines in the draft" tone="accent" />
@@ -4429,6 +4440,7 @@ function Suppliers({ ctx }) {
           empty="No suppliers match your filters. Use “Add supplier” to create one."
         />
       </Card>
+      </>)}
     </>
   );
 }
@@ -4436,6 +4448,147 @@ function Suppliers({ ctx }) {
 function nextSupplierId(suppliers) {
   const nums = (suppliers || []).map((s) => parseInt(String(s.id).replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
   return "SUP-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0");
+}
+
+// Generate & download the branded Purchase Order PDF.
+function printPo(ctx, po) {
+  try {
+    setReportCompany(ctx.store.settings && ctx.store.settings.company);
+    downloadPurchaseOrderPdf(normalizePurchaseOrder(po));
+  } catch (e) { alert("Couldn't generate the purchase order PDF.\n\n" + (e && e.message ? e.message : "")); }
+}
+
+function PurchaseOrders({ ctx }) {
+  const { store, setModal } = ctx;
+  const pos = (store.purchaseOrders || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  const totalValue = pos.filter((p) => p.status !== "cancelled" && (p.currency || "UGX") === "UGX").reduce((s, p) => s + poTotals(p).grand, 0);
+  return (
+    <>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={ShoppingCart} label="Purchase orders" value={pos.length} meta={`${pos.filter((p) => p.status === "issued").length} issued`} tone="brand" />
+        <StatCard Icon={Building2} label="Suppliers ordered from" value={new Set(pos.map((p) => p.supplierId)).size} meta="distinct suppliers" tone="accent" />
+        <StatCard Icon={Coins} label="UGX order value" value={ugxShort(totalValue)} meta="local POs, excl. cancelled" tone="success" />
+      </div>
+      <Toolbar>
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" onClick={() => setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={null} />)}><Plus size={16} />New purchase order</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "PO No.", render: (p) => <span className="mono" style={{ fontWeight: 600 }}>{p.poNo || p.id}</span> },
+            { label: "Supplier", render: (p) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{p.supplierName || "—"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.quoteNo ? `Quote ${p.quoteNo}` : "no quote ref"}</div></div> },
+            { label: "Date", render: (p) => reqDate(p.date) },
+            { label: "Items", render: (p) => (p.lineItems || []).length },
+            { label: "Total", render: (p) => <span className="mono">{(p.currency || "UGX")} {fmtN(poTotals(p).grand)}</span> },
+            { label: "Status", render: (p) => <Pill tone={poStatusTone(p.status)}>{poStatusLabel(p.status)}</Pill> },
+            { label: "", render: (p) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" variant="primary" onClick={() => printPo(ctx, p)} title="Print / download PDF"><Printer size={13} />PO</Btn>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={p.id} />)} title="Edit"><Pencil size={13} /></Btn>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={purchaseOrdersApi} id={p.id} label={p.poNo || p.id} />)} title="Delete"><Trash2 size={13} /></Btn>
+              </div>
+            ) },
+          ]}
+          rows={pos}
+          empty="No purchase orders yet. Click “New purchase order” to issue one from a supplier's quotation."
+        />
+      </Card>
+    </>
+  );
+}
+
+function PurchaseOrderForm({ ctx, id }) {
+  const { store, setModal, reload } = ctx;
+  const suppliers = (store.suppliers || []).filter((s) => s.status !== "Inactive");
+  const existing = id ? (store.purchaseOrders || []).find((p) => p.id === id) : null;
+  const [f, setF] = useState(() => existing ? normalizePurchaseOrder(existing) : normalizePurchaseOrder({
+    poNo: nextPoNumber(store.purchaseOrders, "UGX"),
+    date: new Date().toISOString().slice(0, 10), currency: "UGX", vatMode: "inclusive",
+    lineItems: [{ code: "", description: "", qty: 1, unit: "", unitPrice: 0 }],
+    issuedBy: ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : "",
+  }));
+  const [busy, setBusy] = useState(false);
+  const [printAfter, setPrintAfter] = useState(true);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const pickSupplier = (sid) => setF((s) => {
+    const sup = suppliers.find((x) => x.id === sid) || {};
+    return { ...s, supplierId: sid, supplierName: sup.name || "", supplierAddress: sup.address || "", contactPerson: sup.contactPerson || "", supplierTin: sup.tin || "", bankName: sup.bankName || "", bankBranch: sup.bankBranch || "", bankAccount: sup.bankAccount || "" };
+  });
+  const setCurrency = (e) => { const currency = e.target.value; setF((s) => ({ ...s, currency, poNo: (!existing && s.poNo === nextPoNumber(store.purchaseOrders, s.currency)) ? nextPoNumber(store.purchaseOrders, currency) : s.poNo })); };
+  const setItem = (i, k, v) => setF((s) => ({ ...s, lineItems: s.lineItems.map((it, j) => (j === i ? { ...it, [k]: v } : it)) }));
+  const addItem = () => setF((s) => ({ ...s, lineItems: [...s.lineItems, { code: "", description: "", qty: 1, unit: "", unitPrice: 0 }] }));
+  const rmItem = (i) => setF((s) => ({ ...s, lineItems: s.lineItems.length > 1 ? s.lineItems.filter((_, j) => j !== i) : s.lineItems }));
+  const tot = poTotals(f);
+  const cur = f.currency || "UGX";
+  const save = async () => {
+    if (!f.supplierId) return alert("Select the supplier this order is for.");
+    const valid = f.lineItems.filter((it) => (it.description || "").trim() && (Number(it.qty) || 0) > 0);
+    if (!valid.length) return alert("Add at least one line item with a description and quantity.");
+    setBusy(true);
+    try {
+      const payload = { ...f, lineItems: valid.map((it) => ({ code: (it.code || "").trim(), description: it.description.trim(), qty: Number(it.qty) || 0, unit: (it.unit || "").trim(), unitPrice: Number(it.unitPrice) || 0 })), status: "issued" };
+      const saved = existing ? await purchaseOrdersApi.update(id, payload) : await purchaseOrdersApi.create(payload);
+      await reload();
+      if (printAfter) printPo(ctx, saved || payload);
+      setModal(null);
+    } catch (e) { alert("Couldn't save the purchase order.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
+  };
+  const th = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 8px", textAlign: "left", borderBottom: "1px solid var(--border)" };
+  const td = { padding: "5px 8px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
+  return (
+    <Modal wide title={existing ? "Edit purchase order" : "New purchase order"} sub={f.poNo} onClose={() => setModal(null)}
+      footer={<>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after issuing</label>
+        <Btn onClick={() => setModal(null)}>Cancel</Btn>
+        <Btn variant="primary" disabled={busy} onClick={save}><Send size={15} />{busy ? "Saving…" : existing ? "Save changes" : "Issue purchase order"}</Btn>
+      </>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Supplier & order" sub="Issue against the quotation the supplier shared" />
+          <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Supplier" required><Select value={f.supplierId} onChange={(e) => pickSupplier(e.target.value)} options={[{ value: "", label: "— select supplier —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} /></Field>
+            <Field label="Supplier quote no." hint="The reference on the quotation they shared"><Input value={f.quoteNo} onChange={set("quoteNo")} placeholder="e.g. CO-P-26-01958" /></Field>
+            <Field label="PO number"><Input value={f.poNo} onChange={set("poNo")} /></Field>
+            <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
+            <Field label="Currency"><Select value={f.currency} onChange={setCurrency} options={PO_CURRENCIES.map((c) => ({ value: c, label: c }))} /></Field>
+            <Field label="VAT treatment"><Select value={f.vatMode} onChange={set("vatMode")} options={PO_VAT_MODES} /></Field>
+            {f.supplierId ? <Field label="Delivery / billing address" full><Input value={f.supplierAddress} onChange={set("supplierAddress")} /></Field> : null}
+          </div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Items ordered</div>
+            <Btn size="sm" variant="primary" onClick={addItem}><Plus size={14} />Add item</Btn>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead><tr><th style={{ ...th, width: 110 }}>Item code</th><th style={th}>Description</th><th style={{ ...th, width: 64, textAlign: "right" }}>Qty</th><th style={{ ...th, width: 84 }}>Unit</th><th style={{ ...th, width: 120, textAlign: "right" }}>Unit price</th><th style={{ ...th, width: 120, textAlign: "right" }}>Amount</th><th style={{ ...th, width: 34 }}></th></tr></thead>
+              <tbody>
+                {f.lineItems.map((it, i) => (
+                  <tr key={i}>
+                    <td style={td}><Input value={it.code} onChange={(e) => setItem(i, "code", e.target.value)} placeholder="Code" /></td>
+                    <td style={td}><Input value={it.description} onChange={(e) => setItem(i, "description", e.target.value)} placeholder="Description of works / item" /></td>
+                    <td style={td}><Input type="number" value={it.qty} onChange={(e) => setItem(i, "qty", e.target.value)} style={{ textAlign: "right" }} /></td>
+                    <td style={td}><Input value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)} placeholder="Pcs" /></td>
+                    <td style={td}><Input type="number" value={it.unitPrice} onChange={(e) => setItem(i, "unitPrice", e.target.value)} style={{ textAlign: "right" }} /></td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "var(--font-mono)", paddingTop: 12 }}>{fmtN((Number(it.qty) || 0) * (Number(it.unitPrice) || 0))}</td>
+                    <td style={{ ...td, textAlign: "center", paddingTop: 10 }}><button type="button" onClick={() => rmItem(i)} title="Remove" style={{ border: "none", background: "none", color: "var(--muted)", cursor: "pointer" }}><X size={15} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 20px", gap: 28, background: "var(--surface)", flexWrap: "wrap" }}>
+            {f.vatMode !== "none" && <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>Sub-total: <b className="mono" style={{ color: "var(--text)" }}>{cur} {fmtN(tot.subTotal)}</b></div>}
+            {f.vatMode !== "none" && <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>VAT ({tot.rate}%): <b className="mono" style={{ color: "var(--text)" }}>{cur} {fmtN(tot.vat)}</b></div>}
+            <div style={{ fontSize: 13.5, fontWeight: 700 }}>Grand total: <span className="mono" style={{ color: "var(--brand)" }}>{cur} {fmtN(tot.grand)}</span></div>
+          </div>
+        </Card>
+        <Field label="Notes / delivery instructions" full><textarea value={f.notes} onChange={set("notes")} rows={2} style={{ ...controlStyle, minHeight: 54, resize: "vertical" }} placeholder="e.g. Delivery within 14 days; original VAT invoice required on delivery." /></Field>
+      </div>
+    </Modal>
+  );
 }
 
 function SupplierForm({ ctx, id }) {

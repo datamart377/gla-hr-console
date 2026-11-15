@@ -505,3 +505,102 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   drawFooters(doc);
   doc.save(`Payment-Voucher-${voucherNo.replace(/\//g, "-")}.pdf`);
 }
+
+/* ---------------------------- purchase order ----------------------------- */
+/**
+ * downloadPurchaseOrderPdf(po) — a branded Purchase Order issued to a supplier
+ * against their quotation. Letterhead + QR, supplier & order details, line
+ * items, VAT totals, amount in words, optional supplier bank, and signatures.
+ */
+export function downloadPurchaseOrderPdf(po, opts = {}) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const guard = letterheadGuard();
+  const items = Array.isArray(po.lineItems) ? po.lineItems : [];
+  const cur = po.currency || "UGX";
+  const rate = Number(po.vatRate ?? 18);
+  const mode = po.vatMode || "inclusive";
+  const sum = items.reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.unitPrice) || 0), 0);
+  let vat = 0, subTotal = sum, grand = sum;
+  if (mode === "exclusive") { vat = Math.round(sum * rate / 100); grand = sum + vat; }
+  else if (mode === "inclusive") { vat = Math.round(sum * rate / (100 + rate)); subTotal = sum - vat; }
+  const poNo = po.poNo || po.id || "";
+
+  const qrText = [
+    `${COMPANY.name} — PURCHASE ORDER`,
+    `PO: ${poNo}`,
+    `Supplier: ${po.supplierName || "-"}`,
+    po.quoteNo ? `Quote: ${po.quoteNo}` : null,
+    `Total: ${cur} ${voMoney(grand)}`,
+    `Date: ${voDate(po.date)}`,
+    (COMPANY.lines || []).find((l) => /email/i.test(l)) || "",
+  ].filter(Boolean).join("\n");
+
+  const reference = poNo;
+  let y = drawLetterhead(doc);
+  drawTopRightQR(doc, qrText);
+  y = drawTitleBlock(doc, y, { eyebrow: "Procurement", title: "PURCHASE ORDER", subtitle: null, meta: [], reference });
+
+  // Supplier & order details — two key/value pairs per row.
+  const kcell = { fontStyle: "bold", textColor: INK, fillColor: KVFILL };
+  const detailRows = [
+    [{ content: "Supplier", styles: kcell }, po.supplierName || "—", { content: "PO No.", styles: kcell }, poNo],
+    [{ content: "Address", styles: kcell }, po.supplierAddress || "—", { content: "Date", styles: kcell }, voDate(po.date)],
+    [{ content: "Contact person", styles: kcell }, po.contactPerson || "—", { content: "Supplier quote no.", styles: kcell }, po.quoteNo || "—"],
+    [{ content: "Supplier TIN", styles: kcell }, po.supplierTin || "—", { content: "Currency", styles: kcell }, cur],
+  ];
+  const keyW = 96, valW = (pageW - MARGIN * 2 - keyW * 2) / 2;
+  y = runTable(doc, { body: detailRows, startY: y + 2, guard, columnStyles: { 0: { cellWidth: keyW }, 1: { cellWidth: valW }, 2: { cellWidth: keyW }, 3: { cellWidth: valW } } });
+
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(...BODY);
+  doc.text("Please arrange to supply the following items as per the quotation referenced above:", MARGIN, y + 16);
+  y += 22;
+
+  // Line items.
+  const head = ["Item code", "Description", "Qty", "Unit", `Unit price (${cur})`, `Amount (${cur})`];
+  const body = items.map((li) => [li.code || "", li.description || "", String(li.qty || 0), li.unit || "", voMoney(li.unitPrice), voMoney((Number(li.qty) || 0) * (Number(li.unitPrice) || 0))]);
+  const span = (label, value) => [{ content: label, colSpan: 5, styles: { halign: "right", fontStyle: "bold", textColor: INK } }, { content: value, styles: { halign: "right", fontStyle: "bold", textColor: INK } }];
+  if (mode === "inclusive") { body.push(span("Sub-total (excl. VAT)", voMoney(subTotal))); body.push(span(`VAT (${rate}%, included)`, voMoney(vat))); body.push(span("GRAND TOTAL (incl. VAT)", voMoney(grand))); }
+  else if (mode === "exclusive") { body.push(span("Sub-total", voMoney(subTotal))); body.push(span(`VAT (${rate}%)`, voMoney(vat))); body.push(span("GRAND TOTAL", voMoney(grand))); }
+  else { body.push(span("GRAND TOTAL", voMoney(grand))); }
+  y = runTable(doc, { head, body, startY: y, guard, columnStyles: { 2: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } } });
+
+  // Amount in words.
+  const words = numberToWords(grand) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
+  const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 104);
+  const awY = y + 10, awH = Math.max(24, 9 + wlines.length * 12);
+  doc.setFillColor(...KVFILL); doc.rect(MARGIN, awY, pageW - MARGIN * 2, awH, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...INK);
+  doc.text("Amount in words:", MARGIN + 8, awY + 15);
+  doc.setFont("helvetica", "bolditalic"); doc.setTextColor(...BRAND);
+  doc.text(wlines, MARGIN + 96, awY + 15);
+  y = awY + awH;
+
+  // Supplier bank details (where Global Link settles the invoice), if on file.
+  if (po.bankAccount || po.bankName) {
+    y = drawSectionHeading(doc, y + 16, "Supplier bank details");
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(...BODY);
+    const bank = [po.bankName ? `Bank: ${po.bankName}` : null, po.bankBranch ? `Branch: ${po.bankBranch}` : null, po.bankAccount ? `Account: ${po.bankAccount}` : null].filter(Boolean).join("    ");
+    doc.text(bank, MARGIN, y + 12); y += 18;
+  }
+  if (po.notes && String(po.notes).trim()) {
+    y = drawSectionHeading(doc, y + 14, "Notes");
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(...BODY);
+    const nl = doc.splitTextToSize(String(po.notes).trim(), pageW - MARGIN * 2);
+    doc.text(nl, MARGIN, y + 12); y += 12 + nl.length * 11;
+  }
+
+  // Signatures — anchored toward the lower page.
+  const SIG_H = 96;
+  let sy = y + 40;
+  if (sy < pageH - 70 - SIG_H) sy = pageH - 70 - SIG_H;
+  if (sy + SIG_H > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
+  drawVoucherSignRow(doc, sy, [
+    { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
+    { title: "Approved signatory", name: (SIGNATORIES[1] && SIGNATORIES[1].name) || "", meta: (SIGNATORIES[1] && SIGNATORIES[1].contact) || "" },
+  ]);
+
+  drawFooters(doc);
+  doc.save(`Purchase-Order-${String(poNo).replace(/[/\\]/g, "-")}.pdf`);
+}

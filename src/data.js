@@ -330,6 +330,82 @@ export function resolveScheduleLine(line, suppliers) {
   };
 }
 
+/* ===================== Purchase Orders (procurement) =====================
+   A purchase order is issued to a supplier based on the quotation they shared.
+   It snapshots the supplier's details and the quoted line items, carries a PO
+   number plus the supplier's quote reference, and prints as a branded PDF. */
+export const PO_CURRENCIES = ["UGX", "USD", "EUR", "GBP", "AED", "KES"];
+export const PO_VAT_MODES = [
+  { value: "inclusive", label: "Prices include VAT" },
+  { value: "exclusive", label: "Add VAT on top" },
+  { value: "none", label: "No VAT (exempt / zero-rated)" },
+];
+export const PO_STATUSES = ["draft", "issued", "cancelled"];
+export const poStatusLabel = (s) => ({ draft: "Draft", issued: "Issued", cancelled: "Cancelled" }[s] || s);
+export const poStatusTone = (s) => ({ draft: "muted", issued: "success", cancelled: "danger" }[s] || "muted");
+
+// Totals for a PO. Prices can include VAT, add VAT on top, or be exempt.
+export function poTotals(po = {}) {
+  const items = Array.isArray(po.lineItems) ? po.lineItems : [];
+  const sum = items.reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.unitPrice) || 0), 0);
+  const rate = Number(po.vatRate ?? (data.settings?.payroll?.vat ?? 18));
+  const mode = po.vatMode || "inclusive";
+  let vat = 0, subTotal = sum, grand = sum;
+  if (mode === "exclusive") { vat = Math.round(sum * rate / 100); subTotal = sum; grand = sum + vat; }
+  else if (mode === "inclusive") { vat = Math.round(sum * rate / (100 + rate)); subTotal = sum - vat; grand = sum; }
+  return { count: items.length, lineTotal: sum, subTotal, vat, grand, rate, mode };
+}
+
+// Next PO number: Gla/Local/NNN/YY for UGX, Gla/Intl/NNN/YY otherwise.
+export function nextPoNumber(existing = [], currency = "UGX") {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const n = (existing || []).length + 1;
+  return `Gla/${currency === "UGX" ? "Local" : "Intl"}/${String(n).padStart(3, "0")}/${yy}`;
+}
+
+export function normalizePurchaseOrder(po = {}) {
+  const lineItems = (Array.isArray(po.lineItems) ? po.lineItems : [])
+    .map((li) => ({ code: li.code || "", description: li.description || "", qty: Number(li.qty) || 0, unit: li.unit || "", unitPrice: Number(li.unitPrice) || 0 }));
+  return {
+    id: po.id,
+    poNo: po.poNo || "",
+    supplierId: po.supplierId || "",
+    supplierName: po.supplierName || "",
+    supplierAddress: po.supplierAddress || "",
+    contactPerson: po.contactPerson || "",
+    supplierTin: po.supplierTin || "",
+    bankName: po.bankName || "",
+    bankAccount: po.bankAccount || "",
+    bankBranch: po.bankBranch || "",
+    quoteNo: po.quoteNo || "",
+    date: po.date || new Date().toISOString().slice(0, 10),
+    currency: po.currency || "UGX",
+    vatMode: po.vatMode || "inclusive",
+    vatRate: Number(po.vatRate ?? 18),
+    lineItems: lineItems.length ? lineItems : [{ code: "", description: "", qty: 1, unit: "", unitPrice: 0 }],
+    notes: po.notes || "",
+    status: PO_STATUSES.includes(po.status) ? po.status : "issued",
+    issuedBy: po.issuedBy || "",
+    createdAt: po.createdAt || new Date().toISOString(),
+    updatedAt: po.updatedAt || new Date().toISOString(),
+  };
+}
+
+// Seed a demo purchase order (mock build only — the live table starts empty).
+data.purchaseOrders = [
+  normalizePurchaseOrder({
+    id: "PO-1001", poNo: "Gla/Local/018/26", supplierId: "SUP-002", supplierName: "Nsubuga Technical Supplies Ltd",
+    supplierAddress: "Plot 44, Industrial Area, Kampala", contactPerson: "Ronald Nsubuga",
+    quoteNo: "CO-P-26-01958", date: "2026-11-12", currency: "UGX", vatMode: "inclusive", vatRate: 18,
+    lineItems: [
+      { code: "PVPI-IS-60900", description: "PV PIPE OD 200mm PN 10 ISO CSJ, GREY", qty: 115, unit: "Pieces", unitPrice: 231370 },
+      { code: "PVPI-IS-60700", description: "PV PIPE OD 110mm PN 10 ISO CSJ, GREY", qty: 55, unit: "Pieces", unitPrice: 72500 },
+      { code: "SOCM-FV-15810", description: "TANGIT SOLVENT CEMENT 500ML", qty: 3, unit: "Tins", unitPrice: 26520 },
+    ],
+    status: "issued", issuedBy: "Abu-Baker Nsubuga",
+  }),
+];
+
 // Processed supplier payment schedules (locked history). Seed several past
 // schedules so each supplier's statement of account has audit history.
 data.supplierRuns = [
