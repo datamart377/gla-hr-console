@@ -419,6 +419,8 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   const guard = letterheadGuard();
   const items = Array.isArray(req.lineItems) ? req.lineItems : [];
   const total = items.reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+  const payable = req.approvedAmount != null ? Number(req.approvedAmount) : total;  // HR & Admin may adjust
+  const adjusted = req.approvedAmount != null && Number(req.approvedAmount) !== total;
   const cur = req.currency || "UGX";
   const voucherNo = "PV/" + String(req.id || "").replace(/^REQ-/, "");
   const loc = req.location || {};
@@ -428,7 +430,7 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
     `Voucher: ${voucherNo}`,
     `Requisition: ${req.id || "-"}`,
     `Payee: ${req.requesterName || "-"}`,
-    `Amount: ${cur} ${voMoney(total)}`,
+    `Amount: ${cur} ${voMoney(payable)}${adjusted ? ` (adjusted from ${voMoney(total)})` : ""}`,
     `Status: ${(req.status || "").toUpperCase()}`,
     req.supervisor ? `Supervisor: ${req.supervisor.name} (${voDate(req.supervisor.at)})` : null,
     req.admin ? `Approved by: ${req.admin.name} (${voDate(req.admin.at)})` : null,
@@ -460,11 +462,16 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   y = drawSectionHeading(doc, y + 16, "Particulars");
   const head = ["Item / Description", "Qty", `Rate (${cur})`, `Amount (${cur})`];
   const body = items.map((li) => [li.description || "", String(li.qty || 0), voMoney(li.rate), voMoney((Number(li.qty) || 0) * (Number(li.rate) || 0))]);
-  body.push([{ content: "TOTAL", styles: { fontStyle: "bold", textColor: INK } }, "", "", { content: voMoney(total), styles: { fontStyle: "bold", textColor: INK } }]);
+  if (adjusted) {
+    body.push([{ content: "Requested total", styles: { fontStyle: "bold", textColor: MUTED } }, "", "", { content: voMoney(total), styles: { fontStyle: "bold", textColor: MUTED } }]);
+    body.push([{ content: "APPROVED AMOUNT (adjusted by HR & Admin)", colSpan: 3, styles: { fontStyle: "bold", textColor: [160, 70, 40] } }, { content: voMoney(payable), styles: { fontStyle: "bold", halign: "right", textColor: [160, 70, 40] } }]);
+  } else {
+    body.push([{ content: "TOTAL", styles: { fontStyle: "bold", textColor: INK } }, "", "", { content: voMoney(payable), styles: { fontStyle: "bold", textColor: INK } }]);
+  }
   y = runTable(doc, { head, body, startY: y + 4, guard, columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } } });
 
-  // Amount in words — highlighted band.
-  const words = numberToWords(total) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
+  // Amount in words — highlighted band (the amount actually payable).
+  const words = numberToWords(payable) + " " + (cur === "UGX" ? "Uganda Shillings" : cur) + " only";
   const wlines = doc.splitTextToSize(words, pageW - MARGIN * 2 - 104);
   const awY = y + 10, awH = Math.max(24, 9 + wlines.length * 12);
   doc.setFillColor(...KVFILL);

@@ -79,6 +79,39 @@ export const bankApprovalsApi = makeCrud("bankApprovals", "BAPP");
 export const requisitionsApi = makeCrud("requisitions", "REQ");
 const _rawReqCreate = requisitionsApi.create;
 requisitionsApi.create = (record) => _rawReqCreate(normalizeRequisition(record));
+// Mirror the server's approval transitions so the offline demo stamps the
+// approver, history and HR & Admin amount adjustments like the live backend.
+// The acting user is passed in body._actor (ignored by the live server).
+const _rawReqUpdate = requisitionsApi.update;
+requisitionsApi.update = (id, body = {}) => {
+  const rec = (data.requisitions || []).find((x) => x.id === id);
+  const target = body.status;
+  if (!rec || !["pending_admin", "approved", "rejected", "adjust"].includes(target)) return _rawReqUpdate(id, body);
+  const now = new Date().toISOString();
+  const actor = body._actor || {};
+  const empId = actor.id || "", name = actor.name || "";
+  const note = String(body.note || "").slice(0, 1000);
+  const reqdTotal = (rec.lineItems || []).reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+  const parseAmt = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.round(x) : null; };
+  const hist = (action, n) => [...(rec.history || []), { at: now, by: empId, byName: name, action, note: n != null ? n : note }];
+  let patch;
+  if (target === "pending_admin") {
+    patch = { status: "pending_admin", supervisor: { id: empId, name, at: now }, history: hist("supervisor_approved"), updatedAt: now };
+  } else if (target === "approved") {
+    const amt = ("approvedAmount" in body) ? parseAmt(body.approvedAmount) : null;
+    const adjusted = amt != null && amt !== reqdTotal;
+    const n = adjusted ? `Amount adjusted from UGX ${reqdTotal.toLocaleString()} to UGX ${amt.toLocaleString()}${note ? " — " + note : ""}` : note;
+    patch = { status: "approved", admin: { id: empId, name, at: now }, approvedAmount: amt, adjustment: adjusted ? { by: empId, byName: name, at: now, from: reqdTotal, to: amt, reason: note } : (rec.adjustment || null), history: hist("admin_approved", n), updatedAt: now };
+  } else if (target === "adjust") {
+    const amt = parseAmt(body.approvedAmount);
+    const adjusted = amt != null && amt !== reqdTotal;
+    patch = { approvedAmount: amt, adjustment: adjusted ? { by: empId, byName: name, at: now, from: reqdTotal, to: amt, reason: note } : null, history: hist("amount_adjusted", `Approved amount set to UGX ${(amt || 0).toLocaleString()}${note ? " — " + note : ""}`), updatedAt: now };
+  } else { // rejected
+    const stage = rec.status === "pending_supervisor" ? "supervisor" : "admin";
+    patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage }, history: hist(stage === "supervisor" ? "supervisor_rejected" : "admin_rejected"), updatedAt: now };
+  }
+  return _rawReqUpdate(id, patch);
+};
 
 // Purchase orders (issued to suppliers against their quotations)
 export const purchaseOrdersApi = makeCrud("purchaseOrders", "PO");

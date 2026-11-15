@@ -144,7 +144,9 @@ async function updateRequisition(req, res, next) {
     const target = body.status;
     const note = String(body.note || (body.rejection && body.rejection.reason) || "").slice(0, 1000);
     const editable = (b) => pick(b, ["subject", "narrative", "location", "lineItems", "documents", "currency"]);
-    const hist = (action) => [...(rec.history || []), { at: now, by: empId, byName: name, action, note: action === "submitted" ? "" : note }];
+    const hist = (action, n) => [...(rec.history || []), { at: now, by: empId, byName: name, action, note: n != null ? n : (action === "submitted" ? "" : note) }];
+    const reqdTotal = (rec.lineItems || []).reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
+    const parseAmt = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.round(x) : null; };
 
     let patch = null;
     if (owner && rec.status === "draft" && (!target || target === "draft")) {
@@ -156,9 +158,27 @@ async function updateRequisition(req, res, next) {
     } else if (canSup && rec.status === "pending_supervisor" && target === "rejected") {
       patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage: "supervisor" }, updatedAt: now, history: hist("supervisor_rejected") };
     } else if (hrAdmin && rec.status === "pending_admin" && target === "approved") {
-      patch = { status: "approved", admin: { id: empId, name, at: now }, updatedAt: now, history: hist("admin_approved") };
+      // HR & Admin may approve the full requested amount or adjust it down/up.
+      const amt = ("approvedAmount" in body) ? parseAmt(body.approvedAmount) : null;
+      const adjusted = amt != null && amt !== reqdTotal;
+      const n = adjusted ? `Amount adjusted from UGX ${reqdTotal.toLocaleString()} to UGX ${amt.toLocaleString()}${note ? " — " + note : ""}` : note;
+      patch = {
+        status: "approved", admin: { id: empId, name, at: now }, approvedAmount: amt,
+        adjustment: adjusted ? { by: empId, byName: name, at: now, from: reqdTotal, to: amt, reason: note } : (rec.adjustment || null),
+        updatedAt: now, history: hist("admin_approved", n),
+      };
     } else if (hrAdmin && rec.status === "pending_admin" && target === "rejected") {
       patch = { status: "rejected", rejection: { by: empId, byName: name, at: now, reason: note, stage: "admin" }, updatedAt: now, history: hist("admin_rejected") };
+    } else if (hrAdmin && rec.status === "approved" && target === "adjust") {
+      // HR & Admin correct the approved amount after the fact.
+      const amt = parseAmt(body.approvedAmount);
+      if (amt == null) return res.status(400).json({ error: "Provide a valid approved amount." });
+      const adjusted = amt !== reqdTotal;
+      patch = {
+        approvedAmount: amt,
+        adjustment: adjusted ? { by: empId, byName: name, at: now, from: reqdTotal, to: amt, reason: note } : null,
+        updatedAt: now, history: hist("amount_adjusted", `Approved amount set to UGX ${amt.toLocaleString()}${note ? " — " + note : ""}`),
+      };
     }
     if (!patch) return res.status(403).json({ error: "You can't make that change to this requisition." });
     const merged = { ...rec, ...patch };

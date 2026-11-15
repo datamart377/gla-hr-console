@@ -567,9 +567,15 @@ export function normalizeRequisition(r = {}) {
     updatedAt: r.updatedAt || new Date().toISOString(),
     supervisor: r.supervisor || null,      // { id, name, at }
     admin: r.admin || null,                // { id, name, at }
+    approvedAmount: r.approvedAmount != null ? Number(r.approvedAmount) : null,  // HR & Admin may adjust the payable amount
+    adjustment: r.adjustment || null,      // { by, byName, at, from, to, reason } — set when the amount is changed
     rejection: r.rejection || null,        // { by, byName, at, reason, stage }
   };
 }
+// The amount actually payable: the HR & Admin-approved figure if set, else the
+// requested total. reqAdjusted() is true when HR & Admin changed the amount.
+export const reqPayable = (r) => (r && r.approvedAmount != null ? Number(r.approvedAmount) : reqTotal(r));
+export const reqAdjusted = (r) => !!(r && r.approvedAmount != null && Number(r.approvedAmount) !== reqTotal(r));
 
 // A tiny sample quotation image so the "Supporting documents" viewer is
 // demonstrable in the standalone demo (approvers can open/zoom it).

@@ -26,7 +26,7 @@ import {
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
-  normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, REQ_STAGES, reqStageIndex,
+  normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, reqPayable, reqAdjusted, REQ_STAGES, reqStageIndex,
   supervisorChoices, supervisorsForEmployee, supervisorPoolIds, canSuperviseReq,
   PERMISSION_MODULES, PERMISSION_ACTIONS, roleById,
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
@@ -913,7 +913,7 @@ const byDateDesc = (a, b) => (b.date + (b.clockIn || "")).localeCompare(a.date +
 const reqDate = (s) => (s ? new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const reqDateTime = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const byCreatedDesc = (a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-const reqActionLabel = (a) => ({ submitted: "Submitted", supervisor_approved: "Supervisor approved", supervisor_rejected: "Supervisor rejected", admin_approved: "HR & Admin approved", admin_rejected: "HR & Admin rejected" }[a] || a);
+const reqActionLabel = (a) => ({ submitted: "Submitted", supervisor_approved: "Supervisor approved", supervisor_rejected: "Supervisor rejected", admin_approved: "HR & Admin approved", admin_rejected: "HR & Admin rejected", amount_adjusted: "Amount adjusted" }[a] || a);
 
 function ReqInfo({ label, value }) {
   return (
@@ -1167,7 +1167,9 @@ function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
                 {showRequester && <td style={td}><div style={{ fontWeight: 600 }}>{r.requesterName || "—"}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{r.designation || ""}</div></td>}
                 <td style={{ ...td, maxWidth: 240 }}><div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.subject || "—"}</div></td>
                 <td style={td}><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{(r.location && r.location.name) || "—"}{r.location && r.location.draft ? <Pill tone="warning">Draft</Pill> : null}</span></td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN(reqTotal(r))}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "var(--font-mono)" }}>{reqAdjusted(r) ? (
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.25 }} title={`Adjusted by HR & Admin from ${fmtN(reqTotal(r))}`}><span style={{ fontWeight: 700 }}>{fmtN(reqPayable(r))}</span><span style={{ fontSize: 10.5, color: "var(--muted)", textDecoration: "line-through" }}>{fmtN(reqTotal(r))}</span></span>
+                ) : fmtN(reqTotal(r))}</td>
                 <td style={td}><Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill></td>
                 <td style={{ ...td, textAlign: "right", color: "var(--text-2)", whiteSpace: "nowrap" }}>{reqDate(r.createdAt)}</td>
               </tr>
@@ -1203,6 +1205,12 @@ function ReqDetail({ ctx, r, onClose }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
   const total = reqTotal(r);
+  const payable = reqPayable(r);
+  const adjusted = reqAdjusted(r);
+  const canAdjust = hrAdmin && r.status === "approved";   // HR & Admin may correct the amount after approval
+  const [adjAmount, setAdjAmount] = useState(String(r.approvedAmount != null ? r.approvedAmount : total));
+  const amtNum = Math.max(0, Math.round(Number(adjAmount) || 0));
+  const actorName = `${me.firstName || ""} ${me.lastName || ""}`.trim() || (ctx.auth && ctx.auth.name) || "";
   const loc = r.location || {};
   const poolNames = (r.supervisorIds || []).map((id) => { const e = (ctx.store.employees || []).find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : id; });
   // Attachments: the list endpoint strips inline file data to stay light, so
@@ -1235,15 +1243,16 @@ function ReqDetail({ ctx, r, onClose }) {
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch { window.open(d.dataUrl, "_blank", "noopener"); }
   };
-  const act = async (status) => {
+  const act = async (status, extra = {}) => {
     setBusy(true);
     try {
-      await requisitionsApi.update(r.id, { status, note });
+      await requisitionsApi.update(r.id, { status, note, _actor: { id: myId, name: actorName }, ...extra });
       await ctx.reload();
       onClose();
     } catch (e) { alert("Couldn't update the requisition.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
   };
-  const approve = () => act(canL2 ? "approved" : "pending_admin");
+  const approve = () => act(canL2 ? "approved" : "pending_admin", canL2 ? { approvedAmount: amtNum } : {});
+  const saveAdjust = () => { if (amtNum === total && r.approvedAmount == null) return alert("The amount is unchanged — nothing to adjust."); act("adjust", { approvedAmount: amtNum }); };
   const reject = () => { if (!note.trim()) return alert("Add a short reason for rejecting."); act("rejected"); };
   const diTh = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 12px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)" };
   const diTd = { padding: "9px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5 };
@@ -1254,7 +1263,7 @@ function ReqDetail({ ctx, r, onClose }) {
       footer={canAct ? (
         rejecting
           ? <><Btn onClick={() => setRejecting(false)}>Back</Btn><Btn disabled={busy} onClick={reject} style={redBtn}><X size={15} />Confirm rejection</Btn></>
-          : <><Btn onClick={() => setRejecting(true)} style={redBtn}><X size={15} />Reject</Btn><Btn disabled={busy} onClick={approve} style={greenBtn}><Check size={15} />{canL2 ? "Approve (final)" : "Approve"}</Btn></>
+          : <><Btn onClick={() => setRejecting(true)} style={redBtn}><X size={15} />Reject</Btn><Btn disabled={busy} onClick={approve} style={greenBtn}><Check size={15} />{canL2 ? (amtNum !== total ? "Approve (adjusted)" : "Approve (final)") : "Approve"}</Btn></>
       ) : (
         <>{canVoucher && <Btn variant="primary" onClick={printVoucher}><Printer size={15} />Print payment voucher</Btn>}<Btn onClick={onClose}>Close</Btn></>
       )}>
@@ -1275,10 +1284,26 @@ function ReqDetail({ ctx, r, onClose }) {
                 {(r.lineItems || []).map((li, i) => (
                   <tr key={i}><td style={diTd}>{li.description}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{li.qty}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN(li.rate)}</td><td style={{ ...diTd, textAlign: "right", fontFamily: "var(--font-mono)" }}>{fmtN((Number(li.qty) || 0) * (Number(li.rate) || 0))}</td></tr>
                 ))}
-                <tr><td style={{ ...diTd, fontWeight: 700, borderBottom: "none" }}>Total</td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--success)", borderBottom: "none" }}>{fmtN(total)}</td></tr>
+                <tr><td style={{ ...diTd, fontWeight: 700, borderBottom: "none" }}>{adjusted ? "Requested" : "Total"}</td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)", color: adjusted ? "var(--muted)" : "var(--success)", borderBottom: "none", textDecoration: adjusted ? "line-through" : "none" }}>{fmtN(total)}</td></tr>
+                {adjusted && <tr><td style={{ ...diTd, fontWeight: 700, borderBottom: "none", color: "var(--brand)" }}>Approved (adjusted)</td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, borderBottom: "none" }}></td><td style={{ ...diTd, textAlign: "right", fontWeight: 700, fontFamily: "var(--font-mono)", color: "var(--brand)", borderBottom: "none" }}>{fmtN(payable)}</td></tr>}
               </tbody>
             </table>
           </Card>
+          {(canL2 || canAdjust) && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", background: "var(--accent-dim)" }}>
+              <div style={{ fontSize: 11, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 8 }}>HR &amp; Admin — approved amount</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                <Field label={canL2 ? "Approve at amount (UGX)" : "Adjust approved amount (UGX)"} hint="Requested total is pre-filled — change it to adjust the amount payable."><Input type="number" value={adjAmount} onChange={(e) => setAdjAmount(e.target.value)} style={{ width: 170, textAlign: "right" }} /></Field>
+                {canAdjust && <Btn variant="primary" disabled={busy} onClick={saveAdjust} style={{ marginBottom: 1 }}><Check size={14} />Save adjustment</Btn>}
+              </div>
+              {amtNum !== total && <div style={{ fontSize: 12, color: "var(--brand)", marginTop: 7, fontWeight: 600 }}>This changes the payable amount from {ugx(total)} to {ugx(amtNum)} ({amtNum < total ? "−" : "+"}{ugx(Math.abs(amtNum - total))}).</div>}
+            </div>
+          )}
+          {adjusted && !canL2 && !canAdjust && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", background: "var(--accent-dim)", fontSize: 12.5, color: "var(--text-2)" }}>
+              <b style={{ color: "var(--text)" }}>Amount adjusted by HR &amp; Admin</b> — requested {ugx(total)}, approved <b style={{ color: "var(--brand)" }}>{ugx(payable)}</b>{r.adjustment && r.adjustment.byName ? ` by ${r.adjustment.byName}` : ""}{r.adjustment && r.adjustment.reason ? `. Reason: ${r.adjustment.reason}` : "."}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div>
               <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Paperclip size={13} />Supporting documents <span style={{ color: "var(--text-2)" }}>({attachments.length})</span></div>
@@ -1368,31 +1393,35 @@ function Requisitions({ ctx }) {
     ...(mgmt ? [["all", "All requisitions", all.length]] : []),
   ];
   const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
-  const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqTotal(r), 0);
+  const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqPayable(r), 0);
 
   // Reports: export the requisitions currently in view (respecting the active tab).
   const scopeLabel = { mine: "My requisitions", approvals: "Awaiting my approval", approved: "Approved requisitions", all: "All requisitions" }[tab] || "Requisitions";
   const reportRows = tabData;
   const reportTotal = reportRows.reduce((a, r) => a + reqTotal(r), 0);
+  const reportApproved = reportRows.reduce((a, r) => a + reqPayable(r), 0);
+  const adjustedCount = reportRows.filter((r) => reqAdjusted(r)).length;
   const statusCounts = () => REQ_STATUSES.map((s) => ({ s, n: reportRows.filter((r) => r.status === s).length })).filter((x) => x.n > 0).map((x) => `${reqStatusLabel(x.s)}: ${x.n}`);
   const locName = (r) => (r.location && r.location.name) || "—";
+  // Approved column: the adjusted/payable figure, flagged with * when HR & Admin changed it.
+  const apprCell = (r) => reqAdjusted(r) ? { content: fmtN(reqPayable(r)) + " *", styles: { textColor: [160, 70, 40], fontStyle: "bold" } } : fmtN(reqPayable(r));
   const exportReqPdf = () => downloadReportPdf({
     filename: `GLA-Requisitions-${tab}.pdf`,
     eyebrow: "Requisitions",
     title: "Requisitions Report",
     subtitle: `${scopeLabel} · ${reportRows.length} request${reportRows.length === 1 ? "" : "s"} · generated ${reqDate(new Date().toISOString())}`,
-    meta: [`Total requested: UGX ${fmtN(reportTotal)}`, statusCounts().join("    ")].filter(Boolean),
-    head: ["Ref", "Date", "Requester", "Department", "Location", "Subject", "Amount (UGX)", "Supervisor", "Final approver", "Status"],
-    body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), r.supervisor ? r.supervisor.name : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
-      .concat([["", "", "", "", "", "TOTAL", fmtN(reportTotal), "", "", ""]]),
+    meta: [`Requested: UGX ${fmtN(reportTotal)}    Approved: UGX ${fmtN(reportApproved)}`, statusCounts().join("    "), adjustedCount ? `* ${adjustedCount} amount${adjustedCount === 1 ? "" : "s"} adjusted by HR & Admin (marked in the Approved column)` : ""].filter(Boolean),
+    head: ["Ref", "Date", "Requester", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Supervisor", "Final approver", "Status"],
+    body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), apprCell(r), r.supervisor ? r.supervisor.name : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
+      .concat([[{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold" } }, { content: fmtN(reportTotal), styles: { fontStyle: "bold" } }, { content: fmtN(reportApproved), styles: { fontStyle: "bold" } }, "", "", ""]]),
     orientation: "landscape",
     signatories: SIGNATORIES,
   });
   const exportReqCsv = () => {
-    const header = ["Ref", "Date", "Requester", "Designation", "Department", "Location", "Subject", "Amount (UGX)", "Supervisor", "Final approver", "Status"];
+    const header = ["Ref", "Date", "Requester", "Designation", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Adjusted", "Supervisor", "Final approver", "Status"];
     const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
-    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), r.supervisor ? r.supervisor.name : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
-    lines.push(["", "", "", "", "", "", "TOTAL", reportTotal, "", "", ""].map(esc).join(","));
+    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), reqPayable(r), reqAdjusted(r) ? "YES" : "", r.supervisor ? r.supervisor.name : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
+    lines.push(["", "", "", "", "", "", "TOTAL", reportTotal, reportApproved, "", "", "", ""].map(esc).join(","));
     downloadFile(`gla-requisitions-${tab}.csv`, lines.join("\n"));
   };
   return (
