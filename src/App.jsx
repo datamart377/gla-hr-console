@@ -1369,6 +1369,32 @@ function Requisitions({ ctx }) {
   ];
   const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
   const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqTotal(r), 0);
+
+  // Reports: export the requisitions currently in view (respecting the active tab).
+  const scopeLabel = { mine: "My requisitions", approvals: "Awaiting my approval", approved: "Approved requisitions", all: "All requisitions" }[tab] || "Requisitions";
+  const reportRows = tabData;
+  const reportTotal = reportRows.reduce((a, r) => a + reqTotal(r), 0);
+  const statusCounts = () => REQ_STATUSES.map((s) => ({ s, n: reportRows.filter((r) => r.status === s).length })).filter((x) => x.n > 0).map((x) => `${reqStatusLabel(x.s)}: ${x.n}`);
+  const locName = (r) => (r.location && r.location.name) || "—";
+  const exportReqPdf = () => downloadReportPdf({
+    filename: `GLA-Requisitions-${tab}.pdf`,
+    eyebrow: "Requisitions",
+    title: "Requisitions Report",
+    subtitle: `${scopeLabel} · ${reportRows.length} request${reportRows.length === 1 ? "" : "s"} · generated ${reqDate(new Date().toISOString())}`,
+    meta: [`Total requested: UGX ${fmtN(reportTotal)}`, statusCounts().join("    ")].filter(Boolean),
+    head: ["Ref", "Date", "Requester", "Department", "Location", "Subject", "Amount (UGX)", "Supervisor", "Final approver", "Status"],
+    body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), r.supervisor ? r.supervisor.name : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
+      .concat([["", "", "", "", "", "TOTAL", fmtN(reportTotal), "", "", ""]]),
+    orientation: "landscape",
+    signatories: SIGNATORIES,
+  });
+  const exportReqCsv = () => {
+    const header = ["Ref", "Date", "Requester", "Designation", "Department", "Location", "Subject", "Amount (UGX)", "Supervisor", "Final approver", "Status"];
+    const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
+    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), r.supervisor ? r.supervisor.name : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
+    lines.push(["", "", "", "", "", "", "TOTAL", reportTotal, "", "", ""].map(esc).join(","));
+    downloadFile(`gla-requisitions-${tab}.csv`, lines.join("\n"));
+  };
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 16, marginBottom: 18 }}>
@@ -1377,12 +1403,19 @@ function Requisitions({ ctx }) {
         {canApprove && <StatCard Icon={ClipboardCheck} label="Awaiting my action" value={queue.length} meta={isSup && !hrAdmin ? "first-level review" : hrAdmin && !isSup ? "final approval" : "to review"} tone="accent" />}
         <StatCard Icon={Coins} label="Approved value" value={ugxShort(approvedValue)} meta="your approved requests" tone="success" />
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
         {tabs.map(([id, label, count]) => (
           <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 999, border: "1px solid " + (tab === id ? "var(--brand)" : "var(--border)"), background: tab === id ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
             {label}{count != null && count > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: id === "approvals" ? "var(--accent)" : "var(--surface-2)", color: id === "approvals" ? "#fff" : "var(--text-2)", borderRadius: 999, padding: "1px 7px" }}>{count}</span>}
           </button>
         ))}
+        {tab !== "new" && reportRows.length > 0 && (
+          <>
+            <div style={{ flex: 1 }} />
+            <Btn size="sm" onClick={exportReqPdf} title="Download this list as a branded PDF report"><FileText size={14} />PDF report</Btn>
+            <Btn size="sm" onClick={exportReqCsv} title="Export this list to CSV"><Download size={14} />CSV</Btn>
+          </>
+        )}
       </div>
       {tab === "new"
         ? <ReqForm ctx={ctx} onDone={() => setTab("mine")} />
