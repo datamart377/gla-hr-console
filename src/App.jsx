@@ -4839,6 +4839,7 @@ function Suppliers({ ctx }) {
   const onSchedule = new Set((store.supplierSchedule || []).filter((l) => supplierIdSet.has(l.supplierId)).map((l) => l.supplierId)).size;
   const statusTone = (s) => (s === "Inactive" ? "muted" : s === "Frozen" ? "warning" : "success");
   const addToSchedule = async (s) => {
+    if (!canDo(ctx, "manageSuppliers")) return;
     // One line per supplier — never create a second line for a supplier already on the schedule.
     if ((store.supplierSchedule || []).some((l) => l.supplierId === s.id)) { await ctx.reload(); return; }
     await supplierScheduleApi.create({ supplierId: s.id, subTotal: 0, applyWht: s.whtDefault !== false, applyVat: s.vatDefault !== false });
@@ -4902,7 +4903,7 @@ function Suppliers({ ctx }) {
             { label: "", render: (s) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierView ctx={cc} id={s.id} />)} title="View supplier"><FileText size={13} /></Btn>
-                {scheduleCount(s.id) === 0 && s.status !== "Inactive" && s.status !== "Frozen" && <Btn size="sm" variant="success" onClick={() => addToSchedule(s)} title="Add to payment schedule"><Plus size={13} />Schedule</Btn>}
+                {canDo(ctx, "manageSuppliers") && scheduleCount(s.id) === 0 && s.status !== "Inactive" && s.status !== "Frozen" && <Btn size="sm" variant="success" onClick={() => addToSchedule(s)} title="Add to payment schedule"><Plus size={13} />Schedule</Btn>}
                 {canDo(ctx, "manageSuppliers") && s.status !== "Inactive" && (s.status === "Frozen"
                   ? <Btn size="sm" variant="success" onClick={() => toggleFreeze(s)} title="Reactivate — allow payments"><Check size={13} />Activate</Btn>
                   : <Btn size="sm" variant="warning" onClick={() => toggleFreeze(s)} title="Freeze — hold payments"><Ban size={13} />Freeze</Btn>)}
