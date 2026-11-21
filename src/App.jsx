@@ -1144,7 +1144,7 @@ function ReqForm({ ctx, onDone }) {
   );
 }
 
-function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
+function ReqTable({ rows, showRequester, onOpen, onDelete, emptyLabel }) {
   const th = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "10px 14px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)", whiteSpace: "nowrap" };
   const td = { padding: "11px 14px", borderBottom: "1px solid var(--border)", fontSize: 12.5, color: "var(--text)" };
   return (
@@ -1159,6 +1159,7 @@ function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
             <th style={{ ...th, textAlign: "right" }}>Amount (UGX)</th>
             <th style={th}>Status</th>
             <th style={{ ...th, textAlign: "right" }}>Date</th>
+            {onDelete && <th style={{ ...th, width: 40 }}></th>}
           </tr></thead>
           <tbody>
             {rows.map((r) => (
@@ -1172,9 +1173,10 @@ function ReqTable({ rows, showRequester, onOpen, emptyLabel }) {
                 ) : fmtN(reqTotal(r))}</td>
                 <td style={td}><Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill></td>
                 <td style={{ ...td, textAlign: "right", color: "var(--text-2)", whiteSpace: "nowrap" }}>{reqDate(r.createdAt)}</td>
+                {onDelete && <td style={{ ...td, textAlign: "center" }} onClick={(e) => e.stopPropagation()}><button type="button" title="Delete requisition" onClick={() => onDelete(r)} style={{ border: "none", background: "none", color: "var(--muted)", cursor: "pointer", padding: 4, display: "inline-flex" }} onMouseEnter={(e) => (e.currentTarget.style.color = "var(--danger)")} onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}><Trash2 size={15} /></button></td>}
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={showRequester ? 7 : 6} style={{ ...td, textAlign: "center", color: "var(--muted)", padding: "30px 14px" }}>{emptyLabel}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={(showRequester ? 7 : 6) + (onDelete ? 1 : 0)} style={{ ...td, textAlign: "center", color: "var(--muted)", padding: "30px 14px" }}>{emptyLabel}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1448,7 +1450,7 @@ function Requisitions({ ctx }) {
       </div>
       {tab === "new"
         ? <ReqForm ctx={ctx} onDone={() => setTab("mine")} />
-        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "approved" ? "No approved requisitions yet — a payment voucher appears here once HR & Admin give final approval." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
+        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} onDelete={hrAdmin ? (r) => ctx.setModal(() => (cc) => <ConfirmDelete ctx={cc} api={requisitionsApi} id={r.id} label={`${r.id} — ${r.subject || "requisition"}`} />) : undefined} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "approved" ? "No approved requisitions yet — a payment voucher appears here once HR & Admin give final approval." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
       {open && <ReqDetail ctx={ctx} r={open} onClose={() => setOpenId(null)} />}
     </>
   );
@@ -7700,7 +7702,7 @@ function ConfirmDelete({ ctx, api, id, label, cleanup }) {
   return (
     <Modal title="Delete record?" sub={label} onClose={() => ctx.setModal(null)}
       footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" style={{ background: "var(--danger)", color: "#fff" }} onClick={remove}><Trash2 size={15} />Delete</Btn></>}>
-      <p style={{ margin: 0, color: "var(--text-2)" }}>This will permanently remove “{label}” from the demo data.</p>
+      <p style={{ margin: 0, color: "var(--text-2)" }}>This will permanently remove “{label}”. This action cannot be undone.</p>
     </Modal>
   );
 }
