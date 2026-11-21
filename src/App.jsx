@@ -4885,7 +4885,7 @@ function Suppliers({ ctx }) {
         <SearchBox value={q} onChange={setQ} placeholder="Search name, TIN, contact, bank…" />
         <Select value={cat} onChange={(e) => setCat(e.target.value)} options={[{ value: "", label: "All categories" }, ...SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))]} style={{ width: "auto" }} />
         <div style={{ flex: 1 }} />
-        <Btn variant="primary" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={null} />)}><Plus size={16} />Add supplier</Btn>
+        {canDo(ctx, "manageSuppliers") && <Btn variant="primary" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={null} />)}><Plus size={16} />Add supplier</Btn>}
       </Toolbar>
       <Card>
         <DataTable
@@ -4903,10 +4903,10 @@ function Suppliers({ ctx }) {
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierView ctx={cc} id={s.id} />)} title="View supplier"><FileText size={13} /></Btn>
                 {scheduleCount(s.id) === 0 && s.status !== "Inactive" && s.status !== "Frozen" && <Btn size="sm" variant="success" onClick={() => addToSchedule(s)} title="Add to payment schedule"><Plus size={13} />Schedule</Btn>}
-                {s.status !== "Inactive" && (s.status === "Frozen"
+                {canDo(ctx, "manageSuppliers") && s.status !== "Inactive" && (s.status === "Frozen"
                   ? <Btn size="sm" variant="success" onClick={() => toggleFreeze(s)} title="Reactivate — allow payments"><Check size={13} />Activate</Btn>
                   : <Btn size="sm" variant="warning" onClick={() => toggleFreeze(s)} title="Freeze — hold payments"><Ban size={13} />Freeze</Btn>)}
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)} title="Edit"><Pencil size={13} /></Btn>
+                {canDo(ctx, "manageSuppliers") && <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)} title="Edit"><Pencil size={13} /></Btn>}
                 {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} cleanup={async () => { for (const l of (store.supplierSchedule || []).filter((x) => x.supplierId === s.id)) await supplierScheduleApi.remove(l.id); }} />)} title="Delete"><Trash2 size={13} /></Btn>}
               </div>
             ) },
@@ -5278,6 +5278,7 @@ function SupplierForm({ ctx, id }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggle = (k) => () => setF({ ...f, [k]: !f[k] });
   const submit = async () => {
+    if (!canDo(ctx, "manageSuppliers")) return alert("Your role doesn't allow adding or editing suppliers.");
     if (!f.name.trim()) return alert("Supplier name is required.");
     if (!String(f.phone || "").trim()) return alert("A primary contact phone number is required.");
     const payload = { ...f, whtDefault: !!f.whtDefault, vatDefault: !!f.vatDefault };
@@ -5336,7 +5337,7 @@ function SupplierView({ ctx, id }) {
   );
   return (
     <Modal title={s.name} sub={`${s.id}${s.category ? " · " + s.category : ""}`} wide onClose={() => ctx.setModal(null)}
-      footer={<><Btn onClick={() => ctx.setModal(null)}>Close</Btn><Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)}><Pencil size={15} />Edit</Btn></>}>
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Close</Btn>{canDo(ctx, "manageSuppliers") && <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)}><Pencil size={15} />Edit</Btn>}</>}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <Pill tone={s.status === "Inactive" ? "muted" : "success"}>{s.status || "Active"}</Pill>
         {s.whtDefault !== false && <Tag>6% WHT</Tag>}
