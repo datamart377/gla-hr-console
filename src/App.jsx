@@ -1021,6 +1021,7 @@ function ReqLocationPicker({ value, onChange }) {
 }
 
 function ReqForm({ ctx, onDone }) {
+  const isMobile = useIsMobile();
   const me = ctx.currentEmp || {};
   const linked = !!ctx.currentEmp;                 // staff record resolved → fields auto-fill, read-only
   const [rqName, setRqName] = useState((ctx.auth && ctx.auth.name) || "");
@@ -1079,7 +1080,7 @@ function ReqForm({ ctx, onDone }) {
   const cellH = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 10px", textAlign: "left", borderBottom: "1px solid var(--border)" };
   const cell = { padding: "6px 10px", borderBottom: "1px solid var(--border)" };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 18, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 300px", gap: 18, alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
         <Card style={{ padding: 0 }}>
           <CardHead title="Requester" sub="From your profile" />
@@ -1167,7 +1168,7 @@ function ReqForm({ ctx, onDone }) {
           <Btn variant="primary" disabled={busy} onClick={submit}><Send size={15} />{busy ? "Submitting…" : "Submit for approval"}</Btn>
         </div>
       </div>
-      <div style={{ position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "draft" }} /></div>
+      <div style={isMobile ? undefined : { position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "draft" }} /></div>
     </div>
   );
 }
@@ -1237,6 +1238,7 @@ function ReqTable({ rows, showRequester, onOpen, onDelete, emptyLabel }) {
 }
 
 function ReqDetail({ ctx, r, onClose }) {
+  const isMobile = useIsMobile();
   const me = ctx.currentEmp || {};
   const role = me.roleId || (ctx.auth && ctx.auth.role) || "staff";
   const myId = me.id || (ctx.auth && ctx.auth.empId);
@@ -1322,7 +1324,7 @@ function ReqDetail({ ctx, r, onClose }) {
       ) : (
         <>{canVoucher && <Btn variant="primary" onClick={printVoucher}><Printer size={15} />Print payment voucher</Btn>}<Btn onClick={onClose}>Close</Btn></>
       )}>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 280px", gap: 18 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <ReqInfo label="Requester" value={<span>{r.requesterName || "—"}{r.designation ? ` · ${r.designation}` : ""}</span>} />
