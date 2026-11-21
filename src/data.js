@@ -701,7 +701,7 @@ data.advances = [
 // locked snapshot is consistent with the auto-recovery schedule and the
 // September ledger carries forward correctly.
 (function seedPaidRuns() {
-  const months = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"];
+  const months = ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"];
   const cols = data.ledgerColumns.map((c) => ({ ...c }));
   months.forEach((month) => {
     const emps = data.employees.filter((e) => e.status !== "Terminated");
