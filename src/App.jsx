@@ -1277,8 +1277,12 @@ function ReqDetail({ ctx, r, onClose }) {
   const canL2 = hrAdmin && r.status === "pending_admin";
   const canAct = canL1 || canL2;
   // Once HR & Admin give final approval, the supervisor(s) who handled it and
-  // management can print the payment voucher for disbursement.
-  const canVoucher = r.status === "approved" && (mgmt || canSuperviseReq(r, myId, ctx.store.employees || []));
+  // management can print the payment voucher for disbursement (and after it's
+  // closed as paid, finance can still reprint it).
+  const settled = r.status === "paid";
+  const canVoucher = (r.status === "approved" || settled) && (mgmt || canSuperviseReq(r, myId, ctx.store.employees || []));
+  // Finance / management close an approved requisition as a completed payment.
+  const canSettle = r.status === "approved" && mgmt;
   const printVoucher = () => {
     try {
       setReportCompany(ctx.store.settings && ctx.store.settings.company);
@@ -1337,6 +1341,7 @@ function ReqDetail({ ctx, r, onClose }) {
     } catch (e) { alert("Couldn't update the requisition.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
   };
   const approve = () => act(canL2 ? "approved" : "pending_admin", canL2 ? { approvedAmount: amtNum } : {});
+  const markPaid = () => { if (window.confirm(`Mark “${r.subject || r.id}” as paid and closed?\n\nThis records that the ${ugx(payable)} payment has been disbursed, and closes the requisition as a completed payment.`)) act("paid"); };
   const saveAdjust = () => { if (amtNum === total && r.approvedAmount == null) return alert("The amount is unchanged — nothing to adjust."); act("adjust", { approvedAmount: amtNum }); };
   const reject = () => { if (!note.trim()) return alert("Add a short reason for rejecting."); act("rejected"); };
   const diTh = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 12px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)" };
@@ -1350,7 +1355,7 @@ function ReqDetail({ ctx, r, onClose }) {
           ? <><Btn onClick={() => setRejecting(false)}>Back</Btn><Btn disabled={busy} onClick={reject} style={redBtn}><X size={15} />Confirm rejection</Btn></>
           : <><Btn onClick={() => setRejecting(true)} style={redBtn}><X size={15} />Reject</Btn><Btn disabled={busy} onClick={approve} style={greenBtn}><Check size={15} />{canL2 ? (amtNum !== total ? "Approve (adjusted)" : "Approve (final)") : "Approve"}</Btn></>
       ) : (
-        <>{canVoucher && <Btn variant="primary" onClick={printVoucher}><Printer size={15} />Print payment voucher</Btn>}<Btn onClick={onClose}>Close</Btn></>
+        <>{canVoucher && <Btn onClick={printVoucher}><Printer size={15} />Print payment voucher</Btn>}{canSettle && <Btn disabled={busy} variant="primary" onClick={markPaid} style={greenBtn}><Check size={15} />Mark as paid</Btn>}<Btn onClick={onClose}>Close</Btn></>
       )}>
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 280px", gap: 18 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
@@ -1465,7 +1470,7 @@ function Requisitions({ ctx }) {
   ].sort(byCreatedDesc);
   // Fully-approved requests this person can act on — where the payment voucher
   // is printed. A supervisor sees the ones in their pool; management sees all.
-  const approved = all.filter((r) => r.status === "approved" && (mgmt || canSuperviseReq(r, myId, employees))).slice().sort(byCreatedDesc);
+  const approved = all.filter((r) => (r.status === "approved" || r.status === "paid") && (mgmt || canSuperviseReq(r, myId, employees))).slice().sort(byCreatedDesc);
   const canSeeApproved = isSup || mgmt;
   const [tab, setTab] = useState("mine");
   const [openId, setOpenId] = useState(null);
@@ -1474,7 +1479,7 @@ function Requisitions({ ctx }) {
     ["mine", "My requests", mine.length],
     ["new", "New request", null],
     ...(canApprove ? [["approvals", "Approvals", queue.length]] : []),
-    ...(canSeeApproved ? [["approved", "Approved — vouchers", approved.length]] : []),
+    ...(canSeeApproved ? [["approved", "Approved / Paid", approved.length]] : []),
     ...(mgmt ? [["all", "All requisitions", all.length]] : []),
   ];
   const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];

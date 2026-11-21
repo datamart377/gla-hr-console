@@ -505,13 +505,13 @@ export const positionsFor = (name) => ((data.settings?.departments || []).find((
    approval. The location is either an existing station (from GEOFENCES) or a
    free-text "draft" location the requester types in. A Supervisor is any employee
    flagged isSupervisor; HR & Admin are the hr/admin roles. */
-export const REQ_STATUSES = ["draft", "pending_supervisor", "pending_admin", "approved", "rejected"];
+export const REQ_STATUSES = ["draft", "pending_supervisor", "pending_admin", "approved", "paid", "rejected"];
 export const reqStatusLabel = (s) => ({
   draft: "Draft", pending_supervisor: "Awaiting Supervisor", pending_admin: "Awaiting HR & Admin",
-  approved: "Approved", rejected: "Rejected",
+  approved: "Approved", paid: "Paid", rejected: "Rejected",
 }[s] || s);
 export const reqStatusTone = (s) => ({
-  draft: "muted", pending_supervisor: "warning", pending_admin: "accent", approved: "success", rejected: "danger",
+  draft: "muted", pending_supervisor: "warning", pending_admin: "accent", approved: "success", paid: "info", rejected: "danger",
 }[s] || "muted");
 export const reqTotal = (r) => (r?.lineItems || []).reduce((a, li) => a + (Number(li.qty) || 0) * (Number(li.rate) || 0), 0);
 // Approval workflow stages (drives the workflow map). "rejected" is an off-path terminal state.
@@ -520,9 +520,10 @@ export const REQ_STAGES = [
   { key: "supervisor", label: "Supervisor approval", who: "Supervisor", desc: "First-level field review and approval." },
   { key: "admin", label: "HR & Admin approval", who: "HR & Admin", desc: "Final approval of the request." },
   { key: "approved", label: "Approved", who: "Finance / Accounts", desc: "Request approved — ready for disbursement." },
+  { key: "paid", label: "Paid", who: "Finance / Accounts", desc: "Payment disbursed and the requisition closed." },
 ];
 // Index into REQ_STAGES for a status (how far it has progressed). -1 => rejected.
-export const reqStageIndex = (status) => ({ draft: 0, pending_supervisor: 1, pending_admin: 2, approved: 3, rejected: -1 }[status] ?? 0);
+export const reqStageIndex = (status) => ({ draft: 0, pending_supervisor: 1, pending_admin: 2, approved: 3, paid: 4, rejected: -1 }[status] ?? 0);
 
 // ---- Supervisor pool (multi-supervisor first-level approval) ----------------
 // An employee flagged isSupervisor may act as a requisition approver.
@@ -579,6 +580,7 @@ export function normalizeRequisition(r = {}) {
     approvedAmount: r.approvedAmount != null ? Number(r.approvedAmount) : null,  // HR & Admin may adjust the payable amount
     adjustment: r.adjustment || null,      // { by, byName, at, from, to, reason } — set when the amount is changed
     rejection: r.rejection || null,        // { by, byName, at, reason, stage }
+    payment: r.payment || null,            // { by, byName, at } — set by Finance when closed as paid
   };
 }
 // The amount actually payable: the HR & Admin-approved figure if set, else the

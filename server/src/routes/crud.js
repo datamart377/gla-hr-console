@@ -179,6 +179,13 @@ async function updateRequisition(req, res, next) {
         adjustment: adjusted ? { by: empId, byName: name, at: now, from: reqdTotal, to: amt, reason: note } : null,
         updatedAt: now, history: hist("amount_adjusted", `Approved amount set to UGX ${amt.toLocaleString()}${note ? " — " + note : ""}`),
       };
+    } else if (isMgmt(req) && rec.status === "approved" && target === "paid") {
+      // Finance / management close out an approved requisition as a completed
+      // payment once it has been disbursed.
+      patch = {
+        status: "paid", payment: { by: empId, byName: name, at: now },
+        updatedAt: now, history: hist("marked_paid", note || "Payment disbursed — requisition closed."),
+      };
     }
     if (!patch) return res.status(403).json({ error: "You can't make that change to this requisition." });
     const merged = { ...rec, ...patch };
