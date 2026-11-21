@@ -2130,13 +2130,13 @@ function Advances({ ctx }) {
                   <Btn size="sm" variant="success" onClick={() => approveAsIs(a)} title="Approve as requested"><Check size={13} />Approve</Btn>
                   <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceReview ctx={cc} id={a.id} />)} title="Modify then approve"><Pencil size={13} />Modify</Btn>
                   <Btn size="sm" variant="danger" onClick={() => reject(a)} title="Reject"><X size={13} /></Btn>
-                  <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>
+                  {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>}
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   {a.status === "Approved" && <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceSchedule ctx={cc} id={a.id} />)} title="Repayment schedule"><CalendarDays size={13} />Schedule</Btn>}
                   <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceReview ctx={cc} id={a.id} />)} title="Revise decision"><Pencil size={13} />Revise</Btn>
-                  <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>
+                  {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>}
                 </div>
               )
             )},
@@ -2526,7 +2526,7 @@ function Employees({ ctx }) {
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => openStaffFile(e.id)}>Open file</Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={13} /></Btn>
-                <Btn size="sm" variant="danger" onClick={() => del(e)}><Trash2 size={13} /></Btn>
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => del(e)}><Trash2 size={13} /></Btn>}
               </div>
             )},
           ]}
@@ -4907,7 +4907,7 @@ function Suppliers({ ctx }) {
                   ? <Btn size="sm" variant="success" onClick={() => toggleFreeze(s)} title="Reactivate — allow payments"><Check size={13} />Activate</Btn>
                   : <Btn size="sm" variant="warning" onClick={() => toggleFreeze(s)} title="Freeze — hold payments"><Ban size={13} />Freeze</Btn>)}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <SupplierForm ctx={cc} id={s.id} />)} title="Edit"><Pencil size={13} /></Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} cleanup={async () => { for (const l of (store.supplierSchedule || []).filter((x) => x.supplierId === s.id)) await supplierScheduleApi.remove(l.id); }} />)} title="Delete"><Trash2 size={13} /></Btn>
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={suppliersApi} id={s.id} label={s.name} cleanup={async () => { for (const l of (store.supplierSchedule || []).filter((x) => x.supplierId === s.id)) await supplierScheduleApi.remove(l.id); }} />)} title="Delete"><Trash2 size={13} /></Btn>}
               </div>
             ) },
           ]}
@@ -5147,7 +5147,7 @@ function PurchaseOrders({ ctx }) {
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderPreview ctx={cc} po={p} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printPo(ctx, p)} title="Print / download PDF"><Printer size={13} />PO</Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={p.id} />)} title="Edit"><Pencil size={13} /></Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={purchaseOrdersApi} id={p.id} label={p.poNo || p.id} />)} title="Delete"><Trash2 size={13} /></Btn>
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={purchaseOrdersApi} id={p.id} label={p.poNo || p.id} />)} title="Delete"><Trash2 size={13} /></Btn>}
               </div>
             ) },
           ]}
@@ -6103,7 +6103,7 @@ function StockOverview({ ctx }) {
                 <Btn size="sm" variant="danger" onClick={() => openMove("OUT", i.id)}><PackageMinus size={13} />Out</Btn>
                 <Btn size="sm" onClick={() => stockCardReport(i, movements)} title="Stock card (PDF)"><Printer size={13} /></Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <StockItemForm ctx={cc} id={i.id} />)}><Pencil size={13} /></Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={stockItemsApi} id={i.id} label={i.name} />)}><Trash2 size={13} /></Btn>
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={stockItemsApi} id={i.id} label={i.name} />)}><Trash2 size={13} /></Btn>}
               </div>
             ) },
           ]}
@@ -6169,7 +6169,7 @@ function StockMovements({ ctx }) {
             { label: "Value", num: true, render: (m) => fmtN(Math.abs((Number(m.qty) || 0) * (Number(m.unitCost) || 0))) },
             { label: "Supplier / Issued to", render: (m) => m.type === "IN" ? (m.party || "—") : m.type === "ADJUST" ? (m.reason || "Stock take") : (m.issuedTo || m.party || "—") },
             { label: "Approved by", render: (m) => m.type === "IN" ? "—" : (m.approvedBy || "—") },
-            { label: "", render: (m) => <div style={{ display: "flex", justifyContent: "flex-end" }}><Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={stockMovementsApi} id={m.id} label={m.reference || m.id} />)}><Trash2 size={13} /></Btn></div> },
+            { label: "", render: (m) => <div style={{ display: "flex", justifyContent: "flex-end" }}>{canDo(ctx, "deleteRecords") && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={stockMovementsApi} id={m.id} label={m.reference || m.id} />)}><Trash2 size={13} /></Btn>}</div> },
           ]}
           rows={list}
           empty="No stock movements match your filters."
@@ -8422,7 +8422,22 @@ function Announcements({ ctx, audience }) {
 
 /* ============================ Confirm delete ============================ */
 function ConfirmDelete({ ctx, api, id, label, cleanup }) {
-  const remove = async () => { await api.remove(id); if (cleanup) { try { await cleanup(); } catch { /* best effort */ } } await ctx.reload(); ctx.setModal(null); };
+  // Central enforcement point for every record deletion in the app: a role
+  // without the "Delete records" permission can never complete a delete, even
+  // if a delete control somehow reaches this dialog.
+  const allowed = canDo(ctx, "deleteRecords");
+  const remove = async () => { if (!allowed) return; await api.remove(id); if (cleanup) { try { await cleanup(); } catch { /* best effort */ } } await ctx.reload(); ctx.setModal(null); };
+  if (!allowed) {
+    return (
+      <Modal title="Deletion not permitted" sub={label} onClose={() => ctx.setModal(null)}
+        footer={<Btn variant="primary" onClick={() => ctx.setModal(null)}>Close</Btn>}>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <ShieldCheck size={20} style={{ color: "var(--muted)", flex: "none", marginTop: 1 }} />
+          <p style={{ margin: 0, color: "var(--text-2)" }}>Your role doesn't allow deleting records. Please ask an administrator to remove this item, or to grant your role delete access in Settings &rarr; Roles &amp; Permissions.</p>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal title="Delete record?" sub={label} onClose={() => ctx.setModal(null)}
       footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" style={{ background: "var(--danger)", color: "#fff" }} onClick={remove}><Trash2 size={15} />Delete</Btn></>}>

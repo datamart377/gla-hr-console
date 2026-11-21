@@ -452,6 +452,7 @@ export const PERMISSION_ACTIONS = [
   ["manageAdvances", "Approve salary advances"],
   ["manageStock", "Adjust stock & month-end"],
   ["manageSettings", "Change system settings"],
+  ["deleteRecords", "Delete records"],
 ];
 const allMods = (v) => Object.fromEntries(PERMISSION_MODULES.map(([k]) => [k, v]));
 const allActs = (v) => Object.fromEntries(PERMISSION_ACTIONS.map(([k]) => [k, v]));
@@ -480,7 +481,7 @@ data.settings = {
   roles: [
     { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: allMods(true), actions: allActs(true) },
     { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
-    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false } },
+    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [
