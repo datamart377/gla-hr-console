@@ -1135,14 +1135,28 @@ export function setGeofences(list) {
 }
 export function getGeofences() { return _geofences; }
 
-// Nearest geofence to a point, with distance and whether it's inside the radius.
-export function matchGeofence(lat, lng) {
+// Nearest geofence to a point, with an ACCURACY-AWARE verdict (in / near / out).
+// A ±2000 m cell-tower fallback taken indoors can place the reported point far
+// from the true position while the real location is still inside the fence, so
+// a fix is only "out" when even its full error margin clears the radius.
+export function matchGeofence(lat, lng, accuracy) {
+  const acc = Math.max(0, Number(accuracy) || 0);
   let best = null;
   for (const g of _geofences) {
     const radius = Number(g.radius) || 150;
     const d = distanceMeters(lat, lng, Number(g.lat), Number(g.lng));
-    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d, within: d <= radius };
+    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d };
   }
+  if (!best) return null;
+  const radius = best.fence.radius, d = best.distanceM;
+  const reliable = acc <= radius;
+  const inside = d <= radius;
+  const reaches = d <= radius + acc;
+  const verdict = inside && reliable ? "in" : reaches ? "near" : "out";
+  best.verdict = verdict;
+  best.within = verdict !== "out";
+  best.accuracy = acc;
+  best.lowAccuracy = acc > radius;
   return best;
 }
 export const formatDistance = (m) => (m == null ? "—" : m >= 1000 ? (m / 1000).toFixed(2) + " km" : Math.round(m) + " m");
@@ -1177,21 +1191,22 @@ export const formatDistance = (m) => (m == null ? "—" : m >= 1000 ? (m / 1000)
       const ot = field ? Math.max(0, Math.round(((outMin - 1020) / 60) * 2) / 2) : 0;
       const fence = field ? GEOFENCES[1 + Math.floor(r() * (GEOFENCES.length - 1))] : GEOFENCES[0];
       const g = r();
-      let lat = null, lng = null, accuracy = null, within = false, dist = null, method = "GPS", geoSite = null;
+      let lat = null, lng = null, accuracy = null, within = false, dist = null, method = "GPS", geoSite = null, verdict = null;
       if (g < 0.05) { method = "Manual"; }
       else {
         const outside = g < 0.13, jit = () => (r() - 0.5) * 0.0009;
         lat = fence.lat + (outside ? 0.02 : jit());
         lng = fence.lng + (outside ? 0.02 : jit());
-        const m = matchGeofence(lat, lng);
-        within = m.within; dist = Math.round(m.distanceM); geoSite = m.fence.name; accuracy = 8 + Math.round(r() * 22);
+        accuracy = 8 + Math.round(r() * 22);
+        const m = matchGeofence(lat, lng, accuracy);
+        within = m.within; dist = Math.round(m.distanceM); geoSite = m.fence.name; verdict = m.verdict;
       }
       data.attendance.push({
         id: `AT-${counter++}`, empId: e.id, date,
         clockIn: `${pad(Math.floor(inMin / 60))}:${pad(inMin % 60)}`,
         clockOut: `${pad(Math.floor(outMin / 60))}:${pad(outMin % 60)}`,
         site: fence.name, status: field ? "Field" : "Present", overtime: ot,
-        lat, lng, accuracy, geoSite, withinFence: within, distanceM: dist, method,
+        lat, lng, accuracy, geoSite, withinFence: within, distanceM: dist, method, verdict,
       });
     }
   }

@@ -32,7 +32,7 @@ import {
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
   itemValuation, avgCost, movementDelta, sortedMovements, suggestedOrderQty, avgDailyUsage, daysOfCover,
   monthKeyOf, monthLabel, addMonth, prevMonthKey, CURRENT_MONTH, monthLedgerRow, monthIsClosed,
-  GEOFENCES, matchGeofence, formatDistance, setGeofences, getGeofences,
+  GEOFENCES, matchGeofence, geoVerdictOf, formatDistance, setGeofences, getGeofences,
   timeToMinutes, minutesToTime, LATE_THRESHOLD_MIN,
   normalizePurchaseOrder, poTotals, nextPoNumber, PO_CURRENCIES, PO_VAT_MODES, poStatusLabel, poStatusTone,
 } from "./data.js";
@@ -103,6 +103,17 @@ function Pill({ tone = "muted", children }) {
 const Tag = ({ children }) => (
   <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "var(--surface-2)", color: "var(--text-2)", fontSize: 11.5, fontWeight: 500, whiteSpace: "nowrap" }}>{children}</span>
 );
+// Accuracy-aware geo-fence pill. "near" = the fix is too coarse (weak GPS) to
+// confirm or deny the site, so it is shown amber ("within · weak GPS") instead
+// of a red out-of-range violation. `short` drops the distance/accuracy detail
+// for tight table columns.
+function GeoPill({ a, short = false }) {
+  if (!a || a.lat == null) return <Pill tone="muted">{short ? "No GPS" : "No location"}</Pill>;
+  const s = geoVerdictOf(a);
+  if (s === "in") return <Pill tone="success">{short ? "Within" : "Within fence"}</Pill>;
+  if (s === "near") return <Pill tone="warning">{short ? "Weak GPS" : `Within · weak GPS ±${Math.round(a.accuracy || 0)} m`}</Pill>;
+  return <Pill tone="danger">{short ? "Outside" : `Outside${a.distanceM != null ? ` · ${formatDistance(a.distanceM)}` : ""}`}</Pill>;
+}
 
 function Card({ children, style, pad = false }) {
   return (
@@ -1597,9 +1608,10 @@ function StaffSidebar({ emp, sv, setSv, onSignOut }) {
 function TodayStatus({ rec }) {
   if (!rec) return <Pill tone="muted">Not clocked in</Pill>;
   if (rec.lat == null) return <Pill tone="info">Clocked in {rec.clockIn}</Pill>;
-  return rec.withinFence
-    ? <Pill tone="success">Clocked in {rec.clockIn} · within {rec.geoSite}</Pill>
-    : <Pill tone="danger">Clocked in {rec.clockIn} · outside fence</Pill>;
+  const s = geoVerdictOf(rec);
+  if (s === "in") return <Pill tone="success">Clocked in {rec.clockIn} · within {rec.geoSite}</Pill>;
+  if (s === "near") return <Pill tone="warning">Clocked in {rec.clockIn} · {rec.geoSite} (weak GPS ±{Math.round(rec.accuracy || 0)} m)</Pill>;
+  return <Pill tone="danger">Clocked in {rec.clockIn} · outside fence</Pill>;
 }
 
 function MyPortal({ ctx, setSv }) {
@@ -1669,7 +1681,7 @@ function MyPortal({ ctx, setSv }) {
               { label: "In", render: (a) => a.clockIn || "—" },
               { label: "Out", render: (a) => a.clockOut || "—" },
               { label: "Site", render: (a) => a.site },
-              { label: "Geo", render: (a) => a.lat == null ? <Pill tone="muted">No GPS</Pill> : a.withinFence ? <Pill tone="success">Within</Pill> : <Pill tone="danger">Outside</Pill> },
+              { label: "Geo", render: (a) => <GeoPill a={a} short /> },
             ]}
             rows={recentAtt}
             empty="No attendance yet."
@@ -1708,7 +1720,7 @@ function MyClockIn({ ctx }) {
             { label: "Out", render: (a) => a.clockOut || "—" },
             { label: "Site", render: (a) => a.site },
             { label: "GPS location", render: (a) => a.lat != null ? <span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(6)}, {a.lng.toFixed(6)}</span> : <span style={{ color: "var(--muted)" }}>—</span> },
-            { label: "Geo-fence", render: (a) => a.lat == null ? <Pill tone="muted">No location</Pill> : a.withinFence ? <Pill tone="success">Within fence</Pill> : <Pill tone="danger">Outside · {formatDistance(a.distanceM)}</Pill> },
+            { label: "Geo-fence", render: (a) => <GeoPill a={a} /> },
             { label: "Status", render: (a) => <Pill tone={attTone[a.status]}>{a.status}</Pill> },
           ]}
           rows={mine}
@@ -3123,7 +3135,7 @@ function Attendance({ ctx }) {
             { label: "GPS location", render: (a) => a.lat != null
               ? <div><span className="mono" style={{ fontSize: 12 }}>{a.lat.toFixed(6)}, {a.lng.toFixed(6)}</span><div style={{ fontSize: 11, color: "var(--muted)" }}>±{Math.round(a.accuracy || 0)} m · {a.method || "GPS"}</div></div>
               : <span style={{ color: "var(--muted)" }}>—</span> },
-            { label: "Geo-fence", render: (a) => a.lat == null ? <Pill tone="muted">No location</Pill> : a.withinFence ? <Pill tone="success">Within fence</Pill> : <Pill tone="danger">Outside · {formatDistance(a.distanceM)}</Pill> },
+            { label: "Geo-fence", render: (a) => <GeoPill a={a} /> },
             { label: "Photo", render: (a) => a.photo
               ? <img src={a.photo} alt="clock-in" onClick={() => setModal(() => () => <PhotoViewer photo={a.photo} emp={empById(a.empId)} rec={a} onClose={() => setModal(null)} />)} style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border)", cursor: "pointer" }} />
               : <span style={{ color: "var(--muted)" }}>—</span> },
@@ -3162,7 +3174,7 @@ function ClockInCard({ ctx }) {
       </div>
       {already && (
         <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, color: "var(--text-2)", display: "flex", alignItems: "center", gap: 8 }}>
-          <Check size={15} style={{ color: "var(--success)" }} /> {emp ? emp.firstName : "Staff"} already clocked in today at {already.clockIn} — {already.withinFence ? `verified within ${already.geoSite}` : already.lat != null ? `outside geofence (${formatDistance(already.distanceM)})` : "no location captured"}.
+          <Check size={15} style={{ color: "var(--success)" }} /> {emp ? emp.firstName : "Staff"} already clocked in today at {already.clockIn} — {(() => { const s = geoVerdictOf(already); return s === "in" ? `verified within ${already.geoSite}` : s === "near" ? `${already.geoSite} · weak GPS ±${Math.round(already.accuracy || 0)} m` : already.lat != null ? `outside geofence (${formatDistance(already.distanceM)})` : "no location captured"; })()}.
         </div>
       )}
     </Card>
@@ -3176,11 +3188,12 @@ function FenceMap({ match, pos }) {
   const cx = 100, cy = 70, R = 40;
   const px = cx + Math.sin(bearing) * R * ratio;
   const py = cy - Math.cos(bearing) * R * ratio;
-  const inside = match.within;
-  const col = inside ? "var(--success)" : "var(--danger)";
+  const state = match.verdict || (match.within ? "in" : "out");
+  const col = state === "in" ? "var(--success)" : state === "near" ? "var(--warning)" : "var(--danger)";
+  const fill = state === "in" ? "rgba(18,137,78,.10)" : state === "near" ? "rgba(201,153,30,.12)" : "rgba(194,58,41,.08)";
   return (
     <svg viewBox="0 0 200 150" style={{ width: "100%", maxWidth: 280, background: "var(--surface)", borderRadius: 10, border: "1px solid var(--border)" }} aria-label="Geofence position">
-      <circle cx={cx} cy={cy} r={R} fill={inside ? "rgba(18,137,78,.10)" : "rgba(194,58,41,.08)"} stroke={col} strokeWidth="1.5" strokeDasharray="4 3" />
+      <circle cx={cx} cy={cy} r={R} fill={fill} stroke={col} strokeWidth="1.5" strokeDasharray="4 3" />
       <circle cx={cx} cy={cy} r="3" fill="var(--text-2)" />
       <line x1={cx} y1={cy} x2={px} y2={py} stroke="var(--border-strong)" strokeWidth="1" />
       <circle cx={px} cy={py} r="5.5" fill={col} stroke="#fff" strokeWidth="1.5" />
@@ -3196,7 +3209,7 @@ function PhotoViewer({ photo, emp, rec, onClose }) {
       <div style={{ textAlign: "center" }}>
         <img src={photo} alt="Clock-in" style={{ maxWidth: "100%", maxHeight: 420, borderRadius: 14, border: "1px solid var(--border)" }} />
         <div style={{ marginTop: 12 }}>
-          {rec.withinFence ? <Pill tone="success">✓ Within {rec.geoSite}</Pill> : <Pill tone="danger">Outside fence</Pill>}
+          <GeoPill a={rec} />
         </div>
         {rec.lat != null && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)" }} className="mono">{rec.lat.toFixed(6)}, {rec.lng.toFixed(6)} · ±{Math.round(rec.accuracy || 0)} m</div>}
       </div>
@@ -3214,7 +3227,7 @@ function ClockInModal({ ctx, empId }) {
   const close = () => { ctx.setModal(null); };
 
   // ---- location capture ----
-  const applyPos = (lat, lng, accuracy, method) => { setPos({ lat, lng, accuracy, method }); setMatch(matchGeofence(lat, lng)); setPhase("located"); };
+  const applyPos = (lat, lng, accuracy, method) => { setPos({ lat, lng, accuracy, method }); setMatch(matchGeofence(lat, lng, accuracy)); setPhase("located"); };
   const useLocation = () => {
     setErrMsg("");
     if (!navigator.geolocation) { setPhase("error"); setErrMsg("This device has no location services."); return; }
@@ -3230,12 +3243,14 @@ function ClockInModal({ ctx, empId }) {
     const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
     const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const within = match ? match.within : false;
+    const verdict = match ? match.verdict : "out";
     const site = match ? match.fence.name : "Unknown";
     await attendanceApi.create({
       empId, date: ymd, clockIn: hhmm, clockOut: "", site,
       status: within ? (site.includes("Head Office") ? "Present" : "Field") : "Field",
       overtime: 0, lat: pos.lat, lng: pos.lng, accuracy: Math.round(pos.accuracy || 0),
-      geoSite: site, withinFence: within, distanceM: match ? Math.round(match.distanceM) : null, method: pos.method,
+      geoSite: site, withinFence: within, verdict, lowAccuracy: match ? match.lowAccuracy : false,
+      distanceM: match ? Math.round(match.distanceM) : null, method: pos.method,
     });
     await ctx.reload(); close();
   };
@@ -3271,8 +3286,10 @@ function ClockInModal({ ctx, empId }) {
             <FenceMap match={match} pos={pos} />
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ marginBottom: 10 }}>
-                {match.within
+                {match.verdict === "in"
                   ? <Pill tone="success">✓ Within geofence — {match.fence.name}</Pill>
+                  : match.verdict === "near"
+                  ? <Pill tone="warning">Within range — {match.fence.name} (weak GPS ±{Math.round(pos.accuracy || 0)} m)</Pill>
                   : <Pill tone="danger">Outside geofence — {formatDistance(match.distanceM)} from {match.fence.name}</Pill>}
               </div>
               <dl style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: "6px 12px", fontSize: 13, margin: 0 }}>
@@ -3283,7 +3300,8 @@ function ClockInModal({ ctx, empId }) {
               </dl>
             </div>
           </div>
-          {!match.within && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle}>This point is outside the site geofence. The clock-in will be recorded and flagged for review.</Banner></div>}
+          {match.verdict === "out" && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle}>This point is outside the site geofence. The clock-in will be recorded and flagged for review.</Banner></div>}
+          {match.verdict === "near" && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle} tone="warning">Your GPS signal is weak (±{Math.round(pos.accuracy || 0)} m), so the exact position can't be confirmed — but it is within range of {match.fence.name}. For a sharper fix, step outside or near a window and re-capture.</Banner></div>}
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn size="sm" onClick={useLocation}><RefreshCw size={13} />Re-capture location</Btn>
           </div>
@@ -7141,16 +7159,19 @@ function GeoMapReport({ ctx }) {
       // nationwide, the map focuses on the actual clock-ins instead.
     });
 
-    // Clock-in markers, coloured by geofence compliance.
+    // Clock-in markers, coloured by geofence compliance (green = within,
+    // amber = within range but weak GPS, red = outside).
     points.forEach((p) => {
-      const col = p.withinFence ? "#12894e" : "#c23a29";
+      const s = geoVerdictOf(p);
+      const col = s === "in" ? "#12894e" : s === "near" ? "#c9991e" : "#c23a29";
+      const label = s === "in" ? "✓ Within" : s === "near" ? "◐ Within · weak GPS" : "✗ Outside";
       L.circleMarker([p.lat, p.lng], { radius: 6, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.9 })
         .addTo(map)
         .bindPopup(
           `<div style="min-width:172px;line-height:1.5">` +
           `<b>${p.name}</b><br>` +
           `${fmtDate(p.date)} · ${p.clockIn || "—"}<br>` +
-          `<span style="color:${col};font-weight:600">${p.withinFence ? "✓ Within" : "✗ Outside"}</span> ${p.geoSite || p.site || ""}` +
+          `<span style="color:${col};font-weight:600">${label}</span> ${p.geoSite || p.site || ""}` +
           `${p.distanceM != null ? ` · ${formatDistance(p.distanceM)}` : ""}<br>` +
           `<span style="font-family:monospace;font-size:11px">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span> · ±${Math.round(p.accuracy || 0)} m` +
           `</div>`

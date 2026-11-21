@@ -1368,15 +1368,50 @@ export function setGeofences(list) {
 }
 export function getGeofences() { return _geofences; }
 
-// Nearest geofence to a point, with distance and whether it's inside the radius.
-export function matchGeofence(lat, lng) {
+// Nearest geofence to a point, with an ACCURACY-AWARE verdict.
+//
+// The ± metres a phone reports for a fix matters: a tight ±15 m reading that
+// lands inside the radius is a confident "in", but a ±2000 m cell-tower/Wi-Fi
+// fallback (what a handset returns indoors with no satellite lock) can place
+// the single reported point hundreds of metres off even while the true
+// position is still inside the fence. We therefore grade each fix:
+//   "in"   – best estimate is inside the radius AND the fix is precise
+//            (accuracy no larger than the fence itself)
+//   "near" – inside but imprecise, OR outside the centre yet the accuracy
+//            circle still reaches the fence, so weak GPS can neither confirm
+//            nor rule out the site — treated as on-site, flagged low-accuracy
+//   "out"  – beyond the fence even allowing for the whole error margin
+export function matchGeofence(lat, lng, accuracy) {
+  const acc = Math.max(0, Number(accuracy) || 0);
   let best = null;
   for (const g of _geofences) {
     const radius = Number(g.radius) || 150;
     const d = distanceMeters(lat, lng, Number(g.lat), Number(g.lng));
-    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d, within: d <= radius };
+    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d };
   }
+  if (!best) return null;
+  const radius = best.fence.radius, d = best.distanceM;
+  const reliable = acc <= radius;              // fix precise relative to the fence
+  const inside = d <= radius;                  // best estimate inside the fence
+  const reaches = d <= radius + acc;           // accuracy circle still touches the fence
+  const verdict = inside && reliable ? "in" : reaches ? "near" : "out";
+  best.verdict = verdict;
+  best.within = verdict !== "out";             // counts as on-site for attendance
+  best.accuracy = acc;
+  best.lowAccuracy = acc > radius;
   return best;
+}
+// Grade an already-stored attendance record (which carries distanceM +
+// accuracy but may predate the verdict field) into in / near / out.
+export function geoVerdictOf(a, radius = 150) {
+  if (!a || a.lat == null) return null;
+  if (a.verdict) return a.verdict;
+  const acc = Math.max(0, Number(a.accuracy) || 0);
+  const d = a.distanceM == null ? null : Number(a.distanceM);
+  if (d == null) return a.withinFence ? "in" : "out";
+  if (d <= radius && acc <= radius) return "in";
+  if (d <= radius + acc) return "near";
+  return "out";
 }
 export const formatDistance = (m) => (m == null ? "—" : m >= 1000 ? (m / 1000).toFixed(2) + " km" : Math.round(m) + " m");
 
@@ -1410,21 +1445,22 @@ export const formatDistance = (m) => (m == null ? "—" : m >= 1000 ? (m / 1000)
       const ot = field ? Math.max(0, Math.round(((outMin - 1020) / 60) * 2) / 2) : 0;
       const fence = field ? GEOFENCES[1 + Math.floor(r() * (GEOFENCES.length - 1))] : GEOFENCES[0];
       const g = r();
-      let lat = null, lng = null, accuracy = null, within = false, dist = null, method = "GPS", geoSite = null;
+      let lat = null, lng = null, accuracy = null, within = false, dist = null, method = "GPS", geoSite = null, verdict = null;
       if (g < 0.05) { method = "Manual"; }
       else {
         const outside = g < 0.13, jit = () => (r() - 0.5) * 0.0009;
         lat = fence.lat + (outside ? 0.02 : jit());
         lng = fence.lng + (outside ? 0.02 : jit());
-        const m = matchGeofence(lat, lng);
-        within = m.within; dist = Math.round(m.distanceM); geoSite = m.fence.name; accuracy = 8 + Math.round(r() * 22);
+        accuracy = 8 + Math.round(r() * 22);
+        const m = matchGeofence(lat, lng, accuracy);
+        within = m.within; dist = Math.round(m.distanceM); geoSite = m.fence.name; verdict = m.verdict;
       }
       data.attendance.push({
         id: `AT-${counter++}`, empId: e.id, date,
         clockIn: `${pad(Math.floor(inMin / 60))}:${pad(inMin % 60)}`,
         clockOut: `${pad(Math.floor(outMin / 60))}:${pad(outMin % 60)}`,
         site: fence.name, status: field ? "Field" : "Present", overtime: ot,
-        lat, lng, accuracy, geoSite, withinFence: within, distanceM: dist, method,
+        lat, lng, accuracy, geoSite, withinFence: within, distanceM: dist, method, verdict,
       });
     }
   }
