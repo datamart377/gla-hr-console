@@ -5201,19 +5201,25 @@ function SFSection({ title, Icon, children, right }) {
     </Card>
   );
 }
-function SFKV({ rows }) {
+function SFKV({ rows, cols = 2 }) {
+  const mobile = useIsMobile();
+  const n = mobile ? 1 : cols;
+  const lastRowStart = rows.length - ((rows.length % n) || n);
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-        <tbody>
-          {rows.map(([k, v], i) => (
-            <tr key={i}>
-              <td style={{ width: 300, minWidth: 200, fontWeight: 600, color: "var(--text)", background: "var(--surface)", padding: "11px 16px", borderBottom: i === rows.length - 1 ? "none" : "1px solid var(--border)", verticalAlign: "top" }}>{k}</td>
-              <td style={{ color: "var(--text-2)", padding: "11px 16px", borderBottom: i === rows.length - 1 ? "none" : "1px solid var(--border)", verticalAlign: "top" }}>{v == null || v === "" ? "N/A" : v}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))`, fontSize: 13.5 }}>
+      {rows.map(([k, v], i) => {
+        const col = i % n;
+        return (
+          <div key={i} style={{
+            display: "flex", gap: 14, padding: "10px 16px", alignItems: "baseline",
+            borderBottom: i >= lastRowStart ? "none" : "1px solid var(--border)",
+            borderRight: !mobile && col < n - 1 ? "1px solid var(--border)" : "none",
+          }}>
+            <div style={{ width: 150, minWidth: 120, fontWeight: 600, color: "var(--text)" }}>{k}</div>
+            <div style={{ flex: 1, minWidth: 0, color: "var(--text-2)", wordBreak: "break-word" }}>{v == null || v === "" ? "N/A" : v}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -5249,14 +5255,15 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
       meta: [`File No: ${na(e.fileNumber)}`],
       sections: [
         { heading: "Bio Data Information", type: "kv", rows: [
-          ["Name", fullName(e)], ["Email", na(e.email)], ["Gender", (e.gender || "").toString()],
+          ["Email", na(e.email)], ["Gender", na(e.gender)],
           ["Date of Birth", fmtDateLong(e.dob)], ["Year Joined", fmtDateLong(e.employmentDate)], ["Nationality", na(e.nationality)],
           ["NIN", na(e.nationalId)], ["TIN", na(e.tin)], ["Marital Status", na(e.maritalStatus)], ["Religion", na(e.religion)], ["Disability", na(e.disability)],
           ["Region of Origin", na(or.region)], ["District of Origin", na(or.district)], ["County of Origin", na(or.county)], ["Village of Origin", na(or.village)],
           ["Residence District", na(re.district)], ["Residence County", na(re.county)], ["Residence Sub County", na(re.subCounty)], ["Residence Parish", na(re.parish)], ["Residence Village", na(re.village)],
         ] },
         { heading: "Contact Information", type: "kv", rows: [
-          ["Postal Address", na(co.postalAddress)], ["Telephone", na(co.telephone)], ["Mobile", na(co.mobile)], ["Email", na(co.email)], ["District", na(co.district)],
+          ["Postal Address", na(co.postalAddress)], ["Telephone", na(co.telephone)], ["Mobile", na(co.mobile)],
+          ...(co.email && co.email !== e.email ? [["Alt. Email", na(co.email)]] : []), ["District", na(co.district)],
         ] },
         { heading: "Bank Details", type: "table", head: ["Bank", "Account Name", "Account Number", "Branch"],
           body: (e.bankDetails || []).map((r) => [na(r.bankName), na(r.accountName), na(r.accountNumber), na(r.branch)]), empty: "No bank details on record" },
@@ -5305,19 +5312,21 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
       </div>
 
       {/* header banner */}
-      <Card style={{ background: "var(--surface)", padding: "24px 26px" }}>
-        <h2 style={{ fontSize: 24, fontWeight: 700, color: "var(--text)" }}>Electronic Staff File</h2>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 20, color: "var(--text)", marginTop: 4 }}>{fullName(e).toUpperCase()}</div>
-        <div style={{ color: "var(--text-2)", marginTop: 10, fontSize: 13 }}>File Number: {na(e.fileNumber)}</div>
-        <div style={{ color: "var(--text-2)", marginTop: 4, fontSize: 13 }}>Position: {na(e.position)}</div>
+      <Card style={{ background: "var(--surface)", padding: "22px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+          <Avatar emp={e} size={56} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--text)" }}>{fullName(e).toUpperCase()}</div>
+            <div style={{ color: "var(--text-2)", marginTop: 6, fontSize: 13 }}>{na(e.position || e.jobTitle)} · File No. {na(e.fileNumber)}</div>
+          </div>
+        </div>
       </Card>
 
       {/* Bio Data */}
       <SFSection title="Bio Data Information" Icon={IdCard}>
         <SFKV rows={[
-          ["Name", fullName(e)],
           ["Email", na(e.email)],
-          ["Gender", (e.gender || "").toLowerCase()],
+          ["Gender", na(e.gender)],
           ["Date of Birth", fmtDateLong(e.dob)],
           ["Year Joined", fmtDateLong(e.employmentDate)],
           ["Nationality", na(e.nationality)],
@@ -5335,7 +5344,6 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ["Residence Sub County", na(e.residence.subCounty)],
           ["Residence Parish", na(e.residence.parish)],
           ["Residence Village", na(e.residence.village)],
-          ["Profile Photo", <Avatar emp={e} size={40} />],
         ]} />
       </SFSection>
 
@@ -5345,7 +5353,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ["Postal Address", na(e.contact.postalAddress)],
           ["Telephone", na(e.contact.telephone)],
           ["Mobile", na(e.contact.mobile)],
-          ["Email", na(e.contact.email)],
+          ...(e.contact.email && e.contact.email !== e.email ? [["Alt. Email", na(e.contact.email)]] : []),
           ["District", na(e.contact.district)],
         ]} />
       </SFSection>
