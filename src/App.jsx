@@ -3503,8 +3503,103 @@ function StaffSalaries({ ctx }) {
       <PayrollRunBar month={month} setMonth={setMonth} months={months} run={run} cur={cur} onProcess={processMonth} onMarkPaid={markPaid} onSetCheque={setCheque}
         processBlocked={!processGate.ok ? monthLabel(processGate.prev) : null}
         payBlocked={run && !payGate.ok ? monthLabel(payGate.prev) : null} />
+      <PayrollTracker runs={runs} month={month} setMonth={setMonth} />
       {run ? <LedgerSnapshot run={run} ctx={ctx} onReprocess={cur ? processMonth : null} /> : <LedgerLive ctx={ctx} prevMonthLabel={prevRun ? monthLabel(prevRun.month) : null} />}
     </>
+  );
+}
+
+// At-a-glance tracker of which salary months have been processed / paid.
+// One row per year (newest first), twelve clickable month cells colour-coded by
+// status. Clicking a cell jumps the ledger to that month.
+function PayrollTracker({ runs, month, setMonth }) {
+  const byMonth = {};
+  (runs || []).forEach((r) => { byMonth[r.month] = r; });
+  const processed = (runs || []).filter((r) => r.status === "Processed" || r.status === "Paid");
+  const netOf = (r) => (r && r.totals && r.totals.net != null) ? r.totals.net : (r && r.rows ? r.rows.reduce((s, x) => s + (Number(x.net) || 0), 0) : 0);
+  const paidRuns = processed.filter((r) => r.status === "Paid");
+  const outstanding = processed.filter((r) => r.status !== "Paid");
+  const netPaid = paidRuns.reduce((s, r) => s + netOf(r), 0);
+
+  const curY = Number(CURRENT_MONTH.split("-")[0]);
+  const runYears = (runs || []).map((r) => Number(r.month.split("-")[0])).filter((n) => !isNaN(n));
+  const minY = Math.min(curY, ...(runYears.length ? runYears : [curY]));
+  const years = []; for (let y = curY; y >= minY; y--) years.push(y);
+
+  const palette = {
+    paid: ["var(--success)", "var(--success-dim)"],
+    processed: ["var(--info)", "var(--info-dim)"],
+    current: ["var(--warning)", "var(--warning-dim)"],
+    none: ["var(--muted)", "var(--surface-2)"],
+    future: ["var(--muted)", "transparent"],
+  };
+  const stateOf = (key) => {
+    const r = byMonth[key];
+    if (r && r.status === "Paid") return "paid";
+    if (r && r.status === "Processed") return "processed";
+    if (key === CURRENT_MONTH) return "current";
+    if (key > CURRENT_MONTH) return "future";
+    return "none";
+  };
+  const monthAbbr = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString("en-US", { month: "short" }));
+  const legend = [["Paid", "paid"], ["Processed", "processed"], ["Current (draft)", "current"], ["Not processed", "none"]];
+
+  return (
+    <Card style={{ overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ padding: "13px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <CalendarCheck size={17} style={{ color: "var(--brand)" }} />
+        <h3 style={{ fontSize: 14.5, fontWeight: 700, color: "var(--text)" }}>Processed payroll tracker</h3>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+          <b style={{ color: "var(--text)" }}>{processed.length}</b> processed · <b style={{ color: "var(--success)" }}>{paidRuns.length}</b> paid
+          {outstanding.length > 0 && <> · <b style={{ color: "var(--warning)" }}>{outstanding.length}</b> awaiting payment</>}
+          {netPaid > 0 && <> · net paid <b style={{ color: "var(--text)" }}>{ugxShort(netPaid)}</b></>}
+        </span>
+      </div>
+      <div style={{ padding: "14px 18px", overflowX: "auto" }}>
+        <div style={{ minWidth: 560 }}>
+          {/* month header */}
+          <div style={{ display: "grid", gridTemplateColumns: "48px repeat(12, 1fr)", gap: 5, marginBottom: 6 }}>
+            <div />
+            {monthAbbr.map((m, i) => <div key={i} style={{ fontSize: 10, textAlign: "center", color: "var(--muted)", fontWeight: 600 }}>{m}</div>)}
+          </div>
+          {years.map((y) => (
+            <div key={y} style={{ display: "grid", gridTemplateColumns: "48px repeat(12, 1fr)", gap: 5, marginBottom: 5 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center" }}>{y}</div>
+              {Array.from({ length: 12 }, (_, i) => {
+                const key = `${y}-${String(i + 1).padStart(2, "0")}`;
+                const st = stateOf(key);
+                const [fg, bg] = palette[st];
+                const r = byMonth[key];
+                const selected = key === month;
+                const title = `${monthLabel(key)} — ${st === "paid" ? `Paid ${fmtDate(r.paidAt)}` : st === "processed" ? `Processed ${fmtDate(r.processedAt)} (awaiting payment)` : st === "current" ? "Current month — not yet processed" : st === "future" ? "Upcoming" : "Not processed"}${r ? ` · net ${ugxShort(netOf(r))}` : ""}`;
+                return (
+                  <button key={i} onClick={() => setMonth(key)} title={title}
+                    style={{
+                      height: 30, borderRadius: 7, cursor: "pointer", fontSize: 10.5, fontWeight: 700, color: fg,
+                      background: bg, border: selected ? `2px solid var(--brand)` : `1px solid ${st === "future" ? "var(--border)" : bg}`,
+                      display: "grid", placeItems: "center", transition: "transform .1s",
+                    }}>
+                    {st === "paid" ? "✓" : st === "processed" ? "•" : st === "current" ? "…" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        {/* legend */}
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
+          {legend.map(([label, st]) => {
+            const [fg, bg] = palette[st];
+            return (
+              <span key={st} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-2)" }}>
+                <span style={{ width: 14, height: 14, borderRadius: 4, background: bg, border: `1px solid ${st === "none" ? "var(--border)" : fg}` }} />{label}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    </Card>
   );
 }
 
