@@ -3006,7 +3006,7 @@ function LeaveRequests({ ctx }) {
               ) : (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   {l.status === "Approved" && !l.returnedAt && !LEAVE_TYPES[l.type]?.duty && <Btn size="sm" variant="success" onClick={() => reportBack(l)} title="Mark reported back to work"><CalendarCheck size={13} />Report back</Btn>}
-                  <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={leaveApi} id={l.id} label={l.id} />)}><Trash2 size={13} /></Btn>
+                  {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={leaveApi} id={l.id} label={l.id} />)}><Trash2 size={13} /></Btn>}
                 </div>
               )
             )},
@@ -5502,7 +5502,7 @@ function Appraisals({ ctx }) {
               {a.comments && <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--text-2)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>“{a.comments}”</div>}
               <div style={{ marginTop: 12, display: "flex", gap: 6, alignItems: "center" }}>
                 <span style={{ fontSize: 11.5, color: "var(--muted)", marginRight: "auto" }}>Reviewer: {a.reviewer || "—"}</span>
-                <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={appraisalsApi} id={a.id} label={a.id} />)}><Trash2 size={13} />Delete</Btn>
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={appraisalsApi} id={a.id} label={a.id} />)}><Trash2 size={13} />Delete</Btn>}
               </div>
             </div>
           </Card>
