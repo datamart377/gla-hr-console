@@ -7213,6 +7213,170 @@ function PayeReport({ ctx }) {
   );
 }
 
+// Deep-dive analysis of ONE staff member's attendance over the report period:
+// headline stats, an arrival-time trend against the late threshold, and a
+// leave-aware day-by-day breakdown, with per-person PDF/CSV export.
+function StaffAttendanceAnalysis({ ctx, emp, start, end, weekdays, periodLabel, onClose }) {
+  const recsAll = (ctx.store.attendance || []).filter((a) => a.empId === emp.id && a.date >= start && a.date <= end);
+  const leaveFor = (dt) => (ctx.store.leave || []).find((l) => l.empId === emp.id && l.status === "Approved" && dt >= l.startDate && dt <= l.endDate);
+  // One representative record per day — the earliest genuine clock-in.
+  const byDate = {};
+  recsAll.forEach((a) => {
+    const cur = byDate[a.date];
+    if (!cur) { byDate[a.date] = a; return; }
+    const ta = timeToMinutes(a.clockIn), tc = timeToMinutes(cur.clockIn);
+    if (a.clockIn && (!cur.clockIn || (ta != null && tc != null && ta < tc))) byDate[a.date] = a;
+  });
+  const past = weekdays.filter((dt) => dt <= TODAY);
+  const days = past.map((dt) => {
+    const a = byDate[dt], lv = leaveFor(dt);
+    let status = "Absent", inMin = null;
+    if (a && a.clockIn && a.status !== "Absent") {
+      inMin = timeToMinutes(a.clockIn);
+      status = a.status === "Field" ? "Field" : a.status === "Half-day" ? "Half-day" : (inMin > LATE_THRESHOLD_MIN ? "Late" : "Present");
+    } else if (a && a.status === "Absent") status = "Absent";
+    else if (lv) status = "Leave";
+    return { dt, a, lv, status, inMin };
+  });
+  const has = (...s) => (d) => s.includes(d.status);
+  const presentDays = days.filter(has("Present", "Late", "Field", "Half-day"));
+  const lateDays = days.filter(has("Late"));
+  const leaveDays = days.filter(has("Leave"));
+  const absentDays = days.filter(has("Absent"));
+  const expected = Math.max(0, days.length - leaveDays.length);
+  const rate = expected ? Math.round((presentDays.length / expected) * 100) : 0;
+  const punct = presentDays.length ? Math.round(((presentDays.length - lateDays.length) / presentDays.length) * 100) : 0;
+  const inMins = presentDays.map((d) => d.inMin).filter((x) => x != null);
+  const avgIn = inMins.length ? minutesToTime(inMins.reduce((s, x) => s + x, 0) / inMins.length) : "—";
+  const earliest = inMins.length ? minutesToTime(Math.min(...inMins)) : "—";
+  const latest = inMins.length ? minutesToTime(Math.max(...inMins)) : "—";
+  const otTotal = recsAll.reduce((s, a) => s + (Number(a.overtime) || 0), 0);
+  const geoRecs = recsAll.filter((a) => a.lat != null);
+  const geoPct = geoRecs.length ? Math.round((geoRecs.filter((a) => a.withinFence).length / geoRecs.length) * 100) : null;
+  let streak = 0, best = 0;
+  days.forEach((d) => { if (d.status !== "Absent" && d.status !== "Leave") { streak++; best = Math.max(best, streak); } else if (d.status === "Absent") streak = 0; });
+
+  const tone = { Present: "success", Late: "warning", Field: "info", "Half-day": "accent", Leave: "muted", Absent: "danger" };
+  const wd = (dt) => new Date(dt + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
+
+  // Arrival-time dot chart (06:00–11:00 window) with the late-after line.
+  const Chart = () => {
+    const y0 = 360, y1 = 660, padL = 38, padR = 10, padT = 10, padB = 22, H = 158;
+    const W = Math.max(360, days.length * 26 + padL + padR);
+    const yOf = (m) => padT + (H - padT - padB) * (Math.max(y0, Math.min(y1, m)) - y0) / (y1 - y0);
+    const xOf = (i) => padL + (days.length <= 1 ? (W - padL - padR) / 2 : (W - padL - padR) * i / (days.length - 1));
+    const thrY = yOf(LATE_THRESHOLD_MIN);
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+          {[420, 480, 540, 600].map((m) => (
+            <g key={m}>
+              <line x1={padL} y1={yOf(m)} x2={W - padR} y2={yOf(m)} stroke="var(--border)" strokeWidth="1" />
+              <text x={padL - 6} y={yOf(m) + 3} textAnchor="end" fontSize="9" fill="var(--muted)">{minutesToTime(m)}</text>
+            </g>
+          ))}
+          <line x1={padL} y1={thrY} x2={W - padR} y2={thrY} stroke="var(--warning)" strokeWidth="1.2" strokeDasharray="4 3" />
+          <text x={W - padR} y={thrY - 4} textAnchor="end" fontSize="8.5" fill="var(--warning)" fontWeight="700">late after {minutesToTime(LATE_THRESHOLD_MIN)}</text>
+          {days.map((d, i) => {
+            const x = xOf(i);
+            if (d.inMin != null) {
+              const col = d.status === "Late" ? "var(--warning)" : d.status === "Field" ? "var(--info)" : "var(--success)";
+              return <circle key={i} cx={x} cy={yOf(d.inMin)} r="4" fill={col} stroke="#fff" strokeWidth="1"><title>{`${fmtDate(d.dt)} · in ${minutesToTime(d.inMin)} · ${d.status}`}</title></circle>;
+            }
+            const col = d.status === "Leave" ? "var(--muted)" : "var(--danger)";
+            return <g key={i}><rect x={x - 3} y={H - padB - 6} width="6" height="6" rx="1.5" fill={col} opacity="0.75"><title>{`${fmtDate(d.dt)} · ${d.status}`}</title></rect></g>;
+          })}
+        </svg>
+      </div>
+    );
+  };
+
+  const exportCsv = () => {
+    const head = ["Date", "Day", "Clock In", "Clock Out", "Site", "Geo-fence", "Status", "OT (h)"];
+    const lines = [head.join(",")].concat(days.map((d) => [d.dt, wd(d.dt), d.a?.clockIn || "", d.a?.clockOut || "", d.a?.geoSite || d.a?.site || (d.status === "Leave" ? `${d.lv?.type} leave` : ""), d.a ? (geoVerdictOf(d.a) || "") : "", d.status, d.a?.overtime || 0].map((x) => `"${x ?? ""}"`).join(",")));
+    downloadFile(`GLA-Attendance-${emp.id}-${start}_to_${end}.csv`, lines.join("\n"));
+  };
+  const geoWord = { in: "Within", near: "Weak GPS", out: "Outside" };
+  const exportPdf = () => downloadReportPdf({
+    filename: `GLA-Attendance-${emp.id}-${start}_to_${end}.pdf`,
+    eyebrow: "Attendance",
+    title: `Attendance Analysis — ${fullName(emp)}`,
+    subtitle: `${emp.id} · ${emp.jobTitle || emp.position || ""} · ${fmtDate(start)} → ${fmtDate(end)}`,
+    meta: [`Attendance ${rate}%   Punctuality ${punct}%   Avg in ${avgIn}   Present ${presentDays.length}/${expected}   Late ${lateDays.length}   Absent ${absentDays.length}   Leave ${leaveDays.length}   OT ${otTotal.toFixed(1)}h`],
+    head: ["Date", "Day", "In", "Out", "Site", "Geo", "Status", "OT"],
+    body: days.map((d) => [fmtDate(d.dt), wd(d.dt), d.a?.clockIn || "—", d.a?.clockOut || "—", d.a?.geoSite || d.a?.site || (d.status === "Leave" ? `${d.lv?.type} leave` : "—"), d.a ? (geoWord[geoVerdictOf(d.a)] || "—") : "—", d.status, d.a?.overtime ? String(d.a.overtime) : "—"]),
+    orientation: "landscape",
+  });
+
+  const footer = (
+    <>
+      <Btn onClick={onClose}>Close</Btn>
+      <Btn onClick={exportCsv}><Download size={14} />CSV</Btn>
+      <Btn variant="primary" onClick={exportPdf}><FileText size={14} />PDF</Btn>
+    </>
+  );
+  const th = { textAlign: "left", padding: "8px 10px", fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", borderBottom: "1.5px solid var(--border-strong)", position: "sticky", top: 0, background: "var(--bg-elevated)", whiteSpace: "nowrap" };
+  const td = { padding: "8px 10px", fontSize: 12.5, color: "var(--text)", borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
+
+  return (
+    <Modal wide title="Attendance analysis" sub={`${fullName(emp)} · ${emp.id} · ${periodLabel}`} onClose={onClose} footer={footer}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <Avatar emp={emp} size={44} />
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>{fullName(emp)}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>{emp.jobTitle || emp.position || "—"} · {emp.department || "—"}</div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ fontSize: 12, color: "var(--text-2)", textAlign: "right" }}>{fmtDate(start)} → {fmtDate(end)}<div style={{ color: "var(--muted)" }}>{days.length} working days</div></div>
+      </div>
+
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={Check} label="Attendance rate" value={rate + "%"} meta={`${presentDays.length} of ${expected} days`} tone={rate >= 90 ? "success" : rate >= 75 ? "warning" : "danger"} />
+        <StatCard Icon={Timer} label="Punctuality" value={punct + "%"} meta={`${lateDays.length} late arrivals`} tone={punct >= 85 ? "success" : "warning"} />
+        <StatCard Icon={Clock} label="Avg clock-in" value={avgIn} meta={`${earliest}–${latest} range`} tone="brand" />
+        <StatCard Icon={TrendingUp} label="Overtime" value={otTotal.toFixed(1) + " h"} meta={`best streak ${best} day${best === 1 ? "" : "s"}`} tone="accent" />
+        <StatCard Icon={LocateFixed} label="Geo-verified" value={geoPct == null ? "—" : geoPct + "%"} meta={`${absentDays.length} absent · ${leaveDays.length} leave`} tone={geoPct == null ? "muted" : geoPct >= 90 ? "success" : "warning"} />
+      </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <CardHead title="Arrival-time trend" right={<span style={{ fontSize: 11, color: "var(--muted)" }}>clock-in time each working day</span>} />
+        <div style={{ padding: "12px 16px" }}>
+          {inMins.length ? <Chart /> : <div style={{ color: "var(--muted)", fontSize: 13, padding: "10px 0" }}>No clock-ins recorded in this period.</div>}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8, fontSize: 11.5, color: "var(--text-2)" }}>
+            {[["On time", "var(--success)"], ["Late", "var(--warning)"], ["Field", "var(--info)"], ["Absent", "var(--danger)"]].map(([l, c]) => (
+              <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />{l}</span>
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHead title="Day-by-day" right={<span style={{ fontSize: 11, color: "var(--muted)" }}>{days.length} working days</span>} />
+        <div style={{ maxHeight: 320, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr><th style={th}>Date</th><th style={th}>In</th><th style={th}>Out</th><th style={th}>Site</th><th style={th}>Geo-fence</th><th style={th}>Status</th><th style={{ ...th, textAlign: "right" }}>OT</th></tr>
+            </thead>
+            <tbody>
+              {days.slice().reverse().map((d, i) => (
+                <tr key={i} style={{ background: d.status === "Absent" ? "color-mix(in srgb, var(--danger) 7%, transparent)" : undefined }}>
+                  <td style={td}><span style={{ fontWeight: 600 }}>{wd(d.dt)}</span> <span style={{ color: "var(--text-2)" }}>{fmtDate(d.dt)}</span></td>
+                  <td style={td} className="mono">{d.a?.clockIn || "—"}</td>
+                  <td style={td} className="mono">{d.a?.clockOut || "—"}</td>
+                  <td style={td}>{d.a?.geoSite || d.a?.site || (d.status === "Leave" ? <span style={{ color: "var(--text-2)" }}>{d.lv?.type} leave</span> : "—")}</td>
+                  <td style={td}>{d.a ? <GeoPill a={d.a} short /> : <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                  <td style={td}><Pill tone={tone[d.status] || "muted"}>{d.status}</Pill></td>
+                  <td style={{ ...td, textAlign: "right" }} className="mono">{d.a?.overtime ? Number(d.a.overtime).toFixed(1) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </Modal>
+  );
+}
+
 function AttendanceReport({ ctx }) {
   const { store } = ctx;
   const emps = store.employees.filter((e) => e.status !== "Terminated");
@@ -7291,6 +7455,7 @@ function AttendanceReport({ ctx }) {
     orientation: "landscape",
   });
   const periodLabel = period === "month" ? "This month" : `Last ${period} days`;
+  const analyse = (e) => ctx.setModal(() => (cc) => <StaffAttendanceAnalysis ctx={cc} emp={e} start={start} end={end} weekdays={weekdays} periodLabel={periodLabel} onClose={() => cc.setModal(null)} />);
 
   return (
     <>
@@ -7350,10 +7515,10 @@ function AttendanceReport({ ctx }) {
       </div>
 
       <Card>
-        <CardHead title={`Per-employee attendance summary — ${periodLabel}`} right={<Btn size="sm" onClick={exportCsv}><Download size={14} />CSV</Btn>} />
+        <CardHead title={`Per-employee attendance summary — ${periodLabel}`} right={<span style={{ fontSize: 11.5, color: "var(--muted)" }}>select a staff member to analyse</span>} />
         <DataTable
           columns={[
-            { label: "Employee", render: (s) => <EmpCell emp={s.e} /> },
+            { label: "Employee", render: (s) => <span style={{ cursor: "pointer" }} onClick={() => analyse(s.e)}><EmpCell emp={s.e} /></span> },
             { label: "Dept", render: (s) => s.e.department },
             { label: "Present", num: true, render: (s) => s.presentDays },
             { label: "Late", num: true, render: (s) => s.lateDays ? <span style={{ color: "var(--warning)", fontWeight: 600 }}>{s.lateDays}</span> : 0 },
@@ -7367,6 +7532,7 @@ function AttendanceReport({ ctx }) {
                 <span className="mono" style={{ fontWeight: 600 }}>{s.rate}%</span>
               </div>
             ) },
+            { label: "", render: (s) => <Btn size="sm" onClick={() => analyse(s.e)} title="Analyse this staff member"><BarChart3 size={13} />Analyse</Btn> },
           ]}
           rows={empStats}
           empty="No attendance in this period."
