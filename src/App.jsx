@@ -2261,7 +2261,10 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
     attendance: ["Log attendance", (c) => c.setModal(() => (cc) => <AttendanceForm ctx={cc} />)],
     appraisals: ["New appraisal", (c) => c.setModal(() => (cc) => <AppraisalForm ctx={cc} />)],
   };
-  const add = addButtons[view];
+  let add = addButtons[view];
+  // "Log attendance" records attendance for any staff member — gate it like the
+  // Manual entry control so only roles that may log for others see it.
+  if (view === "attendance" && !canDo(ctx, "manageAttendance")) add = null;
   const roleLabel = { admin: "HR / Admin", hr: "HR Officer", finance: "Finance", staff: "Staff" }[ctx.auth && ctx.auth.role] || "Staff";
   const sessExp = (authApi.expiresAt && authApi.expiresAt());
   return (
@@ -3188,7 +3191,7 @@ function Attendance({ ctx }) {
         <StatCard Icon={TrendingUp} label="Overtime hours" value={ot.toFixed(1)} meta="today, across crews" tone="warning" />
       </div>
       <Card>
-        <CardHead title="Clock-in register" right={<Btn size="sm" onClick={() => setModal(() => (cc) => <AttendanceForm ctx={cc} />)}><Plus size={14} />Manual entry</Btn>} />
+        <CardHead title="Clock-in register" right={canDo(ctx, "manageAttendance") ? <Btn size="sm" onClick={() => setModal(() => (cc) => <AttendanceForm ctx={cc} />)}><Plus size={14} />Manual entry</Btn> : null} />
         <DataTable
           columns={[
             { label: "Employee", render: (a) => <EmpCell emp={empById(a.empId)} /> },
@@ -3205,7 +3208,7 @@ function Attendance({ ctx }) {
               : <span style={{ color: "var(--muted)" }}>—</span> },
             { label: "Status", render: (a) => <Pill tone={attTone[a.status]}>{a.status}</Pill> },
             { label: "OT", num: true, render: (a) => (Number(a.overtime) || 0).toFixed(1) },
-            { label: "", render: (a) => <div style={{ display: "flex", justifyContent: "flex-end" }}><Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={attendanceApi} id={a.id} label={a.id} />)}><Trash2 size={13} /></Btn></div> },
+            { label: "", render: (a) => <div style={{ display: "flex", justifyContent: "flex-end" }}>{canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={attendanceApi} id={a.id} label={a.id} />)}><Trash2 size={13} /></Btn>}</div> },
           ]}
           rows={list}
           empty="No attendance logged yet."
@@ -3220,9 +3223,13 @@ function ClockInCard({ ctx }) {
   // Default to the person who is signed in (so "Signed in as" matches reality),
   // falling back to the first staff member only if their record isn't available.
   const meId = (ctx.currentEmp && ctx.currentEmp.id) || (ctx.auth && ctx.auth.empId) || "";
+  // Only roles that may log attendance for others can pick a different person;
+  // everyone else is locked to clocking themselves in.
+  const canOthers = canDo(ctx, "manageAttendance");
   const [empId, setEmpId] = useState((meId && emps.some((e) => e.id === meId) ? meId : emps[0]?.id) || "");
-  const emp = ctx.empById(empId);
-  const already = ctx.store.attendance.find((a) => a.empId === empId && a.date === TODAY);
+  const effId = canOthers ? empId : (meId && emps.some((e) => e.id === meId) ? meId : empId);
+  const emp = ctx.empById(effId);
+  const already = ctx.store.attendance.find((a) => a.empId === effId && a.date === TODAY);
   return (
     <Card style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "18px 20px" }}>
@@ -3234,9 +3241,9 @@ function ClockInCard({ ctx }) {
         <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Signed in as</div>
-            <Select value={empId} onChange={(e) => setEmpId(e.target.value)} options={emps.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))} style={{ width: "auto" }} />
+            <Select value={effId} onChange={(e) => setEmpId(e.target.value)} disabled={!canOthers} title={canOthers ? undefined : "You can only clock yourself in"} options={(canOthers ? emps : emps.filter((e) => e.id === effId)).map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))} style={{ width: "auto", ...(canOthers ? {} : { opacity: 0.7, cursor: "not-allowed" }) }} />
           </div>
-          <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <ClockInModal ctx={cc} empId={empId} />)} style={{ height: 38 }}><LocateFixed size={16} />Capture location &amp; clock in</Btn>
+          <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <ClockInModal ctx={cc} empId={effId} />)} style={{ height: 38 }}><LocateFixed size={16} />Capture location &amp; clock in</Btn>
         </div>
       </div>
       {already && (
@@ -3383,6 +3390,7 @@ function AttendanceForm({ ctx }) {
   const [f, setF] = useState({ empId: emps[0]?.id || "", date: TODAY, status: "Present", clockIn: "", clockOut: "", site: SITES[0], overtime: 0 });
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const submit = async () => {
+    if (!canDo(ctx, "manageAttendance")) return alert("Your role doesn't allow logging attendance for others.");
     if (!f.empId || !f.date) return alert("Employee and date are required.");
     await attendanceApi.create({ ...f, overtime: Number(f.overtime) || 0 });
     await ctx.reload();

@@ -453,6 +453,7 @@ export const PERMISSION_ACTIONS = [
   ["manageStock", "Adjust stock & month-end"],
   ["manageSettings", "Change system settings"],
   ["manageSuppliers", "Add / edit suppliers"],
+  ["manageAttendance", "Log attendance for others"],
   ["deleteRecords", "Delete records"],
 ];
 const allMods = (v) => Object.fromEntries(PERMISSION_MODULES.map(([k]) => [k, v]));
@@ -482,7 +483,7 @@ data.settings = {
   roles: [
     { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: allMods(true), actions: allActs(true) },
     { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
-    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, deleteRecords: false } },
+    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [
