@@ -15,34 +15,10 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import qrcode from "qrcode-generator";
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
-
-export const COMPANY = {
-  name: "Global Link Associates Ltd",
-  lines: [
-    "P.O. Box 71674, Kampala - Uganda.",
-    "Tel / fax: 256-0414270704",
-    "Cell: 0711506063, 0772413777",
-    "Email: glassociates.ug@gmail.com",
-  ],
-};
-
-// Sync the report letterhead with the editable company profile in Settings.
-export function setReportCompany(c) {
-  if (!c) return;
-  if (c.name) COMPANY.name = c.name;
-  COMPANY.lines = [
-    c.address,
-    c.telephone ? `Tel / fax: ${c.telephone}` : null,
-    c.cell ? `Cell: ${c.cell}` : null,
-    c.email ? `Email: ${c.email}` : null,
-  ].filter(Boolean);
-}
-
-// Approved signatories for salary and payment schedules.
-export const SIGNATORIES = [
-  { name: "Ismail Kimuli", contact: "256701506063" },
-  { name: "Abu-Baker Nsubuga", contact: "256772413777" },
-];
+// Letterhead text + signatories live in a tiny dependency-free module so the
+// app can import them without loading jsPDF. Re-exported here for compatibility.
+import { COMPANY, setReportCompany, SIGNATORIES } from "./reportConstants.js";
+export { COMPANY, setReportCompany, SIGNATORIES };
 
 /* -------------------------------- palette -------------------------------- */
 const INK = [16, 24, 33];        // near-black headings

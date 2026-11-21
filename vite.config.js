@@ -8,10 +8,20 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 3003, open: true },
   preview: { port: 3003 },
-  // Emit a single JS bundle so the standalone "Open in Safari" file can inline
-  // everything (including jsPDF and its optional deps) into one <script>.
+  // Production (served by Express/Render) is code-split: the heavy PDF (jsPDF),
+  // Excel (exceljs) and map (leaflet) libraries load on demand instead of in the
+  // initial bundle, so the app opens fast on slow connections. Set STANDALONE=1
+  // to instead inline everything into one <script> for the "Open in Safari" file.
   build: {
-    chunkSizeWarningLimit: 2000,
-    rollupOptions: { output: { inlineDynamicImports: true } },
+    chunkSizeWarningLimit: 900,
+    rollupOptions: process.env.STANDALONE === "1"
+      ? { output: { inlineDynamicImports: true } }
+      : {
+          output: {
+            manualChunks(id) {
+              if (id.includes("node_modules/react") || id.includes("node_modules/scheduler")) return "react-vendor";
+            },
+          },
+        },
   },
 });

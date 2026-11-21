@@ -11,9 +11,9 @@ import {
   Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
-import L from "leaflet";
-import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, SIGNATORIES, setReportCompany } from "./reportPdf.js";
-import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsx.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
+import { SIGNATORIES, setReportCompany } from "./reportConstants.js";
+import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
@@ -2514,7 +2514,7 @@ function EmployeeForm({ ctx, id }) {
     id: nextEmpId(ctx.store.employees), firstName: "", lastName: "", gender: "Male", dob: "", nationalId: "",
     phone: "", email: "", address: "", department: (ctx.store.settings?.departments?.[0]?.name) || "Engineering Department", jobTitle: "", contractType: "Permanent",
     status: "Active", employmentDate: "", grossSalary: 1200000, tin: "", nssfNumber: "", bankName: "",
-    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "", nextOfKinName: "", nextOfKinDetails: "", nextOfKinName: "", nextOfKinDetails: "",
+    bankAccount: "", annualUsed: 0, sickUsed: 0, emergencyName: "", emergencyRelation: "", emergencyPhone: "", nextOfKinName: "", nextOfKinDetails: "",
   }));
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const setN = (group, k) => (e) => setF((s) => ({ ...s, [group]: { ...s[group], [k]: e.target.value } }));
@@ -6945,7 +6945,11 @@ function GeoMapReport({ ctx }) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const map = L.map(containerRef.current, { scrollWheelZoom: false, zoomControl: true });
+    let map = null, t = null, cancelled = false;
+    (async () => {
+    const L = (await import("leaflet")).default;
+    if (cancelled || !containerRef.current) return;
+    map = L.map(containerRef.current, { scrollWheelZoom: false, zoomControl: true });
 
     // Base map tiles. OpenStreetMap's own tile servers block embedded apps, so
     // we use key-free providers that permit embedding, with an automatic
@@ -6995,8 +6999,9 @@ function GeoMapReport({ ctx }) {
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.18));
     else map.setView([0.3136, 32.5811], 12); // Kampala fallback
 
-    const t = setTimeout(() => map.invalidateSize(), 60);
-    return () => { clearTimeout(t); map.remove(); };
+    t = setTimeout(() => map.invalidateSize(), 60);
+    })();
+    return () => { cancelled = true; if (t) clearTimeout(t); if (map) map.remove(); };
   }, [points]);
 
   const exportCsv = () => {

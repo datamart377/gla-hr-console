@@ -2,6 +2,7 @@
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
+import compression from "compression";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import fs from "node:fs";
@@ -36,6 +37,9 @@ app.set("trust proxy", 1);
 // CSP disabled so the bundled single-page app (inline styles, data: images)
 // renders when served from this same service; other helmet protections stay on.
 app.use(helmet({ contentSecurityPolicy: false }));
+// Gzip responses (API JSON + the on-demand JS/CSS chunks) — a big win on slow
+// mobile connections where every kilobyte counts.
+app.use(compression());
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json({ limit: "25mb" })); // room for requisition attachments (images/PDFs stored inline as data URLs)
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
@@ -110,9 +114,22 @@ for (const [path, table] of Object.entries(COLLECTIONS)) {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "..", "dist");
 if (fs.existsSync(path.join(distDir, "index.html"))) {
-  app.use(express.static(distDir));
+  // Hashed asset filenames (e.g. index-ab12cd.js) can be cached forever; the
+  // HTML entry must revalidate so a new deploy is picked up immediately.
+  app.use(express.static(distDir, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith("index.html")) {
+        res.setHeader("Cache-Control", "no-cache");
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }));
   // SPA fallback for any non-API GET route.
-  app.get(/^(?!\/api\/).*/, (req, res) => res.sendFile(path.join(distDir, "index.html")));
+  app.get(/^(?!\/api\/).*/, (req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(path.join(distDir, "index.html"));
+  });
   console.log(`Serving web app from ${distDir}`);
 }
 

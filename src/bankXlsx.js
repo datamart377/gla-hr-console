@@ -6,7 +6,7 @@
    Shared by the live Monthly Salary Ledger and processed payroll runs.
    ------------------------------------------------------------------------- */
 import ExcelJS from "exceljs";
-import { COMPANY, SIGNATORIES } from "./reportPdf.js";
+import { COMPANY, SIGNATORIES } from "./reportConstants.js";
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 
 const argb = (hex) => "FF" + hex;
