@@ -480,7 +480,7 @@ data.settings = {
   roles: [
     { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: allMods(true), actions: allActs(true) },
     { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
-    { id: "finance", name: "Finance Officer", description: "Payroll, advances, suppliers and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: true, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: true, manageAdvances: true, manageStock: true, manageSettings: false } },
+    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [

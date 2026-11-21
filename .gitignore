@@ -13,3 +13,6 @@ npm-debug.log*
 .vscode/
 .idea/
 *.local
+
+# Session-generated artifacts (not source)
+Claude outputs/

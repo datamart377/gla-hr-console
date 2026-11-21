@@ -305,10 +305,16 @@ const NAV = [
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
   { id: "settings", label: "Settings", Icon: SettingsIcon, section: "Admin" },
 ];
-// Current user's role definition (from Settings). Admins default to full access.
+// Current user's role definition. Resolved from the LIVE, admin-configured roles
+// in Settings first (so permission toggles actually take effect), falling back
+// to the built-in seed definitions. An unknown/renamed role falls back to the
+// least-privileged "staff" role — never admin — so a lookup miss can't silently
+// grant full access.
 function currentRole(ctx) {
-  const rid = (ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role) || "staff";
-  return roleById(rid) || roleById("admin");
+  const rid = (ctx && ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role))) || "staff";
+  const live = ctx && ctx.store && ctx.store.settings && Array.isArray(ctx.store.settings.roles) ? ctx.store.settings.roles : null;
+  const find = (id) => (live && live.find((r) => r.id === id)) || roleById(id);
+  return find(rid) || find("staff") || roleById("admin");
 }
 const can = (ctx, moduleId) => { const r = currentRole(ctx); return !r || r.modules?.[moduleId] !== false; };
 const canDo = (ctx, action) => { const r = currentRole(ctx); return !r || r.actions?.[action] !== false; };
@@ -486,6 +492,10 @@ function AdminConsole({ ctx }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
   const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView }[view];
+  // Defence in depth: even if a view is reached directly (not via the sidebar),
+  // enforce the same role gate the navigation uses.
+  const viewAllowed = view === "staffFile" || view === "dashboard" ||
+    (can(ctx, view) && (view !== "approvals" || _isAdmin) && (view !== "sessions" || _isAdminOrHr));
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -494,7 +504,14 @@ function AdminConsole({ ctx }) {
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
         <Topbar title={title} sub={sub} view={view} ctx={actx} onMenu={isMobile ? () => setMenuOpen(true) : null} />
         <div className="gla-fade" key={view + (selectedEmpId || "")} style={{ padding: isMobile ? "16px 14px 48px" : "24px 28px 56px" }}>
-          {view === "staffFile" ? <StaffFile ctx={actx} id={selectedEmpId} /> : <ViewComp ctx={actx} />}
+          {view === "staffFile" ? <StaffFile ctx={actx} id={selectedEmpId} />
+            : viewAllowed ? <ViewComp ctx={actx} />
+            : <Card pad><div style={{ padding: "32px 24px", textAlign: "center" }}>
+                <ShieldCheck size={30} style={{ color: "var(--muted)", marginBottom: 10 }} />
+                <div style={{ fontWeight: 700, color: "var(--text)" }}>You don't have access to this section</div>
+                <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4 }}>Your role doesn't include this module. Contact your administrator if you need access.</div>
+                <Btn variant="primary" onClick={() => setView("dashboard")} style={{ margin: "16px auto 0" }}>Go to dashboard</Btn>
+              </div></Card>}
         </div>
       </div>
     </div>
