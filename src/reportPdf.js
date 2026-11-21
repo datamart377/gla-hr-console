@@ -17,8 +17,8 @@ import qrcode from "qrcode-generator";
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 // Letterhead text + signatories live in a tiny dependency-free module so the
 // app can import them without loading jsPDF. Re-exported here for compatibility.
-import { COMPANY, setReportCompany, SIGNATORIES } from "./reportConstants.js";
-export { COMPANY, setReportCompany, SIGNATORIES };
+import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories } from "./reportConstants.js";
+export { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories };
 
 /* -------------------------------- palette -------------------------------- */
 const INK = [16, 24, 33];        // near-black headings

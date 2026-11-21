@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
-import { SIGNATORIES, setReportCompany } from "./reportConstants.js";
+import { SIGNATORIES, setReportCompany, setReportSignatories } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -306,6 +306,7 @@ export default function App() {
       stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
+    if (settings && settings.signatories) setReportSignatories(settings.signatories); // dynamic approved signatories
     setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
     setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings });
   };
@@ -1200,6 +1201,7 @@ function ReqDetail({ ctx, r, onClose }) {
   const printVoucher = () => {
     try {
       setReportCompany(ctx.store.settings && ctx.store.settings.company);
+      setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
       downloadRequisitionVoucherPdf(r, { employees: ctx.store.employees || [] });
     } catch (e) { alert("Couldn't generate the payment voucher.\n\n" + (e && e.message ? e.message : "")); }
   };
@@ -4592,6 +4594,7 @@ function nextSupplierId(suppliers) {
 function printPo(ctx, po) {
   try {
     setReportCompany(ctx.store.settings && ctx.store.settings.company);
+    setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
     downloadPurchaseOrderPdf(normalizePurchaseOrder(po));
   } catch (e) { alert("Couldn't generate the purchase order PDF.\n\n" + (e && e.message ? e.message : "")); }
 }
@@ -7391,13 +7394,20 @@ function SettingsGeneral({ ctx, readOnly }) {
   const s = ctx.store.settings;
   const [c, setC] = useState({ ...s.company });
   const [p, setP] = useState({ ...s.payroll });
+  const [sigs, setSigs] = useState(() => {
+    const d = (Array.isArray(s.signatories) && s.signatories.length) ? s.signatories : SIGNATORIES;
+    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", contact: (d[i] && d[i].contact) || "" }));
+  });
   const [saved, setSaved] = useState(false);
   const setCo = (k) => (e) => { setC({ ...c, [k]: e.target.value }); setSaved(false); };
   const setPa = (k) => (e) => { setP({ ...p, [k]: e.target.value }); setSaved(false); };
+  const setSig = (i, k) => (e) => { setSigs(sigs.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x))); setSaved(false); };
   const save = async () => {
     const payroll = { ...p, nssfEmp: Number(p.nssfEmp) || 0, nssfEr: Number(p.nssfEr) || 0, wht: Number(p.wht) || 0, vat: Number(p.vat) || 0, payDay: Number(p.payDay) || 1 };
-    await settingsApi.update({ company: c, payroll });
+    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), contact: (x.contact || "").trim() }));
+    await settingsApi.update({ company: c, payroll, signatories });
     setReportCompany(c);
+    setReportSignatories(signatories);
     await ctx.reload(); setSaved(true);
   };
   return (
@@ -7428,6 +7438,18 @@ function SettingsGeneral({ ctx, readOnly }) {
           </div>
         </Card>
       </div>
+      <Card style={{ marginTop: 16 }}>
+        <CardHead title="Approved signatories" sub="Printed as the approving authority on purchase orders, payment vouchers and reports" />
+        <div style={{ padding: 20, display: "grid", gap: 12 }}>
+          {sigs.map((sg, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder="e.g. Ismail Kimuli" /></Field>
+              <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256701506063" /></Field>
+            </div>
+          ))}
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>On a purchase order the preparer is whoever issues it; the <b>first signatory</b> here is used as the approving authority (or the second, if the issuer is the first). Both appear on payment vouchers and schedules.</div>
+        </div>
+      </Card>
       {!readOnly && <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <Btn variant="primary" onClick={save}><Check size={15} />Save settings</Btn>
         {saved && <span style={{ fontSize: 13, color: "var(--success)", fontWeight: 600 }}>✓ Saved — applied across the system</span>}
