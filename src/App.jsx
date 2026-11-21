@@ -1996,11 +1996,13 @@ function Advances({ ctx }) {
                   <Btn size="sm" variant="success" onClick={() => approveAsIs(a)} title="Approve as requested"><Check size={13} />Approve</Btn>
                   <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceReview ctx={cc} id={a.id} />)} title="Modify then approve"><Pencil size={13} />Modify</Btn>
                   <Btn size="sm" variant="danger" onClick={() => reject(a)} title="Reject"><X size={13} /></Btn>
+                  <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   {a.status === "Approved" && <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceSchedule ctx={cc} id={a.id} />)} title="Repayment schedule"><CalendarDays size={13} />Schedule</Btn>}
                   <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceReview ctx={cc} id={a.id} />)} title="Revise decision"><Pencil size={13} />Revise</Btn>
+                  <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={advancesApi} id={a.id} label={`Advance ${a.id} · ${ugx(a.amount)}`} />)} title="Delete advance"><Trash2 size={13} /></Btn>
                 </div>
               )
             )},
