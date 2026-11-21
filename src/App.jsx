@@ -2433,6 +2433,7 @@ function Employees({ ctx }) {
         <div style={{ flex: 1 }} />
         <Btn onClick={exportPdf}><FileText size={16} />PDF</Btn>
         <Btn onClick={exportCsv}><Download size={16} />Export CSV</Btn>
+        <Btn variant="primary" onClick={() => setModal(() => (cc) => <StaffImport ctx={cc} />)}><UserPlus size={16} />Import staff</Btn>
       </Toolbar>
       <Card>
         <DataTable
@@ -2559,6 +2560,107 @@ function LoginAccessSection({ ctx, empId }) {
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Setting a password here lets the staff member sign in immediately. The email invite lets them choose their own (link valid 7 days).</div>
       </div>
     </>
+  );
+}
+
+// Bulk-add staff from a list of work emails (paste or CSV/Excel upload). Names
+// are derived from each email and editable before import; shared mailboxes and
+// duplicates (including name-order variants) are skipped. Each new record is a
+// skeleton (name + email, status Active) for HR to complete later.
+function StaffImport({ ctx }) {
+  const { store, setModal, reload } = ctx;
+  const existingEmails = useMemo(
+    () => new Set((store.employees || []).map((e) => (e.email || "").trim().toLowerCase()).filter(Boolean)),
+    [store.employees]
+  );
+  const [text, setText] = useState("");
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [done, setDone] = useState(null);
+
+  const SHARED = new Set(["operations", "operation", "info", "admin", "administrator", "support", "sales", "accounts", "account", "hr", "noreply", "no-reply", "contact", "enquiries", "enquiry", "finance", "it", "helpdesk", "reception"]);
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "");
+
+  const parse = (raw) => {
+    const emails = String(raw).toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g) || [];
+    const seen = new Set(), out = [];
+    for (const email of emails) {
+      const local = email.split("@")[0];
+      const parts = local.replace(/[_-]/g, ".").split(".").filter(Boolean);
+      if (SHARED.has(local) || parts.length < 2) continue; // skip role mailboxes & single-token addresses
+      const words = parts.map(cap);
+      const key = words.map((w) => w.toLowerCase()).sort().join("|"); // dedupe name-order variants
+      if (seen.has(key) || seen.has(email)) continue;
+      seen.add(key); seen.add(email);
+      out.push({ firstName: words[0] || "", lastName: words.slice(1).join(" ") || "", email, exists: existingEmails.has(email), include: !existingEmails.has(email) });
+    }
+    return out;
+  };
+
+  const onFile = async (ev) => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    try {
+      const nm = (f.name || "").toLowerCase();
+      let raw = "";
+      if (nm.endsWith(".xlsx") || nm.endsWith(".xlsm")) {
+        const ExcelJS = (await import("exceljs")).default;
+        const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await f.arrayBuffer());
+        wb.worksheets.forEach((ws) => ws.eachRow((r) => { r.eachCell((c) => { raw += " " + (c.text || c.value || ""); }); raw += "\n"; }));
+      } else { raw = await f.text(); }
+      setText(raw); setRows(parse(raw));
+    } catch (e) { alert("Couldn't read that file — paste the email list instead.\n\n" + (e && e.message ? e.message : "")); }
+    ev.target.value = "";
+  };
+
+  const setRow = (i, k, v) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const toImport = (rows || []).filter((r) => r.include && !r.exists && (r.firstName.trim() || r.lastName.trim()));
+  const existsCount = (rows || []).filter((r) => r.exists).length;
+
+  const run = async () => {
+    setBusy(true); setProgress(0); let ok = 0, fail = 0;
+    for (const r of toImport) {
+      try { await employeesApi.create(normalizeEmployee({ firstName: r.firstName.trim(), lastName: r.lastName.trim(), email: r.email, status: "Active" })); ok++; }
+      catch { fail++; }
+      setProgress((p) => p + 1);
+    }
+    await reload(); setBusy(false); setDone({ ok, fail });
+  };
+
+  return (
+    <Modal wide title="Import staff" sub="Create records from an email list" onClose={() => setModal(null)}
+      footer={done
+        ? <Btn variant="primary" onClick={() => setModal(null)}><Check size={15} />Done</Btn>
+        : rows
+          ? <><Btn onClick={() => { setRows(null); }}>Back</Btn><Btn variant="primary" disabled={busy || !toImport.length} onClick={run}>{busy ? `Importing ${progress}/${toImport.length}…` : `Import ${toImport.length} staff`}</Btn></>
+          : <><Btn onClick={() => setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={!text.trim()} onClick={() => setRows(parse(text))}>Preview</Btn></>}>
+      {done ? (
+        <div style={{ padding: "10px 2px" }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>✓ Added {done.ok} staff{done.fail ? ` · ${done.fail} failed` : ""}</div>
+          <div style={{ color: "var(--text-2)", fontSize: 13 }}>They're on the register now with name + email. Open each record to fill in department, job title, salary, bank and other HR details.</div>
+        </div>
+      ) : !rows ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Banner Icon={UserPlus}>Paste a list of work emails (one per line, or any text containing them), or upload a CSV/Excel file. Names are derived from each email — you can fix them before importing. Shared mailboxes (operations@, info@…) and duplicates are skipped automatically.</Banner>
+          <Field label="Paste emails"><textarea value={text} onChange={(e) => setText(e.target.value)} rows={7} style={{ ...controlStyle, minHeight: 130, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 12.5 }} placeholder={"abubaker.nsubuga@glassociates.co.ug\nbashir.kalyango@glassociates.co.ug\n…"} /></Field>
+          <div style={{ fontSize: 12.5, color: "var(--text-2)" }}>or <label style={{ color: "var(--brand)", cursor: "pointer", fontWeight: 600 }}>upload a CSV / Excel file<input type="file" accept=".csv,.xlsx,.xlsm,.txt" onChange={onFile} style={{ display: "none" }} /></label></div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 13, color: "var(--text-2)" }}><b style={{ color: "var(--text)" }}>{toImport.length}</b> to add{existsCount ? ` · ${existsCount} already on the register (skipped)` : ""}. Fix any names, untick anyone to leave out.</div>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", maxHeight: "48vh", overflowY: "auto" }}>
+            {rows.map((r, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "26px 1fr 1fr 1.3fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: i === rows.length - 1 ? "none" : "1px solid var(--border)", opacity: r.exists ? 0.55 : 1 }}>
+                <input type="checkbox" checked={r.include && !r.exists} disabled={r.exists} onChange={(e) => setRow(i, "include", e.target.checked)} />
+                <Input value={r.firstName} onChange={(e) => setRow(i, "firstName", e.target.value)} placeholder="First name" />
+                <Input value={r.lastName} onChange={(e) => setRow(i, "lastName", e.target.value)} placeholder="Surname" />
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.email}</div>{r.exists && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>already on register</span>}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
