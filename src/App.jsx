@@ -148,11 +148,38 @@ const attTone = { Present: "success", Field: "info", "Half-day": "warning", Abse
 
 /* ================================ Data table ============================== */
 function DataTable({ columns, rows, empty }) {
+  const mobile = useIsMobile();
   if (!rows.length) {
     return (
       <div style={{ padding: "44px 20px", textAlign: "center", color: "var(--muted)" }}>
         <AlertTriangle size={30} style={{ opacity: 0.5, marginBottom: 8 }} />
         <div>{empty || "No records yet."}</div>
+      </div>
+    );
+  }
+  // On phones a wide table pushes status and action buttons off-screen. Render
+  // each row as a stacked card instead: first column as the heading, the rest
+  // as label/value pairs, and any action column (no label) full-width below.
+  if (mobile) {
+    return (
+      <div>
+        {rows.map((r, ri) => (
+          <div key={ri} style={{ padding: "14px 16px", borderBottom: ri === rows.length - 1 ? "none" : "1px solid var(--border)" }}>
+            {columns.map((c, ci) => {
+              const content = c.render(r);
+              const isEmpty = content == null || content === "" || content === "—";
+              if (ci === 0) return <div key={ci} style={{ marginBottom: 2 }}>{content}</div>;
+              if (!c.label) return isEmpty ? null : <div key={ci} style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>{content}</div>;
+              if (isEmpty) return null;
+              return (
+                <div key={ci} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 14, padding: "4px 0", fontSize: 13 }}>
+                  <span style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--text-2)", fontWeight: 600, flexShrink: 0 }}>{c.label}</span>
+                  <span style={{ textAlign: "right", color: "var(--text)", minWidth: 0 }}>{content}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     );
   }
@@ -1148,6 +1175,30 @@ function ReqForm({ ctx, onDone }) {
 function ReqTable({ rows, showRequester, onOpen, onDelete, emptyLabel }) {
   const th = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "10px 14px", textAlign: "left", borderBottom: "1px solid var(--border)", background: "var(--surface)", whiteSpace: "nowrap" };
   const td = { padding: "11px 14px", borderBottom: "1px solid var(--border)", fontSize: 12.5, color: "var(--text)" };
+  const mobile = useIsMobile();
+  if (mobile) {
+    return (
+      <Card style={{ padding: 0 }}>
+        {rows.length === 0
+          ? <div style={{ padding: "30px 16px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>{emptyLabel}</div>
+          : rows.map((r) => (
+            <div key={r.id} onClick={() => onOpen(r.id)} style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", cursor: "pointer" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, minWidth: 0 }}>{r.subject || "—"}</div>
+                <Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill>
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-2)", marginTop: 3 }}>{r.id} · {reqDate(r.createdAt)}</div>
+              {showRequester && <div style={{ fontSize: 12.5, marginTop: 6 }}><span style={{ color: "var(--muted)" }}>Requester: </span>{r.requesterName || "—"}</div>}
+              <div style={{ fontSize: 12.5, marginTop: 4 }}><span style={{ color: "var(--muted)" }}>Location: </span>{(r.location && r.location.name) || "—"}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>{reqAdjusted(r) ? <span>{fmtN(reqPayable(r))} <span style={{ fontSize: 11, color: "var(--muted)", textDecoration: "line-through", fontWeight: 400 }}>{fmtN(reqTotal(r))}</span></span> : fmtN(reqTotal(r))} <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 400 }}>UGX</span></div>
+                {onDelete && <button type="button" title="Delete requisition" onClick={(e) => { e.stopPropagation(); onDelete(r); }} style={{ border: "none", background: "none", color: "var(--muted)", cursor: "pointer", padding: 6, display: "inline-flex" }}><Trash2 size={16} /></button>}
+              </div>
+            </div>
+          ))}
+      </Card>
+    );
+  }
   return (
     <Card style={{ padding: 0 }}>
       <div style={{ overflowX: "auto" }}>
