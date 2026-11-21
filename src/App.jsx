@@ -2181,9 +2181,6 @@ function Sidebar({ view, setView, store, nav = NAV }) {
           );
         })}
       </nav>
-      <div style={{ padding: "14px 16px", borderTop: "1px solid var(--sidebar-border)", fontSize: 12, color: "var(--sidebar-muted)", display: "flex", alignItems: "center", gap: 7 }}>
-        <Circle size={8} fill="var(--accent)" color="var(--accent)" /> Demo prototype · mock data
-      </div>
     </aside>
   );
 }
