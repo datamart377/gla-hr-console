@@ -3527,10 +3527,10 @@ function PayrollTracker({ runs, month, setMonth }) {
   const years = []; for (let y = curY; y >= minY; y--) years.push(y);
 
   const palette = {
-    paid: ["var(--success)", "var(--success-dim)"],
-    processed: ["var(--info)", "var(--info-dim)"],
-    current: ["var(--warning)", "var(--warning-dim)"],
-    none: ["var(--muted)", "var(--surface-2)"],
+    paid: ["var(--success)", "color-mix(in srgb, var(--success) 22%, var(--bg-elevated))"],
+    processed: ["var(--info)", "color-mix(in srgb, var(--info) 22%, var(--bg-elevated))"],
+    current: ["var(--warning)", "color-mix(in srgb, var(--warning) 26%, var(--bg-elevated))"],
+    none: ["var(--muted)", "color-mix(in srgb, var(--muted) 14%, var(--bg-elevated))"],
     future: ["var(--muted)", "transparent"],
   };
   const stateOf = (key) => {
