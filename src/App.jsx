@@ -1614,6 +1614,55 @@ function TodayStatus({ rec }) {
   return <Pill tone="danger">Clocked in {rec.clockIn} · outside fence</Pill>;
 }
 
+// A staff member's own key attendance statistics for the current month, shown
+// above the clock-in widget so everyone can see how their month is going.
+function MyAttendanceStats({ ctx }) {
+  const emp = ctx.currentEmp;
+  if (!emp) return null;
+  const monthStart = TODAY.slice(0, 7) + "-01";
+  const [y, m] = TODAY.slice(0, 7).split("-").map(Number);
+  const monthName = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const weekdays = [];
+  for (let d = new Date(monthStart + "T00:00:00"); d <= new Date(TODAY + "T00:00:00"); d.setDate(d.getDate() + 1)) { const wd = d.getDay(); if (wd !== 0 && wd !== 6) weekdays.push(d.toISOString().slice(0, 10)); }
+  const recs = (ctx.store.attendance || []).filter((a) => a.empId === emp.id && a.date >= monthStart && a.date <= TODAY);
+  const leaveFor = (dt) => (ctx.store.leave || []).find((l) => l.empId === emp.id && l.status === "Approved" && dt >= l.startDate && dt <= l.endDate);
+  const byDate = {};
+  recs.forEach((a) => { const cur = byDate[a.date]; if (!cur) { byDate[a.date] = a; return; } const ta = timeToMinutes(a.clockIn), tc = timeToMinutes(cur.clockIn); if (a.clockIn && (!cur.clockIn || (ta != null && tc != null && ta < tc))) byDate[a.date] = a; });
+  const days = weekdays.map((dt) => {
+    const a = byDate[dt], lv = leaveFor(dt);
+    let status = "Absent", inMin = null;
+    if (a && a.clockIn && a.status !== "Absent") { inMin = timeToMinutes(a.clockIn); status = a.status === "Field" ? "Field" : a.status === "Half-day" ? "Half-day" : (inMin > LATE_THRESHOLD_MIN ? "Late" : "Present"); }
+    else if (a && a.status === "Absent") status = "Absent";
+    else if (lv) status = "Leave";
+    return { dt, a, status, inMin };
+  });
+  const present = days.filter((d) => ["Present", "Late", "Field", "Half-day"].includes(d.status));
+  const late = days.filter((d) => d.status === "Late");
+  const leaveDays = days.filter((d) => d.status === "Leave");
+  const expected = Math.max(0, days.length - leaveDays.length);
+  const rate = expected ? Math.round((present.length / expected) * 100) : 0;
+  const inMins = present.map((d) => d.inMin).filter((x) => x != null);
+  const avgIn = inMins.length ? minutesToTime(inMins.reduce((s, x) => s + x, 0) / inMins.length) : "—";
+  const punct = present.length ? Math.round(((present.length - late.length) / present.length) * 100) : 0;
+  const ot = recs.reduce((s, a) => s + (Number(a.overtime) || 0), 0);
+  let streak = 0, best = 0;
+  days.forEach((d) => { if (d.status !== "Absent" && d.status !== "Leave") { streak++; best = Math.max(best, streak); } else if (d.status === "Absent") streak = 0; });
+  const openFull = () => ctx.setModal(() => (cc) => <StaffAttendanceAnalysis ctx={cc} emp={emp} start={monthStart} end={TODAY} weekdays={weekdays} periodLabel={monthName} onClose={() => cc.setModal(null)} />);
+
+  return (
+    <Card style={{ marginBottom: 16, overflow: "hidden" }}>
+      <CardHead title={`My attendance · ${monthName}`} right={<Btn size="sm" onClick={openFull}><BarChart3 size={13} />Full report</Btn>} />
+      <div style={{ padding: "14px 16px", display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))" }}>
+        <StatCard Icon={Check} label="Days worked" value={present.length} meta={`of ${expected} working days`} tone="success" />
+        <StatCard Icon={Clock} label="Avg report time" value={avgIn} meta={`late after ${minutesToTime(LATE_THRESHOLD_MIN)}`} tone="brand" />
+        <StatCard Icon={Timer} label="Punctuality" value={punct + "%"} meta={`${late.length} late ${late.length === 1 ? "day" : "days"}`} tone={punct >= 85 ? "success" : "warning"} />
+        <StatCard Icon={TrendingUp} label="Overtime" value={ot.toFixed(1) + " h"} meta={`best streak ${best} day${best === 1 ? "" : "s"}`} tone="accent" />
+        <StatCard Icon={CalendarCheck} label="Attendance" value={rate + "%"} meta="this month" tone={rate >= 90 ? "success" : rate >= 75 ? "warning" : "danger"} />
+      </div>
+    </Card>
+  );
+}
+
 function MyPortal({ ctx, setSv }) {
   const emp = ctx.currentEmp;
   const today = ctx.store.attendance.find((a) => a.empId === emp.id && a.date === TODAY);
@@ -1622,8 +1671,6 @@ function MyPortal({ ctx, setSv }) {
   const myLeave = ctx.store.leave.filter((l) => l.empId === emp.id);
   const pending = myLeave.filter((l) => l.status === "Pending").length;
   const myAtt = ctx.store.attendance.filter((a) => a.empId === emp.id);
-  const start = (() => { const d = new Date(TODAY + "T00:00:00"); d.setDate(d.getDate() - 13); return d.toISOString().slice(0, 10); })();
-  const present14 = myAtt.filter((a) => a.date >= start && a.status !== "Absent" && a.clockIn).length;
   const recentAtt = [...myAtt].sort(byDateDesc).slice(0, 5);
   const action = (Icon, label, onClick, variant) => <Btn variant={variant} onClick={onClick} style={{ justifyContent: "flex-start" }}><Icon size={16} />{label}</Btn>;
   return (
@@ -1642,6 +1689,9 @@ function MyPortal({ ctx, setSv }) {
         </div>
       </Card>
 
+      {/* A staff member's own attendance statistics, directly above clock-in. */}
+      <MyAttendanceStats ctx={ctx} />
+
       {/* Prominent clock-in — the first and primary action on the staff landing page. */}
       <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16, border: `1.5px solid ${today ? "var(--success)" : "var(--brand)"}` }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "20px 22px", background: today ? "rgba(18,137,78,.06)" : "rgba(138,86,64,.07)" }}>
@@ -1658,7 +1708,6 @@ function MyPortal({ ctx, setSv }) {
         <StatCard Icon={CalendarDays} label="Annual leave left" value={`${annual.remaining} / ${annual.entitlement}`} meta="working days" tone="success" />
         <StatCard Icon={CalendarCheck} label="Sick leave left" value={`${sick.remaining} / ${sick.entitlement}`} meta="working days" tone="brand" />
         <StatCard Icon={Timer} label="Pending requests" value={pending} meta="awaiting HR decision" tone="accent" />
-        <StatCard Icon={Check} label="Present (14 days)" value={present14} meta="days clocked in" tone="success" />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16 }} className="rep-cols">
@@ -1698,6 +1747,7 @@ function MyClockIn({ ctx }) {
   const mine = ctx.store.attendance.filter((a) => a.empId === emp.id).sort(byDateDesc).slice(0, 12);
   return (
     <>
+      <MyAttendanceStats ctx={ctx} />
       <Card style={{ padding: 0, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, padding: "18px 20px" }}>
           <div style={{ width: 46, height: 46, borderRadius: 12, flex: "none", display: "grid", placeItems: "center", background: "rgba(138,86,64,.12)", color: "var(--brand)" }}><Smartphone size={22} /></div>
