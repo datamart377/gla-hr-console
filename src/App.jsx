@@ -3217,7 +3217,10 @@ function Attendance({ ctx }) {
 
 function ClockInCard({ ctx }) {
   const emps = ctx.store.employees.filter((e) => e.status !== "Terminated");
-  const [empId, setEmpId] = useState(emps[0]?.id || "");
+  // Default to the person who is signed in (so "Signed in as" matches reality),
+  // falling back to the first staff member only if their record isn't available.
+  const meId = (ctx.currentEmp && ctx.currentEmp.id) || (ctx.auth && ctx.auth.empId) || "";
+  const [empId, setEmpId] = useState((meId && emps.some((e) => e.id === meId) ? meId : emps[0]?.id) || "");
   const emp = ctx.empById(empId);
   const already = ctx.store.attendance.find((a) => a.empId === empId && a.date === TODAY);
   return (
