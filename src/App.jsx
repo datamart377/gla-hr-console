@@ -5254,11 +5254,12 @@ function SupplierForm({ ctx, id }) {
   const existing = (ctx.store.suppliers || []).find((s) => s.id === id);
   const [f, setF] = useState(existing
     ? { whtDefault: existing.whtDefault !== false, vatDefault: existing.vatDefault !== false, ...existing }
-    : { id: nextSupplierId(ctx.store.suppliers), name: "", tin: "", category: SUPPLIER_CATEGORIES[0], contactPerson: "", phone: "", email: "", bankName: "", bankAccount: "", bankBranch: "", accountName: "", bankAddress: "", iban: "", swiftCode: "", address: "", whtDefault: true, vatDefault: true, status: "Active", notes: "" });
+    : { id: nextSupplierId(ctx.store.suppliers), name: "", tin: "", category: SUPPLIER_CATEGORIES[0], contactPerson: "", phone: "", phone2: "", email: "", bankName: "", bankAccount: "", bankBranch: "", accountName: "", bankAddress: "", iban: "", swiftCode: "", address: "", whtDefault: true, vatDefault: true, status: "Active", notes: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const toggle = (k) => () => setF({ ...f, [k]: !f[k] });
   const submit = async () => {
     if (!f.name.trim()) return alert("Supplier name is required.");
+    if (!String(f.phone || "").trim()) return alert("A primary contact phone number is required.");
     const payload = { ...f, whtDefault: !!f.whtDefault, vatDefault: !!f.vatDefault };
     if (adding) await suppliersApi.create(payload); else await suppliersApi.update(id, payload);
     await ctx.reload(); ctx.setModal(null);
@@ -5283,8 +5284,9 @@ function SupplierForm({ ctx, id }) {
         <Field label="Address"><Input value={f.address} onChange={set("address")} placeholder="Physical / postal address" /></Field>
         <FieldsetTitle>Contact</FieldsetTitle>
         <Field label="Contact person"><Input value={f.contactPerson} onChange={set("contactPerson")} /></Field>
-        <Field label="Phone"><Input value={f.phone} onChange={set("phone")} /></Field>
-        <Field label="Email" full><Input value={f.email} onChange={set("email")} /></Field>
+        <Field label="Primary phone" required><Input value={f.phone} onChange={set("phone")} placeholder="e.g. +256 7XX XXX XXX" /></Field>
+        <Field label="Secondary phone"><Input value={f.phone2 || ""} onChange={set("phone2")} placeholder="Optional alternate number" /></Field>
+        <Field label="Email"><Input value={f.email} onChange={set("email")} /></Field>
         <FieldsetTitle>Bank details</FieldsetTitle>
         <Field label="Account number"><Input value={f.bankAccount} onChange={set("bankAccount")} /></Field>
         <Field label="Bank"><Input value={f.bankName} onChange={set("bankName")} placeholder="e.g. Stanbic Bank" /></Field>
@@ -5324,7 +5326,8 @@ function SupplierView({ ctx, id }) {
       {row("Category", s.category)}
       {row("Address", s.address)}
       {row("Contact person", s.contactPerson)}
-      {row("Phone", s.phone)}
+      {row("Primary phone", s.phone)}
+      {s.phone2 && row("Secondary phone", s.phone2)}
       {row("Email", s.email)}
       {row("Bank", s.bankName)}
       {row("Account number", s.bankAccount)}
