@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
-import { SIGNATORIES, setReportCompany, setReportSignatories } from "./reportConstants.js";
+import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -4772,6 +4772,190 @@ function printPo(ctx, po) {
   } catch (e) { alert("Couldn't generate the purchase order PDF.\n\n" + (e && e.message ? e.message : "")); }
 }
 
+// Spell out an integer amount (for the "amount in words" line in the preview).
+function poAmountWords(n) {
+  n = Math.round(Number(n) || 0);
+  if (n === 0) return "Zero";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const below1000 = (x) => {
+    let s = "";
+    if (x >= 100) { s += ones[Math.floor(x / 100)] + " Hundred"; x %= 100; if (x) s += " "; }
+    if (x >= 20) { s += tens[Math.floor(x / 10)]; x %= 10; if (x) s += " " + ones[x]; }
+    else if (x > 0) s += ones[x];
+    return s;
+  };
+  const scales = [["Trillion", 1e12], ["Billion", 1e9], ["Million", 1e6], ["Thousand", 1e3]];
+  let out = "";
+  for (const [name, val] of scales) {
+    if (n >= val) { out += (out ? " " : "") + below1000(Math.floor(n / val)) + " " + name; n %= val; }
+  }
+  if (n > 0) out += (out ? " " : "") + below1000(n);
+  return out.trim();
+}
+const PO_CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
+
+// On-screen preview of a Purchase Order, mirroring the branded PDF layout so
+// staff can review it before printing / downloading.
+function PurchaseOrderPreview({ ctx, po: raw }) {
+  const { setModal } = ctx;
+  // Sync letterhead + signatories with the saved company profile, as printPo does.
+  setReportCompany(ctx.store.settings && ctx.store.settings.company);
+  setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
+  const po = normalizePurchaseOrder(raw);
+  const cur = po.currency || "UGX";
+  const t = poTotals(po);
+  const poNo = po.poNo || po.id || "";
+  const money = (v) => `${cur} ${fmtN(Math.round(Number(v) || 0))}`;
+  const isIntl = (po.currency && po.currency !== "UGX") || po.iban || po.swiftCode || po.bankAddress;
+  const preparer = (po.issuedBy || "").trim();
+  const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
+
+  const ink = "var(--text)", body = "var(--text-2)", line = "1px solid var(--border)";
+  const kv = (k, v) => (
+    <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: line, fontSize: 12.5 }}>
+      <span style={{ width: 118, minWidth: 110, fontWeight: 600, color: ink }}>{k}</span>
+      <span style={{ flex: 1, color: body, wordBreak: "break-word" }}>{v || "—"}</span>
+    </div>
+  );
+  const th = { textAlign: "left", padding: "8px 8px", fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: body, borderBottom: "1.5px solid var(--border-strong)", whiteSpace: "nowrap" };
+  const td = { padding: "8px 8px", fontSize: 12, color: ink, borderBottom: line, verticalAlign: "top" };
+  const rt = { textAlign: "right" };
+  const totalRow = (label, val, strong) => (
+    <tr>
+      <td colSpan={5} style={{ ...td, ...rt, fontWeight: strong ? 700 : 600, color: ink, borderBottom: strong ? "1.5px solid var(--border-strong)" : line }}>{label}</td>
+      <td style={{ ...td, ...rt, fontWeight: strong ? 700 : 600, color: ink, borderBottom: strong ? "1.5px solid var(--border-strong)" : line }} className="mono">{money(val)}</td>
+    </tr>
+  );
+
+  const footer = (
+    <>
+      <Btn onClick={() => setModal(null)}>Close</Btn>
+      <Btn onClick={() => { setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={po.id} />); }}><Pencil size={14} />Edit</Btn>
+      <Btn variant="primary" onClick={() => printPo(ctx, raw)}><Printer size={14} />Download PDF</Btn>
+    </>
+  );
+
+  return (
+    <Modal wide title="Purchase order preview" sub={`${poNo}${po.supplierName ? " · " + po.supplierName : ""}`} onClose={() => setModal(null)} footer={footer}>
+      <div style={{ background: "#fff", color: "#1a1a1a", border: line, borderRadius: 12, padding: "26px 28px" }}>
+        {/* Letterhead */}
+        <div style={{ borderBottom: "2px solid var(--brand)", paddingBottom: 12, marginBottom: 16 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--brand)" }}>{COMPANY.name}</div>
+          {(COMPANY.lines || []).map((l, i) => <div key={i} style={{ fontSize: 11, color: "#555" }}>{l}</div>)}
+        </div>
+
+        {/* Title + reference */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "#888" }}>Procurement</div>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "#1a1a1a", marginTop: 2 }}>PURCHASE ORDER</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: "#888" }}>Reference</div>
+            <div className="mono" style={{ fontWeight: 700, fontSize: 14, color: "#1a1a1a" }}>{poNo}</div>
+            <div style={{ marginTop: 4 }}><Pill tone={poStatusTone(po.status)}>{poStatusLabel(po.status)}</Pill></div>
+          </div>
+        </div>
+
+        {/* Supplier & order details */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "0 28px", marginBottom: 16 }}>
+          <div>
+            {kv("Supplier", po.supplierName)}
+            {kv("Address", po.supplierAddress)}
+            {kv("Contact person", po.contactPerson)}
+            {kv("Supplier TIN", po.supplierTin)}
+          </div>
+          <div>
+            {kv("PO No.", poNo)}
+            {kv("Date", reqDate(po.date))}
+            {kv("Supplier quote no.", po.quoteNo)}
+            {kv("Currency", cur)}
+          </div>
+        </div>
+
+        <div style={{ fontStyle: "italic", fontSize: 11.5, color: "#555", marginBottom: 8 }}>Please arrange to supply the following items as per the quotation referenced above:</div>
+
+        {/* Line items */}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+            <thead>
+              <tr>
+                <th style={th}>Item code</th>
+                <th style={th}>Description</th>
+                <th style={{ ...th, ...rt }}>Qty</th>
+                <th style={th}>Unit</th>
+                <th style={{ ...th, ...rt }}>Unit price ({cur})</th>
+                <th style={{ ...th, ...rt }}>Amount ({cur})</th>
+              </tr>
+            </thead>
+            <tbody>
+              {po.lineItems.map((li, i) => (
+                <tr key={i}>
+                  <td style={{ ...td }} className="mono">{li.code || "—"}</td>
+                  <td style={td}>{li.description || "—"}</td>
+                  <td style={{ ...td, ...rt }} className="mono">{fmtN(li.qty)}</td>
+                  <td style={td}>{li.unit || "—"}</td>
+                  <td style={{ ...td, ...rt }} className="mono">{fmtN(li.unitPrice)}</td>
+                  <td style={{ ...td, ...rt }} className="mono">{fmtN((Number(li.qty) || 0) * (Number(li.unitPrice) || 0))}</td>
+                </tr>
+              ))}
+              {t.mode === "inclusive" && (<>{totalRow("Sub-total (excl. VAT)", t.subTotal)}{totalRow(`VAT (${t.rate}%, included)`, t.vat)}{totalRow("GRAND TOTAL (incl. VAT)", t.grand, true)}</>)}
+              {t.mode === "exclusive" && (<>{totalRow("Sub-total", t.subTotal)}{totalRow(`VAT (${t.rate}%)`, t.vat)}{totalRow("GRAND TOTAL", t.grand, true)}</>)}
+              {t.mode === "none" && totalRow("GRAND TOTAL", t.grand, true)}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Amount in words */}
+        <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: "10px 12px", marginTop: 14, fontSize: 12 }}>
+          <b style={{ color: ink }}>Amount in words: </b>
+          <span style={{ color: "var(--brand)", fontStyle: "italic", fontWeight: 600 }}>{poAmountWords(t.grand)} {PO_CURRENCY_WORDS[cur] || cur} only</span>
+        </div>
+
+        {/* Supplier bank details */}
+        {(po.bankAccount || po.bankName || (isIntl && (po.iban || po.swiftCode))) && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--brand)", marginBottom: 6 }}>Supplier bank details{isIntl ? ` (${cur})` : ""}</div>
+            <div style={{ fontSize: 12, color: body, lineHeight: 1.7 }}>
+              {isIntl ? (
+                [
+                  `Account name: ${po.accountName || po.supplierName || "—"}`,
+                  po.bankName && `Bank: ${po.bankName}`,
+                  po.bankAddress && `Bank address: ${po.bankAddress}`,
+                  po.iban && `IBAN: ${po.iban}`,
+                  po.bankAccount && `Account no: ${po.bankAccount}`,
+                  po.swiftCode && `SWIFT / BIC: ${po.swiftCode}`,
+                ].filter(Boolean).map((l, i) => <div key={i}>{l}</div>)
+              ) : (
+                <div>{[po.bankName && `Bank: ${po.bankName}`, po.bankBranch && `Branch: ${po.bankBranch}`, po.bankAccount && `Account: ${po.bankAccount}`].filter(Boolean).join("    ") || "—"}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Notes */}
+        {po.notes && String(po.notes).trim() && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--brand)", marginBottom: 6 }}>Notes</div>
+            <div style={{ fontSize: 12, color: body, whiteSpace: "pre-wrap" }}>{String(po.notes).trim()}</div>
+          </div>
+        )}
+
+        {/* Signatories */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28, marginTop: 34 }}>
+          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date) }, { title: "Approved signatory", name: approver.name, meta: approver.contact }].map((s, i) => (
+            <div key={i}>
+              <div style={{ borderTop: "1px solid #999", paddingTop: 6, fontSize: 12, color: ink, fontWeight: 600, minHeight: 20 }}>{s.name || ""}</div>
+              <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>{s.title}{s.meta ? ` · ${s.meta}` : ""}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function PurchaseOrders({ ctx }) {
   const { store, setModal } = ctx;
   const pos = (store.purchaseOrders || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
@@ -4790,7 +4974,7 @@ function PurchaseOrders({ ctx }) {
       <Card>
         <DataTable
           columns={[
-            { label: "PO No.", render: (p) => <span className="mono" style={{ fontWeight: 600 }}>{p.poNo || p.id}</span> },
+            { label: "PO No.", render: (p) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <PurchaseOrderPreview ctx={cc} po={p} />)} title="Preview purchase order">{p.poNo || p.id}</span> },
             { label: "Supplier", render: (p) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{p.supplierName || "—"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.quoteNo ? `Quote ${p.quoteNo}` : "no quote ref"}</div></div> },
             { label: "Date", render: (p) => reqDate(p.date) },
             { label: "Items", render: (p) => (p.lineItems || []).length },
@@ -4798,6 +4982,7 @@ function PurchaseOrders({ ctx }) {
             { label: "Status", render: (p) => <Pill tone={poStatusTone(p.status)}>{poStatusLabel(p.status)}</Pill> },
             { label: "", render: (p) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderPreview ctx={cc} po={p} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printPo(ctx, p)} title="Print / download PDF"><Printer size={13} />PO</Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={p.id} />)} title="Edit"><Pencil size={13} /></Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={purchaseOrdersApi} id={p.id} label={p.poNo || p.id} />)} title="Delete"><Trash2 size={13} /></Btn>
