@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
-import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
+import { COMPANY, SIGNATORIES, PAYROLL_SIGNATORIES, ALL_SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -47,10 +47,10 @@ const ugxShort = (n) => {
   return ugx(n);
 };
 // Trailing signatory rows for schedule CSV/Excel exports (matches the PDF block).
-const signatoryCsvLines = () => ["", '"Approved Signatory"', "",
-  SIGNATORIES.map((s) => `"${s.name}"`).join(","),
-  ...(SIGNATORIES.some((s) => s.title) ? [SIGNATORIES.map((s) => `"${s.title || ""}"`).join(",")] : []),
-  SIGNATORIES.map((s) => `"${s.contact}"`).join(",")];
+const signatoryCsvLines = (list = SIGNATORIES) => ["", '"Approved Signatory"', "",
+  list.map((s) => `"${s.name}"`).join(","),
+  ...(list.some((s) => s.title) ? [list.map((s) => `"${s.title || ""}"`).join(",")] : []),
+  list.map((s) => `"${s.contact}"`).join(",")];
 const fullName = (e) => (e ? `${e.firstName} ${e.lastName}` : "—");
 const initials = (e) => ((e?.firstName || " ")[0] + (e?.lastName || " ")[0]).toUpperCase();
 const fmtDate = (s) => {
@@ -3696,7 +3696,7 @@ function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPai
     const cols = run.columns || [];
     const header = ["No", "Name", "Account Number", "Bank", "Branch", "TIN", "NIN", "NSSF No", "Gross Pay", "NSSF 5%", "PAYE", "Advance Deductions", ...cols.map((c) => c.label), "Net Pay", "10% Company Contribution"];
     const lines = [header.join(",")].concat(run.rows.map((r) => [r.no, r.name, r.bankAccount, r.bankName, r.bankBranch, r.tin, r.nationalId, r.nssfNumber, r.gross, r.nssf5, r.paye, r.advance, ...cols.map((c) => (r.custom || {})[c.id] ?? ""), r.net, r.contribution].map((x) => `"${x ?? ""}"`).join(",")));
-    lines.push(...signatoryCsvLines());
+    lines.push(...signatoryCsvLines(PAYROLL_SIGNATORIES));
     downloadFile(`gla-payroll-${run.month}.csv`, lines.join("\n"));
   };
   // Excel bank report — a faithful copy of the PDF bank report (same letterhead,
@@ -3706,11 +3706,12 @@ function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPai
     chequeNo: cheque,
     rows: run.rows.map((rw) => ({ no: rw.no, name: rw.name, account: rw.bankAccount, bank: rw.bankName, branch: rw.bankBranch, net: rw.net })),
     filename: `GLA-Bank-Report-${run.month}.xlsx`,
+    signatories: PAYROLL_SIGNATORIES,
   });
   const exportRunPdf = () => { const cols = run.columns || []; downloadReportPdf({
     filename: `GLA-Payroll-${run.month}.pdf`,
     eyebrow: "Payroll",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Monthly Salary Ledger",
     subtitle: `${monthLabel(run.month)} · processed run (${run.status})`,
     meta: [`Processed by ${run.processedBy || "HR"} · ${fmtDate(run.processedAt)}${run.status === "Paid" ? ` · Paid ${fmtDate(run.paidAt)}` : ""}`],
@@ -3721,7 +3722,7 @@ function PayrollRunBar({ month, setMonth, months, run, cur, onProcess, onMarkPai
   const bankReportPdf = () => downloadReportPdf({
     filename: `GLA-Bank-Report-${run.month}.pdf`,
     eyebrow: "Payment",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Staff Bank Payment Schedule Report",
     subtitle: `${monthLabel(run.month)} · net salaries payable`,
     meta: [...(cheque ? [`Cheque No: ${cheque}`] : []), `Total net payable: UGX ${fmtN(rowsPaid.reduce((s, r) => s + r.net, 0))}`],
@@ -3894,7 +3895,7 @@ function LedgerLive({ ctx, prevMonthLabel }) {
         ...cols.map((c) => (e.custom || {})[c.id] ?? ""), ledgerNet(e, cols), p.nssfEr].map((x) => `"${x ?? ""}"`).join(",");
     }));
     lines.push(["", "TOTALS", "", "", "", "", "", "", t.g, t.ne, t.paye, t.adv, ...cols.map((c) => c.kind === "text" ? "" : colTotal(c)), t.net, t.nr].map((x) => `"${x}"`).join(","));
-    lines.push(...signatoryCsvLines());
+    lines.push(...signatoryCsvLines(PAYROLL_SIGNATORIES));
     downloadFile("gla-monthly-salary-ledger.csv", lines.join("\n"));
   };
   const removeCol = async (c) => { if (window.confirm(`Remove the “${c.label}” column?`)) { await ledgerColumnsApi.remove(c.id); await reload(); } };
@@ -3918,7 +3919,7 @@ function LedgerLive({ ctx, prevMonthLabel }) {
   const exportPdf = () => downloadReportPdf({
     filename: "GLA-Monthly-Salary-Ledger.pdf",
     eyebrow: "Payroll",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Monthly Salary Ledger",
     subtitle: `${monthLabel(CURRENT_MONTH)} · ${pdfEmps.length} staff`,
     meta: [`Gross: UGX ${fmtN(pt.g)}   PAYE: UGX ${fmtN(pt.paye)}   NSSF (5%): UGX ${fmtN(pt.ne)}   Advance: UGX ${fmtN(pt.adv)}   Net: UGX ${fmtN(pt.net)}`],
@@ -4208,13 +4209,13 @@ function SupplierSnapshot({ run, ctx }) {
     out.push(["No", "Name", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "18% VAT (incl.)", "Net Pay"].join(","));
     rows.forEach((r) => out.push([r.no, r.name, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.net].map((x) => `"${x ?? ""}"`).join(",")));
     out.push(["", "TOTAL", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
-    out.push(...signatoryCsvLines());
+    out.push(...signatoryCsvLines(PAYROLL_SIGNATORIES));
     downloadFile(`gla-supplier-schedule-${run.scheduleDate}.csv`, out.join("\n"));
   };
   const exportPdf = () => downloadReportPdf({
     filename: `GLA-Supplier-Schedule-${run.scheduleDate}.pdf`,
     eyebrow: "Procurement",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Suppliers Payment Schedule",
     subtitle: `Schedule date: ${fmtDate(run.scheduleDate)} · processed`,
     meta: [`Processed by ${run.processedBy || "HR"} · ${fmtDate(run.processedAt)}`, ...(cheque ? [`Cheque No: ${cheque}`] : []), `Sub-total: UGX ${fmtN(t.subTotal)}   6% WHT: UGX ${fmtN(t.wht)}   18% VAT: UGX ${fmtN(t.vat)}   Net payable: UGX ${fmtN(t.net)}`],
@@ -4337,10 +4338,19 @@ const BANK_SIGN_STEPS = [
 ];
 const genSignCode = () => "GLA-" + Math.random().toString(36).slice(2, 7).toUpperCase() + "-" + Date.now().toString(36).slice(-4).toUpperCase();
 // Build the signatory block for a bank-report PDF from a sign-off record.
+// Pending slots name the configured payroll signatory expected to sign there
+// (e.g. Dr. Kimuli Ismail as Managing Director); a signed slot carries the
+// signer's own signature image when they are an approved signatory.
+function expectedBankSigner(label) {
+  const md = /managing/i.test(label);
+  return PAYROLL_SIGNATORIES.find((s) => md ? /managing\s+director/i.test(s.title || "") : /engineer/i.test(s.title || "")) || null;
+}
 function bankSignatories(rec) {
-  const mk = (sig, label) => sig
-    ? { name: sig.name, title: label, signedText: sig.name, signedMeta: `Digitally signed ${fmtDate(sig.at)} · ${sig.code}` }
-    : { name: "____________________", title: label, pending: "Pending signature" };
+  const mk = (sig, label) => {
+    if (sig) return { name: sig.name, title: label, signedText: sig.name, signedMeta: `Digitally signed ${fmtDate(sig.at)} · ${sig.code}` };
+    const exp = expectedBankSigner(label);
+    return { name: exp ? exp.name : "____________________", title: label, pending: "Pending signature" };
+  };
   return [mk(rec && rec.engineer, "Director of Engineering"), mk(rec && rec.md, "Managing Director")];
 }
 const bankApprovalFor = (store, key) => (store.bankApprovals || []).find((r) => r.key === key) || null;
@@ -4439,7 +4449,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
   const downloadPdf = () => downloadReportPdf({
     filename: `GLA-Payment-Advice-${(row.name || "supplier").replace(/[^\w]+/g, "-")}-${run.scheduleDate}.pdf`,
     eyebrow: "Remittance",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Supplier Payment Advice",
     subtitle: `${row.name}${row.tin ? " · TIN " + row.tin : ""}`,
     meta: [
@@ -4485,7 +4495,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
         ${row2("18% VAT (incl.)", row.applyVat ? fmtN(row.vat) : "n/a", "#555")}
         <tr class="net"><td style="padding-top:9px">NET PAID</td><td style="padding-top:9px;text-align:right;font-family:'Courier New',monospace;color:#1b7a43">UGX ${fmtN(row.net)}</td></tr>
       </table></div>
-      <div class="sig">${(SIGNATORIES || []).map((s) => `<div>${isSigImage(s.signature) ? `<img src="${s.signature}" alt="">` : ""}<b>${s.name}</b>${s.title ? `<br><span style="font-size:11px;font-weight:700;color:#5a3a2a">${s.title}</span>` : ""}<br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
+      <div class="sig">${(PAYROLL_SIGNATORIES || []).map((s) => `<div>${isSigImage(s.signature) ? `<img src="${s.signature}" alt="">` : ""}<b>${s.name}</b>${s.title ? `<br><span style="font-size:11px;font-weight:700;color:#5a3a2a">${s.title}</span>` : ""}<br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
       </body></html>`);
     w.document.close(); w.focus();
   };
@@ -4629,13 +4639,13 @@ function SupplierDraft({ ctx, date, setDate }) {
     out.push(["No", "Name", "TIN", "Account Number", "Bank", "Branch", "Sub Total", "(-)6% Income With Holding", "18% VAT (incl.)", "Net Pay"].join(","));
     rows.forEach((r, i) => out.push([i + 1, r.held ? r.name + " (PAYMENT HELD)" : r.name, r.tin, r.bankAccount, r.bankName, r.bankBranch, r.subTotal, r.wht, r.vat, r.held ? "HELD" : r.net].map((x) => `"${x ?? ""}"`).join(",")));
     out.push(["", "TOTAL (payable)", "", "", "", "", t.subTotal, t.wht, t.vat, t.net].map((x) => `"${x}"`).join(","));
-    out.push(...signatoryCsvLines());
+    out.push(...signatoryCsvLines(PAYROLL_SIGNATORIES));
     downloadFile(`gla-supplier-schedule-${date}.csv`, out.join("\n"));
   };
   const exportPdf = () => downloadReportPdf({
     filename: `GLA-Supplier-Schedule-${date}.pdf`,
     eyebrow: "Procurement",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Suppliers Payment Schedule",
     subtitle: `Schedule date: ${fmtDate(date)} · ${rows.length} suppliers`,
     meta: [...(chequeNo ? [`Cheque No: ${chequeNo}`] : []), `Sub-total: UGX ${fmtN(t.subTotal)}   6% WHT: UGX ${fmtN(t.wht)}   18% VAT: UGX ${fmtN(t.vat)}   Net payable: UGX ${fmtN(t.net)}`],
@@ -7145,7 +7155,7 @@ function PaymentStatement({ ctx }) {
   const exportPdf = () => downloadReportPdf({
     filename: `GLA-Payment-Statement-${emp?.id || "staff"}-${lo}_${hi}.pdf`,
     eyebrow: "Payroll · Payment Statement",
-    signatories: SIGNATORIES,
+    signatories: PAYROLL_SIGNATORIES,
     title: "Staff Payment Statement",
     subtitle: `${empLbl} · ${rangeLbl}`,
     meta: detailMeta,
@@ -7166,6 +7176,7 @@ function PaymentStatement({ ctx }) {
     rows: lines.map((l) => [l.label, l.status, l.paidAt, l.gross, l.allow, l.nssf5, l.paye, l.advance, l.other, l.net]),
     totalsRow: ["TOTALS", "", "", t.gross, t.allow, t.nssf5, t.paye, t.advance, t.other, t.net],
     filename: `GLA-Payment-Statement-${emp?.id || "staff"}-${lo}_${hi}.xlsx`,
+    signatories: PAYROLL_SIGNATORIES,
   });
 
   const canExport = lines.length > 0 && emp;
@@ -8117,8 +8128,8 @@ function SettingsGeneral({ ctx, readOnly }) {
   const [c, setC] = useState({ ...s.company });
   const [p, setP] = useState({ ...s.payroll });
   const [sigs, setSigs] = useState(() => {
-    const d = (Array.isArray(s.signatories) && s.signatories.length) ? s.signatories : SIGNATORIES;
-    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", title: (d[i] && d[i].title) || "", contact: (d[i] && d[i].contact) || "", signature: (d[i] && isSigImage(d[i].signature) && d[i].signature) || "" }));
+    const d = (Array.isArray(s.signatories) && s.signatories.length) ? s.signatories : ALL_SIGNATORIES;
+    return [0, 1, 2].map((i) => ({ name: (d[i] && d[i].name) || "", title: (d[i] && d[i].title) || "", contact: (d[i] && d[i].contact) || "", scope: (d[i] && d[i].scope === "payroll") ? "payroll" : "all", signature: (d[i] && isSigImage(d[i].signature) && d[i].signature) || "" }));
   });
   const [saved, setSaved] = useState(false);
   const setCo = (k) => (e) => { setC({ ...c, [k]: e.target.value }); setSaved(false); };
@@ -8138,7 +8149,7 @@ function SettingsGeneral({ ctx, readOnly }) {
   const clearSigImage = (i) => () => { setSigs(sigs.map((x, j) => (j === i ? { ...x, signature: "" } : x))); setSaved(false); };
   const save = async () => {
     const payroll = { ...p, nssfEmp: Number(p.nssfEmp) || 0, nssfEr: Number(p.nssfEr) || 0, wht: Number(p.wht) || 0, vat: Number(p.vat) || 0, payDay: Number(p.payDay) || 1 };
-    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), title: (x.title || "").trim(), contact: (x.contact || "").trim(), signature: isSigImage(x.signature) ? x.signature : "" }));
+    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), title: (x.title || "").trim(), contact: (x.contact || "").trim(), scope: x.scope === "payroll" ? "payroll" : "all", signature: isSigImage(x.signature) ? x.signature : "" }));
     await settingsApi.update({ company: c, payroll, signatories });
     setReportCompany(c);
     setReportSignatories(signatories);
@@ -8180,6 +8191,7 @@ function SettingsGeneral({ ctx, readOnly }) {
               <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder={i === 0 ? "e.g. Abu-Baker Nsubuga" : "Optional"} /></Field>
               <Field label="Title"><Input value={sg.title} onChange={setSig(i, "title")} disabled={readOnly} placeholder="e.g. Director, Engineering" /></Field>
               <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256772413777" /></Field>
+              <Field label="Signs on"><Select value={sg.scope} onChange={setSig(i, "scope")} disabled={readOnly} options={[{ value: "all", label: "All documents" }, { value: "payroll", label: "Payroll payments only" }]} /></Field>
               <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 12px", border: "1px dashed var(--border)", borderRadius: 10 }}>
                 <div style={{ width: 150, height: 70, display: "grid", placeItems: "center", background: "#fff", borderRadius: 8, border: "1px solid var(--border)" }}>
                   {sg.signature ? <img src={sg.signature} alt="Signature" style={{ maxWidth: 140, maxHeight: 62 }} /> : <span style={{ fontSize: 11.5, color: "var(--muted)" }}>No signature</span>}
@@ -8194,7 +8206,7 @@ function SettingsGeneral({ ctx, readOnly }) {
             </div>
           ))}
           {sigErr && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 600 }}>{sigErr}</div>}
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>On a purchase order the preparer is whoever issues it; the <b>first signatory</b> here is used as the approving authority (or the second, if the issuer is the first). Every signatory listed appears on payment vouchers, statements and schedules; leave a row blank to omit it.</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}><b>All documents</b> signatories appear on statements, purchase orders and reports (the first is the PO approving authority). <b>Payroll payments</b> — staff salary ledgers, bank reports, supplier payment schedules and payment advice — carry <b>every</b> signatory listed, in this order. Leave a row blank to omit it.</div>
         </div>
       </Card>
       {!readOnly && <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>

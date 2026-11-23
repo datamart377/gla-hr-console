@@ -144,7 +144,7 @@ function drawSignatories(doc, startY, signatories) {
     const cx = MARGIN + colW * i + colW / 2;
     // Signature image (when on file), else the digital signature / pending note.
     const img = sigImageOf(s);
-    if (img && drawSigImage(doc, img, cx, lineY + 8, colW * 0.62, 58)) {
+    if (img && drawSigImage(doc, img, cx, lineY + 2, colW * 0.62, 56)) {
       /* signed with the image */
     } else if (s.signedText) {
       doc.setFont("helvetica", "bolditalic");
@@ -344,7 +344,7 @@ function drawVoucherSignRow(doc, startY, cols) {
   cols.forEach((s, i) => {
     const cx = MARGIN + colW * i + colW / 2;
     const img = sigImageOf(s);
-    if (img && drawSigImage(doc, img, cx, lineY + 6, colW * 0.7, 46)) {
+    if (img && drawSigImage(doc, img, cx, lineY + 1, colW * 0.7, 44)) {
       /* signed with the image */
     } else if (s.signedText) {
       doc.setFont("helvetica", "bolditalic"); doc.setFontSize(13); doc.setTextColor(20, 90, 60);

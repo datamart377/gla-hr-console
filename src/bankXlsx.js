@@ -291,7 +291,7 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
     ws.addRow([]); ws.addRow([]);
     band("Approved Signatory", { font: fnt({ size: 11, bold: true, color: { argb: INK } }) });
     ws.addRow([]);
-    const s = SIGNATORIES;
+    const s = Array.isArray(signatories) && signatories.length ? signatories : SIGNATORIES;
     let padNo = 0;
     if (s.some((x) => sigImg(x))) { const pad = ws.addRow([]); pad.height = 60; padNo = pad.number; }
     const nameRow = ws.addRow([s[0]?.name || "", "", "", s[1]?.name || ""]);

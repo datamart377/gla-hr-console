@@ -7,7 +7,7 @@
    are loaded on demand — they read COMPANY/SIGNATORIES from here.
    ------------------------------------------------------------------------- */
 
-import { DEFAULT_SIGNATURE } from "./signatureDefault.js";
+import { DEFAULT_SIGNATURE, KIMULI_SIGNATURE } from "./signatureDefault.js";
 
 // Company letterhead text. Mutated in place by setReportCompany so every module
 // that imported the object reference sees the current values.
@@ -33,11 +33,19 @@ export function setReportCompany(c) {
   ].filter(Boolean);
 }
 
-// Approved signatories for salary, payment and purchase documents. Editable in
-// Settings; the defaults below apply until a company configures its own.
-export let SIGNATORIES = [
-  { name: "Abu-Baker Nsubuga", title: "Director, Engineering", contact: "256772413777", signature: DEFAULT_SIGNATURE },
+// Approved signatories. Each one signs on either "all" documents or only
+// "payroll" payments (staff salary + supplier payment schedules, bank reports
+// and payment advice). Editable in Settings; the defaults below apply until a
+// company configures its own.
+//   SIGNATORIES          — general documents (statements, POs, reports)
+//   PAYROLL_SIGNATORIES  — payroll payments (everyone, in Settings order)
+const DEFAULT_SIGNATORIES = [
+  { name: "Abu-Baker Nsubuga", title: "Director, Engineering", contact: "256772413777", scope: "all", signature: DEFAULT_SIGNATURE },
+  { name: "Dr. Kimuli Ismail", title: "Managing Director", contact: "256701506063", scope: "payroll", signature: KIMULI_SIGNATURE },
 ];
+export let ALL_SIGNATORIES = DEFAULT_SIGNATORIES;
+export let SIGNATORIES = DEFAULT_SIGNATORIES.filter((s) => s.scope !== "payroll");
+export let PAYROLL_SIGNATORIES = DEFAULT_SIGNATORIES.slice();
 
 // Replace the signatories from the editable Settings profile. Keeps only the
 // entries that have a name; falls back to the defaults when none are set.
@@ -45,8 +53,12 @@ export function setReportSignatories(list) {
   if (!Array.isArray(list)) return;
   const clean = list
     .filter((s) => s && String(s.name || "").trim())
-    .map((s) => ({ name: String(s.name || "").trim(), title: String(s.title || "").trim(), contact: String(s.contact || "").trim(), signature: isSigImage(s.signature) ? s.signature : "" }));
-  if (clean.length) SIGNATORIES = clean;
+    .map((s) => ({ name: String(s.name || "").trim(), title: String(s.title || "").trim(), contact: String(s.contact || "").trim(), scope: s.scope === "payroll" ? "payroll" : "all", signature: isSigImage(s.signature) ? s.signature : "" }));
+  if (!clean.length) return;
+  ALL_SIGNATORIES = clean;
+  const general = clean.filter((s) => s.scope !== "payroll");
+  SIGNATORIES = general.length ? general : clean;
+  PAYROLL_SIGNATORIES = clean.slice();
 }
 
 // A stored signature is an inline image data URL (PNG/JPEG).
@@ -54,7 +66,8 @@ export const isSigImage = (v) => typeof v === "string" && /^data:image\/(png|jpe
 
 // Same person regardless of case, punctuation, spacing or word order
 // ("Abu-Baker Nsubuga" == "ABUBAKER NSUBUGA" == "Nsubuga Abu Baker").
-const nameTokens = (n) => String(n || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+const HONORIFICS = new Set(["dr", "mr", "mrs", "ms", "miss", "eng", "engr", "prof", "hon", "sir"]);
+const nameTokens = (n) => String(n || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((t) => t && !HONORIFICS.has(t));
 const nameKeys = (n) => { const t = nameTokens(n); return t.length ? [t.join(""), t.slice().sort().join("")] : []; };
 export function samePerson(a, b) {
   const ka = nameKeys(a), kb = nameKeys(b);
@@ -65,6 +78,6 @@ export function samePerson(a, b) {
 // signatory with one on file — so it appears anywhere that person signs.
 export function signatureFor(name) {
   if (!nameTokens(name).length) return null;
-  const s = SIGNATORIES.find((x) => x && isSigImage(x.signature) && samePerson(x.name, name));
+  const s = ALL_SIGNATORIES.find((x) => x && isSigImage(x.signature) && samePerson(x.name, name));
   return s ? s.signature : null;
 }
