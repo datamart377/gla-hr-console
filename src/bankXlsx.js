@@ -6,7 +6,20 @@
    Shared by the live Monthly Salary Ledger and processed payroll runs.
    ------------------------------------------------------------------------- */
 import ExcelJS from "exceljs";
-import { COMPANY, SIGNATORIES } from "./reportConstants.js";
+import { COMPANY, SIGNATORIES, signatureFor, isSigImage } from "./reportConstants.js";
+
+// Signature/stamp image for a signer (explicit, else by name; never pending).
+const sigImg = (x) => (!x || x.pending) ? null : (isSigImage(x.signature) ? x.signature : (signatureFor(x.name) || signatureFor(x.signedText)));
+// Place a signature image over a signature column (0-based col), starting at the
+// top of the padding row `topRowNo` (1-based) so it sits just over the rule.
+function placeSig(wb, ws, img, col0, topRowNo, height = 62) {
+  try {
+    const m = /^data:image\/(png|jpe?g);base64,(.+)$/i.exec(img || "");
+    if (!m) return;
+    const id = wb.addImage({ base64: m[2], extension: /png/i.test(m[1]) ? "png" : "jpeg" });
+    ws.addImage(id, { tl: { col: col0 + 0.3, row: topRowNo - 1 + 0.1 }, ext: { width: Math.round(height * 1.8), height }, editAs: "oneCell" });
+  } catch (e) { /* never block the export */ }
+}
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 
 const argb = (hex) => "FF" + hex;
@@ -163,6 +176,7 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
   const s = (Array.isArray(signatories) && signatories.length ? signatories : SIGNATORIES).map((x) => ({
     // Workflow signatures use title as the role label ("Prepared by"); approved
     // signatories print their name, with the title on the line below.
+    img: sigImg(x),
     label: (x.signedText || x.pending) ? (x.title || x.name || "") : (x.name || x.title || ""),
     sub: (x.signedText || x.pending) ? "" : (x.name && x.title ? x.title : ""),
     above: x.signedText || x.pending || "",
@@ -173,11 +187,14 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
     const row = ws.addRow([vals[0] || "", "", "", vals[1] || "", "", ""]);
     merge(row.number, 1, 2); merge(row.number, 4, 5); return row;
   };
-  const aboveRow = twoCol([s[0]?.above, s[1]?.above]);
+  let padNo = 0;
+  if (s.some((x) => x.img)) { const pad = ws.addRow([]); pad.height = 44; padNo = pad.number; }
+  const aboveRow = twoCol([s[0]?.img ? "" : s[0]?.above, s[1]?.img ? "" : s[1]?.above]);
   [1, 4].forEach((c) => { const sg = s[c === 1 ? 0 : 1] || {}; aboveRow.getCell(c).font = fnt({ italic: true, bold: sg.signed, size: sg.signed ? 13 : 10, color: { argb: sg.signed ? GREEN : MUTED } }); aboveRow.getCell(c).alignment = { horizontal: "center", vertical: "bottom" }; });
   aboveRow.height = 22;
   const lineRow = twoCol(["", ""]);
-  [1, 2, 4, 5].forEach((c) => { lineRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+  (s[1] ? [1, 2, 4, 5] : [1, 2]).forEach((c) => { lineRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+  s.forEach((x, i) => { if (x.img && i < 2 && padNo) placeSig(wb, ws, x.img, i === 0 ? 0 : 3, padNo, 66); });
   const labelRow = twoCol([s[0]?.label, s[1]?.label]);
   [1, 4].forEach((c) => { labelRow.getCell(c).font = fnt({ bold: true, size: 10.5, color: { argb: INK } }); labelRow.getCell(c).alignment = { horizontal: "center", vertical: "top" }; });
   if (s.some((x) => x.sub)) {
@@ -275,10 +292,13 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
     band("Approved Signatory", { font: fnt({ size: 11, bold: true, color: { argb: INK } }) });
     ws.addRow([]);
     const s = SIGNATORIES;
+    let padNo = 0;
+    if (s.some((x) => sigImg(x))) { const pad = ws.addRow([]); pad.height = 60; padNo = pad.number; }
     const nameRow = ws.addRow([s[0]?.name || "", "", "", s[1]?.name || ""]);
     nameRow.getCell(1).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
     nameRow.getCell(4).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
-    [1, 2, 4, 5].forEach((c) => { if (c <= N) nameRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+    (s[1] ? [1, 2, 4, 5] : [1, 2]).forEach((c) => { if (c <= N) nameRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+    s.slice(0, 2).forEach((x, i) => { const im = sigImg(x); if (im && padNo) placeSig(wb, ws, im, i === 0 ? 0 : 3, padNo, 64); });
     if (s.some((x) => x && x.title)) {
       const titleRow = ws.addRow([s[0]?.title || "", "", "", s[1]?.title || ""]);
       titleRow.getCell(1).font = fnt({ bold: true, size: 9, color: { argb: "FF5A3A2A" } });

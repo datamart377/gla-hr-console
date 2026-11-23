@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
-import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories } from "./reportConstants.js";
+import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -4471,7 +4471,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
       table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px}
       .box{margin-top:14px;border:1px solid #ddd;border-radius:10px;padding:14px 16px}
       .amt td{font-family:'Courier New',monospace}.net{border-top:2px solid #111;font-weight:800;font-size:15px}
-      .sig{margin-top:48px;display:flex;gap:40px}.sig div{flex:1;border-top:1px solid #999;padding-top:6px;font-size:12px;text-align:center}
+      .sig{margin-top:84px;display:flex;gap:40px}.sig>div{flex:1;border-top:1px solid #999;padding-top:6px;font-size:12px;text-align:center;position:relative}.sig img{position:absolute;left:50%;bottom:calc(100% - 8px);transform:translateX(-50%);height:68px}
       @media print{body{margin:14mm}}</style></head><body onload="window.print()">
       <div class="hd"><h1>${company.name || "Global Link Associates Ltd"}</h1><div class="a">${company.address || ""}</div><div class="e">Supplier Payment Advice · Remittance</div></div>
       <table>
@@ -4485,7 +4485,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
         ${row2("18% VAT (incl.)", row.applyVat ? fmtN(row.vat) : "n/a", "#555")}
         <tr class="net"><td style="padding-top:9px">NET PAID</td><td style="padding-top:9px;text-align:right;font-family:'Courier New',monospace;color:#1b7a43">UGX ${fmtN(row.net)}</td></tr>
       </table></div>
-      <div class="sig">${(SIGNATORIES || []).map((s) => `<div><b>${s.name}</b>${s.title ? `<br><span style="font-size:11px;font-weight:700;color:#5a3a2a">${s.title}</span>` : ""}<br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
+      <div class="sig">${(SIGNATORIES || []).map((s) => `<div>${isSigImage(s.signature) ? `<img src="${s.signature}" alt="">` : ""}<b>${s.name}</b>${s.title ? `<br><span style="font-size:11px;font-weight:700;color:#5a3a2a">${s.title}</span>` : ""}<br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
       </body></html>`);
     w.document.close(); w.focus();
   };
@@ -5121,8 +5121,9 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
 
         {/* Signatories */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28, marginTop: 34 }}>
-          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · ") }].map((s, i) => (
-            <div key={i}>
+          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date), sig: signatureFor(po.issuedBy) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · "), sig: isSigImage(approver.signature) ? approver.signature : signatureFor(approver.name) }].map((s, i) => (
+            <div key={i} style={{ position: "relative", paddingTop: 58 }}>
+              {s.sig && <img src={s.sig} alt={`Signature of ${s.name}`} style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: "calc(100% - 66px)", height: 64, pointerEvents: "none" }} />}
               <div style={{ borderTop: "1px solid #999", paddingTop: 6, fontSize: 12, color: ink, fontWeight: 600, minHeight: 20 }}>{s.name || ""}</div>
               <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>{s.title}{s.meta ? ` · ${s.meta}` : ""}</div>
             </div>
@@ -8112,15 +8113,27 @@ function SettingsGeneral({ ctx, readOnly }) {
   const [p, setP] = useState({ ...s.payroll });
   const [sigs, setSigs] = useState(() => {
     const d = (Array.isArray(s.signatories) && s.signatories.length) ? s.signatories : SIGNATORIES;
-    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", title: (d[i] && d[i].title) || "", contact: (d[i] && d[i].contact) || "" }));
+    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", title: (d[i] && d[i].title) || "", contact: (d[i] && d[i].contact) || "", signature: (d[i] && isSigImage(d[i].signature) && d[i].signature) || "" }));
   });
   const [saved, setSaved] = useState(false);
   const setCo = (k) => (e) => { setC({ ...c, [k]: e.target.value }); setSaved(false); };
   const setPa = (k) => (e) => { setP({ ...p, [k]: e.target.value }); setSaved(false); };
   const setSig = (i, k) => (e) => { setSigs(sigs.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x))); setSaved(false); };
+  const [sigErr, setSigErr] = useState("");
+  const pickSigImage = (i) => (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!/^image\/(png|jpe?g)$/i.test(file.type)) { setSigErr("Use a PNG or JPG image of the signature / stamp."); return; }
+    if (file.size > 400 * 1024) { setSigErr("Signature image is too large — keep it under 400 KB."); return; }
+    const rd = new FileReader();
+    rd.onload = () => { setSigErr(""); setSigs((cur) => cur.map((x, j) => (j === i ? { ...x, signature: String(rd.result || "") } : x))); setSaved(false); };
+    rd.readAsDataURL(file);
+  };
+  const clearSigImage = (i) => () => { setSigs(sigs.map((x, j) => (j === i ? { ...x, signature: "" } : x))); setSaved(false); };
   const save = async () => {
     const payroll = { ...p, nssfEmp: Number(p.nssfEmp) || 0, nssfEr: Number(p.nssfEr) || 0, wht: Number(p.wht) || 0, vat: Number(p.vat) || 0, payDay: Number(p.payDay) || 1 };
-    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), title: (x.title || "").trim(), contact: (x.contact || "").trim() }));
+    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), title: (x.title || "").trim(), contact: (x.contact || "").trim(), signature: isSigImage(x.signature) ? x.signature : "" }));
     await settingsApi.update({ company: c, payroll, signatories });
     setReportCompany(c);
     setReportSignatories(signatories);
@@ -8162,8 +8175,20 @@ function SettingsGeneral({ ctx, readOnly }) {
               <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder={i === 0 ? "e.g. Abu-Baker Nsubuga" : "Optional"} /></Field>
               <Field label="Title"><Input value={sg.title} onChange={setSig(i, "title")} disabled={readOnly} placeholder="e.g. Director, Engineering" /></Field>
               <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256772413777" /></Field>
+              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 12px", border: "1px dashed var(--border)", borderRadius: 10 }}>
+                <div style={{ width: 150, height: 70, display: "grid", placeItems: "center", background: "#fff", borderRadius: 8, border: "1px solid var(--border)" }}>
+                  {sg.signature ? <img src={sg.signature} alt="Signature" style={{ maxWidth: 140, maxHeight: 62 }} /> : <span style={{ fontSize: 11.5, color: "var(--muted)" }}>No signature</span>}
+                </div>
+                <div style={{ flex: 1, minWidth: 180, fontSize: 12, color: "var(--muted)" }}>Signature &amp; stamp — printed above this signatory's line wherever they sign (statements, POs, vouchers, reports, Excel exports). PNG with a transparent background works best.</div>
+                {!readOnly && <div style={{ display: "flex", gap: 8 }}>
+                  <input id={`sig-file-${i}`} type="file" accept="image/png,image/jpeg" onChange={pickSigImage(i)} style={{ display: "none" }} />
+                  <Btn size="sm" onClick={() => { const el = document.getElementById(`sig-file-${i}`); if (el) el.click(); }}>{sg.signature ? "Replace" : "Upload"}</Btn>
+                  {sg.signature && <Btn size="sm" onClick={clearSigImage(i)}>Remove</Btn>}
+                </div>}
+              </div>
             </div>
           ))}
+          {sigErr && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 600 }}>{sigErr}</div>}
           <div style={{ fontSize: 12, color: "var(--muted)" }}>On a purchase order the preparer is whoever issues it; the <b>first signatory</b> here is used as the approving authority (or the second, if the issuer is the first). Every signatory listed appears on payment vouchers, statements and schedules; leave a row blank to omit it.</div>
         </div>
       </Card>

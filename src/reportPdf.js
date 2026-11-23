@@ -17,7 +17,7 @@ import qrcode from "qrcode-generator";
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 // Letterhead text + signatories live in a tiny dependency-free module so the
 // app can import them without loading jsPDF. Re-exported here for compatibility.
-import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories } from "./reportConstants.js";
+import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories, signatureFor, isSigImage } from "./reportConstants.js";
 export { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories };
 
 /* -------------------------------- palette -------------------------------- */
@@ -112,6 +112,25 @@ function drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference }) {
 }
 
 /* ------------------------------ signatories ------------------------------ */
+// The signer's signature/stamp image, when they have one on file. Explicit
+// s.signature wins; otherwise it is looked up by name (never for a pending slot).
+function sigImageOf(s) {
+  if (!s || s.pending) return null;
+  if (isSigImage(s.signature)) return s.signature;
+  return signatureFor(s.name) || signatureFor(s.signedText);
+}
+// Draw a signature image centred on cx, its bottom resting just over the rule.
+function drawSigImage(doc, img, cx, baseY, maxW, maxH) {
+  try {
+    const p = doc.getImageProperties(img);
+    const ratio = p.width / p.height || 1.8;
+    let h = maxH, w = h * ratio;
+    if (w > maxW) { w = maxW; h = w / ratio; }
+    doc.addImage(img, /jpe?g/i.test(p.fileType || "") ? "JPEG" : "PNG", cx - w / 2, baseY - h, w, h);
+    return true;
+  } catch (e) { return false; } // a bad image never blocks the document
+}
+
 function drawSignatories(doc, startY, signatories) {
   const pageW = doc.internal.pageSize.getWidth();
   doc.setFont("helvetica", "bold");
@@ -123,8 +142,11 @@ function drawSignatories(doc, startY, signatories) {
   const colW = (pageW - MARGIN * 2) / n;
   signatories.forEach((s, i) => {
     const cx = MARGIN + colW * i + colW / 2;
-    // Digital signature (or pending note) drawn just above the ruled line.
-    if (s.signedText) {
+    // Signature image (when on file), else the digital signature / pending note.
+    const img = sigImageOf(s);
+    if (img && drawSigImage(doc, img, cx, lineY + 8, colW * 0.62, 58)) {
+      /* signed with the image */
+    } else if (s.signedText) {
       doc.setFont("helvetica", "bolditalic");
       doc.setFontSize(15);
       doc.setTextColor(20, 90, 60);
@@ -321,7 +343,10 @@ function drawVoucherSignRow(doc, startY, cols) {
   const colW = (pageW - MARGIN * 2) / cols.length;
   cols.forEach((s, i) => {
     const cx = MARGIN + colW * i + colW / 2;
-    if (s.signedText) {
+    const img = sigImageOf(s);
+    if (img && drawSigImage(doc, img, cx, lineY + 6, colW * 0.7, 46)) {
+      /* signed with the image */
+    } else if (s.signedText) {
       doc.setFont("helvetica", "bolditalic"); doc.setFontSize(13); doc.setTextColor(20, 90, 60);
       doc.text(String(s.signedText), cx, lineY - 5, { align: "center" });
     }
@@ -599,7 +624,7 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
   drawVoucherSignRow(doc, sy, [
     { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
-    { title: "Approved signatory", name: approver.name || "", meta: [approver.title, approver.contact].filter(Boolean).join(" · ") },
+    { title: "Approved signatory", name: approver.name || "", signature: approver.signature || null, meta: [approver.title, approver.contact].filter(Boolean).join(" · ") },
   ]);
 
   drawFooters(doc);
