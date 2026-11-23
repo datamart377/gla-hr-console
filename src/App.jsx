@@ -49,6 +49,7 @@ const ugxShort = (n) => {
 // Trailing signatory rows for schedule CSV/Excel exports (matches the PDF block).
 const signatoryCsvLines = () => ["", '"Approved Signatory"', "",
   SIGNATORIES.map((s) => `"${s.name}"`).join(","),
+  ...(SIGNATORIES.some((s) => s.title) ? [SIGNATORIES.map((s) => `"${s.title || ""}"`).join(",")] : []),
   SIGNATORIES.map((s) => `"${s.contact}"`).join(",")];
 const fullName = (e) => (e ? `${e.firstName} ${e.lastName}` : "—");
 const initials = (e) => ((e?.firstName || " ")[0] + (e?.lastName || " ")[0]).toUpperCase();
@@ -4484,7 +4485,7 @@ function SupplierPaymentAdvice({ ctx, run, row }) {
         ${row2("18% VAT (incl.)", row.applyVat ? fmtN(row.vat) : "n/a", "#555")}
         <tr class="net"><td style="padding-top:9px">NET PAID</td><td style="padding-top:9px;text-align:right;font-family:'Courier New',monospace;color:#1b7a43">UGX ${fmtN(row.net)}</td></tr>
       </table></div>
-      <div class="sig">${(SIGNATORIES || []).map((s) => `<div><b>${s.name}</b><br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
+      <div class="sig">${(SIGNATORIES || []).map((s) => `<div><b>${s.name}</b>${s.title ? `<br><span style="font-size:11px;font-weight:700;color:#5a3a2a">${s.title}</span>` : ""}<br>${s.contact || ""}</div>`).join("") || "<div>Approved Signatory</div>"}</div>
       </body></html>`);
     w.document.close(); w.focus();
   };
@@ -5120,7 +5121,7 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
 
         {/* Signatories */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28, marginTop: 34 }}>
-          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date) }, { title: "Approved signatory", name: approver.name, meta: approver.contact }].map((s, i) => (
+          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · ") }].map((s, i) => (
             <div key={i}>
               <div style={{ borderTop: "1px solid #999", paddingTop: 6, fontSize: 12, color: ink, fontWeight: 600, minHeight: 20 }}>{s.name || ""}</div>
               <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>{s.title}{s.meta ? ` · ${s.meta}` : ""}</div>
@@ -8111,7 +8112,7 @@ function SettingsGeneral({ ctx, readOnly }) {
   const [p, setP] = useState({ ...s.payroll });
   const [sigs, setSigs] = useState(() => {
     const d = (Array.isArray(s.signatories) && s.signatories.length) ? s.signatories : SIGNATORIES;
-    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", contact: (d[i] && d[i].contact) || "" }));
+    return [0, 1].map((i) => ({ name: (d[i] && d[i].name) || "", title: (d[i] && d[i].title) || "", contact: (d[i] && d[i].contact) || "" }));
   });
   const [saved, setSaved] = useState(false);
   const setCo = (k) => (e) => { setC({ ...c, [k]: e.target.value }); setSaved(false); };
@@ -8119,7 +8120,7 @@ function SettingsGeneral({ ctx, readOnly }) {
   const setSig = (i, k) => (e) => { setSigs(sigs.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x))); setSaved(false); };
   const save = async () => {
     const payroll = { ...p, nssfEmp: Number(p.nssfEmp) || 0, nssfEr: Number(p.nssfEr) || 0, wht: Number(p.wht) || 0, vat: Number(p.vat) || 0, payDay: Number(p.payDay) || 1 };
-    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), contact: (x.contact || "").trim() }));
+    const signatories = sigs.filter((x) => (x.name || "").trim()).map((x) => ({ name: x.name.trim(), title: (x.title || "").trim(), contact: (x.contact || "").trim() }));
     await settingsApi.update({ company: c, payroll, signatories });
     setReportCompany(c);
     setReportSignatories(signatories);
@@ -8157,12 +8158,13 @@ function SettingsGeneral({ ctx, readOnly }) {
         <CardHead title="Approved signatories" sub="Printed as the approving authority on purchase orders, payment vouchers and reports" />
         <div style={{ padding: 20, display: "grid", gap: 12 }}>
           {sigs.map((sg, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder="e.g. Ismail Kimuli" /></Field>
-              <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256701506063" /></Field>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+              <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder={i === 0 ? "e.g. Abu-Baker Nsubuga" : "Optional"} /></Field>
+              <Field label="Title"><Input value={sg.title} onChange={setSig(i, "title")} disabled={readOnly} placeholder="e.g. Managing Director" /></Field>
+              <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256772413777" /></Field>
             </div>
           ))}
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>On a purchase order the preparer is whoever issues it; the <b>first signatory</b> here is used as the approving authority (or the second, if the issuer is the first). Both appear on payment vouchers and schedules.</div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>On a purchase order the preparer is whoever issues it; the <b>first signatory</b> here is used as the approving authority (or the second, if the issuer is the first). Every signatory listed appears on payment vouchers, statements and schedules; leave a row blank to omit it.</div>
         </div>
       </Card>
       {!readOnly && <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>

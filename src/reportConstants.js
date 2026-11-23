@@ -34,8 +34,7 @@ export function setReportCompany(c) {
 // Approved signatories for salary, payment and purchase documents. Editable in
 // Settings; the defaults below apply until a company configures its own.
 export let SIGNATORIES = [
-  { name: "Ismail Kimuli", contact: "256701506063" },
-  { name: "Abu-Baker Nsubuga", contact: "256772413777" },
+  { name: "Abu-Baker Nsubuga", title: "Managing Director", contact: "256772413777" },
 ];
 
 // Replace the signatories from the editable Settings profile. Keeps only the
@@ -44,6 +43,6 @@ export function setReportSignatories(list) {
   if (!Array.isArray(list)) return;
   const clean = list
     .filter((s) => s && String(s.name || "").trim())
-    .map((s) => ({ name: String(s.name || "").trim(), contact: String(s.contact || "").trim() }));
+    .map((s) => ({ name: String(s.name || "").trim(), title: String(s.title || "").trim(), contact: String(s.contact || "").trim() }));
   if (clean.length) SIGNATORIES = clean;
 }

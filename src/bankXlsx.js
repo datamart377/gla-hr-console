@@ -161,7 +161,10 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
   ws.addRow([]);
 
   const s = (Array.isArray(signatories) && signatories.length ? signatories : SIGNATORIES).map((x) => ({
-    label: x.title || x.name || "",
+    // Workflow signatures use title as the role label ("Prepared by"); approved
+    // signatories print their name, with the title on the line below.
+    label: (x.signedText || x.pending) ? (x.title || x.name || "") : (x.name || x.title || ""),
+    sub: (x.signedText || x.pending) ? "" : (x.name && x.title ? x.title : ""),
     above: x.signedText || x.pending || "",
     signed: !!x.signedText,
     meta: x.signedMeta || "",
@@ -177,6 +180,10 @@ export async function downloadBankReportXlsx({ title = "Staff Bank Payment Sched
   [1, 2, 4, 5].forEach((c) => { lineRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
   const labelRow = twoCol([s[0]?.label, s[1]?.label]);
   [1, 4].forEach((c) => { labelRow.getCell(c).font = fnt({ bold: true, size: 10.5, color: { argb: INK } }); labelRow.getCell(c).alignment = { horizontal: "center", vertical: "top" }; });
+  if (s.some((x) => x.sub)) {
+    const subRow = twoCol([s[0]?.sub, s[1]?.sub]);
+    [1, 4].forEach((c) => { subRow.getCell(c).font = fnt({ bold: true, size: 9, color: { argb: "FF5A3A2A" } }); subRow.getCell(c).alignment = { horizontal: "center" }; });
+  }
   if (s.some((x) => x.meta)) {
     const metaRow = twoCol([s[0]?.meta, s[1]?.meta]);
     [1, 4].forEach((c) => { metaRow.getCell(c).font = fnt({ size: 8, color: { argb: MUTED } }); metaRow.getCell(c).alignment = { horizontal: "center" }; });
@@ -272,6 +279,11 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
     nameRow.getCell(1).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
     nameRow.getCell(4).font = fnt({ bold: true, size: 10.5, color: { argb: INK } });
     [1, 2, 4, 5].forEach((c) => { if (c <= N) nameRow.getCell(c).border = { top: { style: "thin", color: { argb: INK } } }; });
+    if (s.some((x) => x && x.title)) {
+      const titleRow = ws.addRow([s[0]?.title || "", "", "", s[1]?.title || ""]);
+      titleRow.getCell(1).font = fnt({ bold: true, size: 9, color: { argb: "FF5A3A2A" } });
+      titleRow.getCell(4).font = fnt({ bold: true, size: 9, color: { argb: "FF5A3A2A" } });
+    }
     const contactRow = ws.addRow([s[0]?.contact || "", "", "", s[1]?.contact || ""]);
     contactRow.getCell(1).font = fnt({ size: 9, color: { argb: MUTED } });
     contactRow.getCell(4).font = fnt({ size: 9, color: { argb: MUTED } });

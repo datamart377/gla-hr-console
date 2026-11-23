@@ -599,7 +599,7 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
   drawVoucherSignRow(doc, sy, [
     { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
-    { title: "Approved signatory", name: approver.name || "", meta: approver.contact || "" },
+    { title: "Approved signatory", name: approver.name || "", meta: [approver.title, approver.contact].filter(Boolean).join(" · ") },
   ]);
 
   drawFooters(doc);
