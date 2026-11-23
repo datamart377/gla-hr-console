@@ -8160,7 +8160,7 @@ function SettingsGeneral({ ctx, readOnly }) {
           {sigs.map((sg, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
               <Field label={`Signatory ${i + 1} — name`}><Input value={sg.name} onChange={setSig(i, "name")} disabled={readOnly} placeholder={i === 0 ? "e.g. Abu-Baker Nsubuga" : "Optional"} /></Field>
-              <Field label="Title"><Input value={sg.title} onChange={setSig(i, "title")} disabled={readOnly} placeholder="e.g. Managing Director" /></Field>
+              <Field label="Title"><Input value={sg.title} onChange={setSig(i, "title")} disabled={readOnly} placeholder="e.g. Director, Engineering" /></Field>
               <Field label="Contact / phone"><Input value={sg.contact} onChange={setSig(i, "contact")} disabled={readOnly} placeholder="e.g. 256772413777" /></Field>
             </div>
           ))}
