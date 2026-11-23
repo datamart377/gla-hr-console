@@ -12,7 +12,7 @@ import {
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
-import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage } from "./reportConstants.js";
+import { COMPANY, SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
@@ -4986,7 +4986,12 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
   const money = (v) => `${cur} ${fmtN(Math.round(Number(v) || 0))}`;
   const isIntl = (po.currency && po.currency !== "UGX") || po.iban || po.swiftCode || po.bankAddress;
   const preparer = (po.issuedBy || "").trim();
-  const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
+  const approver = SIGNATORIES.find((s) => s && s.name && !samePerson(s.name, preparer)) || SIGNATORIES[0] || {};
+  const selfApproved = !!(preparer && approver.name && samePerson(preparer, approver.name));
+  const approverSig = isSigImage(approver.signature) ? approver.signature : signatureFor(approver.name);
+  const signBlocks = selfApproved
+    ? [{ title: "Prepared & approved by", name: approver.name, meta: [approver.title, approver.contact, reqDate(po.date)].filter(Boolean).join(" · "), sig: approverSig }]
+    : [{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date), sig: signatureFor(po.issuedBy) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · "), sig: approverSig }];
 
   const ink = "var(--text)", body = "var(--text-2)", line = "1px solid var(--border)";
   const kv = (k, v) => (
@@ -5120,8 +5125,8 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
         )}
 
         {/* Signatories */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28, marginTop: 34 }}>
-          {[{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date), sig: signatureFor(po.issuedBy) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · "), sig: isSigImage(approver.signature) ? approver.signature : signatureFor(approver.name) }].map((s, i) => (
+        <div style={{ display: "grid", gridTemplateColumns: signBlocks.length === 1 ? "minmax(0, 340px)" : "1fr 1fr", justifyContent: "center", textAlign: signBlocks.length === 1 ? "center" : "left", gap: 28, marginTop: 34 }}>
+          {signBlocks.map((s, i) => (
             <div key={i} style={{ position: "relative", paddingTop: 58 }}>
               {s.sig && <img src={s.sig} alt={`Signature of ${s.name}`} style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: "calc(100% - 66px)", height: 64, pointerEvents: "none" }} />}
               <div style={{ borderTop: "1px solid #999", paddingTop: 6, fontSize: 12, color: ink, fontWeight: 600, minHeight: 20 }}>{s.name || ""}</div>

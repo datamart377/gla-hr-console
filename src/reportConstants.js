@@ -52,15 +52,19 @@ export function setReportSignatories(list) {
 // A stored signature is an inline image data URL (PNG/JPEG).
 export const isSigImage = (v) => typeof v === "string" && /^data:image\/(png|jpe?g);base64,/i.test(v);
 
-// Same person regardless of word order, case or punctuation
-// ("Abu-Baker Nsubuga" == "Nsubuga Abu Baker").
-const nameKey = (n) => String(n || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean).sort().join(" ");
+// Same person regardless of case, punctuation, spacing or word order
+// ("Abu-Baker Nsubuga" == "ABUBAKER NSUBUGA" == "Nsubuga Abu Baker").
+const nameTokens = (n) => String(n || "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+const nameKeys = (n) => { const t = nameTokens(n); return t.length ? [t.join(""), t.slice().sort().join("")] : []; };
+export function samePerson(a, b) {
+  const ka = nameKeys(a), kb = nameKeys(b);
+  return ka.some((k) => kb.includes(k));
+}
 
 // The signature image for whoever signs as `name`, if they are an approved
 // signatory with one on file — so it appears anywhere that person signs.
 export function signatureFor(name) {
-  const k = nameKey(name);
-  if (!k) return null;
-  const s = SIGNATORIES.find((x) => x && isSigImage(x.signature) && nameKey(x.name) === k);
+  if (!nameTokens(name).length) return null;
+  const s = SIGNATORIES.find((x) => x && isSigImage(x.signature) && samePerson(x.name, name));
   return s ? s.signature : null;
 }

@@ -17,7 +17,7 @@ import qrcode from "qrcode-generator";
 import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 // Letterhead text + signatories live in a tiny dependency-free module so the
 // app can import them without loading jsPDF. Re-exported here for compatibility.
-import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories, signatureFor, isSigImage } from "./reportConstants.js";
+import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 export { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories };
 
 /* -------------------------------- palette -------------------------------- */
@@ -351,7 +351,8 @@ function drawVoucherSignRow(doc, startY, cols) {
       doc.text(String(s.signedText), cx, lineY - 5, { align: "center" });
     }
     doc.setDrawColor(...RULE); doc.setLineWidth(0.6);
-    doc.line(cx - colW * 0.34, lineY, cx + colW * 0.34, lineY);
+    const half = Math.min(colW * 0.34, 130);
+    doc.line(cx - half, lineY, cx + half, lineY);
     doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...BRAND);
     doc.text(String(s.title || ""), cx, lineY + 13, { align: "center" });
     let yy = lineY + 13;
@@ -620,9 +621,13 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   if (sy + SIG_H > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
   // Approving authority is a configured signatory, always a different person
   // from whoever prepared the PO (fall back to the senior signatory).
+  // When the preparer IS the approving signatory, show one combined block.
   const preparer = (po.issuedBy || "").trim();
-  const approver = SIGNATORIES.find((s) => s && s.name && s.name.trim() !== preparer) || SIGNATORIES[0] || {};
-  drawVoucherSignRow(doc, sy, [
+  const approver = SIGNATORIES.find((s) => s && s.name && !samePerson(s.name, preparer)) || SIGNATORIES[0] || {};
+  const selfApproved = !!(preparer && approver.name && samePerson(preparer, approver.name));
+  drawVoucherSignRow(doc, sy, selfApproved ? [
+    { title: "Prepared & approved by", name: approver.name, signature: approver.signature || null, meta: [approver.title, approver.contact, voDate(po.date)].filter(Boolean).join(" · ") },
+  ] : [
     { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
     { title: "Approved signatory", name: approver.name || "", signature: approver.signature || null, meta: [approver.title, approver.contact].filter(Boolean).join(" · ") },
   ]);
