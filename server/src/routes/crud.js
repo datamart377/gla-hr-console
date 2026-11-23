@@ -3,7 +3,10 @@
 // record as { ...doc, id } — the exact shape the web client already consumes.
 //
 // Authorization model:
-//   • admin / hr / finance ("management") — full CRUD on every collection.
+//   • admin — full CRUD on every collection.
+//   • hr / finance ("management") — CRUD where their live role (Settings ->
+//     Roles & Permissions) allows it; elsewhere the staff self-service rules
+//     below apply, and roles without Payroll see no one else's pay figures.
 //   • staff — self-service only: they may read their OWN records, create their
 //     own leave / attendance / advance requests, and submit profile-change
 //     drafts. They can never read or write other people's data, and payroll
@@ -32,6 +35,63 @@ const genId = (table) => {
 // ---- Role / ownership policy ----------------------------------------------
 const MGMT = new Set(["admin", "hr", "finance"]);
 const isMgmt = (req) => MGMT.has(req.user && req.user.role);
+
+// ---- Live role permissions (Settings -> Roles & Permissions) ---------------
+// Management users (hr / finance) only get management powers on a collection
+// when their LIVE role allows it; otherwise they fall back to the same
+// self-service rules as staff (own records only). Admin is always full access.
+// Absent keys count as allowed, matching the web client's can()/canDo().
+let rolesCache = { at: 0, roles: null };
+async function liveRole(roleId) {
+  const now = Date.now();
+  if (!rolesCache.roles || now - rolesCache.at > 10000) {
+    try {
+      const { rows } = await query(`SELECT value FROM settings WHERE key = 'app'`);
+      const r = rows[0] && rows[0].value && rows[0].value.roles;
+      rolesCache = { at: now, roles: Array.isArray(r) ? r : [] };
+    } catch { rolesCache = { at: now, roles: rolesCache.roles || [] }; }
+  }
+  return rolesCache.roles.find((x) => x && x.id === roleId) || null;
+}
+const permits = (role, gate) => !role || !gate || ((role[gate[0]] || {})[gate[1]] !== false);
+// Without these, a management user reads the collection like staff would.
+const READ_GATE = { payroll_runs: ["modules", "payroll"] };
+// Without these, a management user writes the collection like staff would.
+const WRITE_GATE = {
+  employees: ["actions", "editEmployees"],
+  leave: ["actions", "approveLeave"],
+  payroll_runs: ["actions", "processPayroll"],
+  ledger_columns: ["actions", "processPayroll"],
+  advances: ["actions", "manageAdvances"],
+  attendance: ["actions", "manageAttendance"],
+  suppliers: ["actions", "manageSuppliers"],
+  supplier_schedule: ["actions", "manageSuppliers"],
+  stock_items: ["actions", "manageStock"],
+  stock_movements: ["actions", "manageStock"],
+  stock_closings: ["actions", "manageStock"],
+};
+// Does this user act with management powers on `table` for `mode`?
+async function mgmtFor(req, table, mode) {
+  if (!isMgmt(req)) return false;
+  if (req.user.role === "admin") return true;
+  const role = await liveRole(req.user.role);
+  if (mode === "delete") return permits(role, ["actions", "deleteRecords"]) && permits(role, WRITE_GATE[table]);
+  if (mode === "read") return permits(role, READ_GATE[table]);
+  return permits(role, WRITE_GATE[table]) && permits(role, READ_GATE[table]);
+}
+// Salary is payroll data: roles without the Payroll module don't receive other
+// people's pay figures inside employee records.
+async function seesPay(req) {
+  if (!isMgmt(req) || req.user.role === "admin") return isMgmt(req);
+  return permits(await liveRole(req.user.role), ["modules", "payroll"]);
+}
+function stripPay(rec, empId) {
+  if (!rec || rec.id === empId) return rec;
+  const { grossSalary, custom, ...rest } = rec;
+  if (rest.terms && typeof rest.terms === "object") { const { entrySalary, ...t } = rest.terms; rest.terms = t; }
+  return rest;
+}
+
 // Final (second-level) requisition approvers: HR & Admin only.
 const isHrAdmin = (req) => ["admin", "hr"].includes(req.user && req.user.role);
 // First-level requisition approver: any employee flagged isSupervisor (looked up live).
@@ -204,7 +264,12 @@ export function crudRouter(table) {
     try {
       const { rows } = await query(`SELECT id, doc FROM ${table} ORDER BY created_at ASC`);
       let recs = rows.map(rowToRecord);
-      if (!isMgmt(req)) {
+      const asMgmt = await mgmtFor(req, table, "read");
+      if (isMgmt(req) && !asMgmt && table === "payroll_runs") {
+        // Management without Payroll: keep each run (month/status drive advance
+        // recovery) but only their own row inside it.
+        recs = recs.map((r) => shapeForStaff(table, r, req.user.empId));
+      } else if (!isMgmt(req)) {
         const empId = req.user.empId;
         if (table === "payroll_runs") {
           recs = recs.map((r) => shapeForStaff(table, r, empId)).filter((r) => (r.rows || []).length);
@@ -223,6 +288,7 @@ export function crudRouter(table) {
       // Keep requisition list payloads light: send attachment metadata only, not
       // the inline file bytes. The detail view fetches the full record to view them.
       if (table === "requisitions") recs = recs.map(stripReqDocs);
+      if (table === "employees" && isMgmt(req) && !(await seesPay(req))) recs = recs.map((r) => stripPay(r, req.user.empId));
       res.json(recs);
     } catch (e) { next(e); }
   });
@@ -233,6 +299,8 @@ export function crudRouter(table) {
       const { rows } = await query(`SELECT id, doc FROM ${table} WHERE id = $1`, [req.params.id]);
       if (!rows.length) return res.status(404).json({ error: "Record not found." });
       let rec = rowToRecord(rows[0]);
+      if (isMgmt(req) && table === "payroll_runs" && !(await mgmtFor(req, table, "read"))) rec = shapeForStaff(table, rec, req.user.empId);
+      if (table === "employees" && isMgmt(req) && !(await seesPay(req))) rec = stripPay(rec, req.user.empId);
       if (!isMgmt(req)) {
         const empId = req.user.empId;
         if (table === "payroll_runs") rec = shapeForStaff(table, rec, empId);
@@ -254,7 +322,7 @@ export function crudRouter(table) {
     try {
       if (table === "requisitions") return createRequisition(req, res, next);
       const body = req.body && typeof req.body === "object" ? { ...req.body } : {};
-      if (!isMgmt(req)) {
+      if (!(await mgmtFor(req, table, "write"))) {
         if (!STAFF_CREATE.has(table)) return res.status(403).json({ error: "You do not have permission to create this record." });
         body[OWN_FIELD[table]] = req.user.empId; // force the new row to belong to the caller
       }
@@ -277,7 +345,15 @@ export function crudRouter(table) {
       if (table === "requisitions") return updateRequisition(req, res, next);
       let patch = req.body && typeof req.body === "object" ? { ...req.body } : {};
       delete patch.id;
-      if (!isMgmt(req)) {
+      // No self-approval: only Admin may decide on their own advance or leave.
+      if ((table === "advances" || table === "leave") && isMgmt(req) && req.user.role !== "admin"
+          && ["status", "approvedAmount", "approvedMonths", "decidedBy", "decidedAt", "startMonth"].some((k) => k in patch)) {
+        const cur = await query(`SELECT doc FROM ${table} WHERE id = $1`, [req.params.id]);
+        if (cur.rows.length && cur.rows[0].doc && cur.rows[0].doc.empId === req.user.empId) {
+          return res.status(403).json({ error: "You can't decide on your own request — HR & Admin will review it." });
+        }
+      }
+      if (!(await mgmtFor(req, table, "write"))) {
         const empId = req.user.empId;
         const fields = STAFF_UPDATE_FIELDS[table];
         if (fields === undefined) return res.status(403).json({ error: "You do not have permission to modify this record." });
@@ -309,7 +385,7 @@ export function crudRouter(table) {
   // DELETE (management only)
   router.delete("/:id", async (req, res, next) => {
     try {
-      if (!isMgmt(req)) return res.status(403).json({ error: "You do not have permission to delete this record." });
+      if (!(await mgmtFor(req, table, "delete"))) return res.status(403).json({ error: "You do not have permission to delete this record." });
       const { rowCount } = await query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
       if (!rowCount) return res.status(404).json({ error: "Record not found." });
       res.json({ id: req.params.id, deleted: true });

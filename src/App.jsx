@@ -319,6 +319,15 @@ function currentRole(ctx) {
 }
 const can = (ctx, moduleId) => { const r = currentRole(ctx); return !r || r.modules?.[moduleId] !== false; };
 const canDo = (ctx, action) => { const r = currentRole(ctx); return !r || r.actions?.[action] !== false; };
+// Salary figures are payroll data — only roles with the Payroll module see them.
+const seesPay = (ctx) => can(ctx, "payroll");
+// Who is acting — stamped on decisions (leave, advances) instead of a fixed name.
+const actorName = (ctx) => {
+  const e = ctx && ctx.currentEmp;
+  const n = e ? `${e.firstName || ""} ${e.lastName || ""}`.trim() : ((ctx && ctx.auth && ctx.auth.name) || "");
+  const role = { admin: "HR & Admin", hr: "HR", finance: "Finance" }[ctx && ctx.auth && ctx.auth.role];
+  return n ? (role ? `${n} (${role})` : n) : (role || "HR");
+};
 const VIEW_META = {
   dashboard: ["Workforce Overview", "Front-end demo — HR snapshot for Global Link Associates Ltd"],
   employees: ["Employee Register", "Staff records, contracts and statutory details"],
@@ -2072,6 +2081,8 @@ function AdvanceForm({ ctx, lockEmpId }) {
 
 function Advances({ ctx }) {
   const { store, empById, reload, setModal } = ctx;
+  // Nobody (except Admin) approves, modifies or revises their own advance.
+  const isOwnAdvance = (a) => !!(ctx.currentEmp && a.empId === ctx.currentEmp.id);
   const [statusFilter, setStatusFilter] = useState("");
   const advances = store.advances || [];
   const runs = store.payrollRuns || [];
@@ -2089,14 +2100,14 @@ function Advances({ ctx }) {
   if (statusFilter) list = list.filter((a) => a.status === statusFilter);
 
   const approveAsIs = async (a) => {
-    await advancesApi.update(a.id, { status: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: "Robert Okello (HR)", decidedAt: TODAY, note: a.note || "Approved as requested." });
-    notifyApi.send("advance_decision", a.empId, { decision: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: "Robert Okello (HR)" });
+    await advancesApi.update(a.id, { status: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: actorName(ctx), decidedAt: TODAY, note: a.note || "Approved as requested." });
+    notifyApi.send("advance_decision", a.empId, { decision: "Approved", approvedAmount: Number(a.amount), approvedMonths: Number(a.months), startMonth: CURRENT_MONTH, decidedBy: actorName(ctx) });
     await reload();
   };
   const reject = async (a) => {
     if (window.confirm(`Reject ${fullName(empById(a.empId))}'s advance request?`)) {
-      await advancesApi.update(a.id, { status: "Rejected", decidedBy: "Robert Okello (HR)", decidedAt: TODAY });
-      notifyApi.send("advance_decision", a.empId, { decision: "Rejected", decidedBy: "Robert Okello (HR)" });
+      await advancesApi.update(a.id, { status: "Rejected", decidedBy: actorName(ctx), decidedAt: TODAY });
+      notifyApi.send("advance_decision", a.empId, { decision: "Rejected", decidedBy: actorName(ctx) });
       await reload();
     }
   };
@@ -2131,7 +2142,9 @@ function Advances({ ctx }) {
               </div>;
             } },
             { label: "", render: (a) => (
-              a.status === "Pending" ? (
+              (isOwnAdvance(a) && ctx.auth && ctx.auth.role !== "admin") ? (
+                <div style={{ textAlign: "right", fontSize: 12, color: "var(--muted)" }} title="You can't decide on your own advance">{a.status === "Pending" ? "Your request — awaiting HR" : "Your advance"}</div>
+              ) : a.status === "Pending" ? (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <Btn size="sm" variant="success" onClick={() => approveAsIs(a)} title="Approve as requested"><Check size={13} />Approve</Btn>
                   <Btn size="sm" onClick={() => setModal(() => (cc) => <AdvanceReview ctx={cc} id={a.id} />)} title="Modify then approve"><Pencil size={13} />Modify</Btn>
@@ -2176,10 +2189,10 @@ function AdvanceReview({ ctx, id }) {
       approvedAmount: status === "Approved" ? amt : null,
       approvedMonths: status === "Approved" ? mo : null,
       startMonth: status === "Approved" ? CURRENT_MONTH : "",
-      decidedBy: "Robert Okello (HR)", decidedAt: TODAY,
+      decidedBy: actorName(ctx), decidedAt: TODAY,
       note: note.trim() || (status === "Approved" ? (changed ? "Approved with modifications." : "Approved as requested.") : "Request declined."),
     });
-    notifyApi.send("advance_decision", a.empId, { decision: status, approvedAmount: status === "Approved" ? amt : null, approvedMonths: status === "Approved" ? mo : null, startMonth: status === "Approved" ? CURRENT_MONTH : "", decidedBy: "Robert Okello (HR)", note: note.trim() || undefined });
+    notifyApi.send("advance_decision", a.empId, { decision: status, approvedAmount: status === "Approved" ? amt : null, approvedMonths: status === "Approved" ? mo : null, startMonth: status === "Approved" ? CURRENT_MONTH : "", decidedBy: actorName(ctx), note: note.trim() || undefined });
     await ctx.reload(); ctx.setModal(null);
   };
   return (
@@ -2199,6 +2212,9 @@ function AdvanceReview({ ctx, id }) {
           <span style={{ color: "rgba(255,255,255,.8)", fontSize: 13 }}>Monthly repayment</span>
           <span className="mono" style={{ fontWeight: 700, color: "#34d399" }}>{ugx(monthly)} × {mo} mo</span>
         </div>
+        {net <= 0 && !seesPay(ctx) && (
+          <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)" }}>Salary figures aren't shown for your role, so the repayment isn't checked against net pay here — HR confirms affordability when payroll is processed.</div>
+        )}
         {net > 0 && (
           <div style={{ gridColumn: "1 / -1" }}>
             <Banner Icon={afford === "ok" ? Check : AlertTriangle} tone={afford === "ok" ? "success" : afford === "high" ? "warning" : "danger"}>
@@ -2271,6 +2287,13 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
   // "Log attendance" records attendance for any staff member — gate it like the
   // Manual entry control so only roles that may log for others see it.
   if (view === "attendance" && !canDo(ctx, "manageAttendance")) add = null;
+  // Adding staff needs "Edit employees"; without "Approve leave" a new leave
+  // request is the user's own (they can't file leave for someone else).
+  if (view === "employees" && !canDo(ctx, "editEmployees")) add = null;
+  if (view === "leave" && !canDo(ctx, "approveLeave")) {
+    const me = ctx.currentEmp && ctx.currentEmp.id;
+    add = me ? ["Apply for leave", (c) => c.setModal(() => (cc) => <LeaveForm ctx={cc} lockEmpId={me} />)] : null;
+  }
   const roleLabel = { admin: "HR / Admin", hr: "HR Officer", finance: "Finance", staff: "Staff" }[ctx.auth && ctx.auth.role] || "Staff";
   const sessExp = (authApi.expiresAt && authApi.expiresAt());
   return (
@@ -2413,7 +2436,7 @@ function Dashboard({ ctx }) {
         <StatCard Icon={Users} label="Total staff" value={emps.length} meta={`${active} active · ${emps.length - active} inactive`} tone="brand" />
         <StatCard Icon={Check} label="Present today" value={presentToday} meta={`of ${emps.length} on the register`} tone="success" />
         <StatCard Icon={CalendarDays} label="On leave today" value={onLeaveToday} meta={`${pending} request${pending === 1 ? "" : "s"} pending`} tone="accent" />
-        <StatCard Icon={Wallet} label="Monthly gross" value={ugxShort(monthlyGross)} meta="Payroll run · Sept 2026" tone="warning" />
+        {seesPay(ctx) && <StatCard Icon={Wallet} label="Monthly gross" value={ugxShort(monthlyGross)} meta="Payroll run · Sept 2026" tone="warning" />}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.35fr 1fr", gap: 16, marginTop: 16 }} className="dash-cols">
@@ -2498,7 +2521,7 @@ function Employees({ ctx }) {
   const del = (e) => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={employeesApi} id={e.id} label={fullName(e)} />);
 
   const exportCsv = () => {
-    const cols = ["id", "firstName", "lastName", "department", "jobTitle", "contractType", "status", "grossSalary", "phone", "email"];
+    const cols = ["id", "firstName", "lastName", "department", "jobTitle", "contractType", "status", ...(seesPay(ctx) ? ["grossSalary"] : []), "phone", "email"];
     const lines = [cols.join(",")].concat(list.map((e) => cols.map((c) => `"${String(e[c] ?? "").replace(/"/g, '""')}"`).join(",")));
     downloadFile("gla-employees.csv", lines.join("\n"));
   };
@@ -2508,8 +2531,8 @@ function Employees({ ctx }) {
     title: "Employee Register",
     subtitle: "Staff records, contracts and statutory details",
     meta: [`Total staff: ${list.length}`],
-    head: ["#", "Name", "Staff ID", "Unit", "Job Title", "Contract", "Status", "Gross (UGX)"],
-    body: list.map((e, i) => [i + 1, fullName(e), e.id, e.department, e.jobTitle, e.contractType, e.status, fmtN(e.grossSalary)]),
+    head: ["#", "Name", "Staff ID", "Unit", "Job Title", "Contract", "Status", ...(seesPay(ctx) ? ["Gross (UGX)"] : [])],
+    body: list.map((e, i) => [i + 1, fullName(e), e.id, e.department, e.jobTitle, e.contractType, e.status, ...(seesPay(ctx) ? [fmtN(e.grossSalary)] : [])]),
     orientation: "landscape",
   });
 
@@ -2520,7 +2543,7 @@ function Employees({ ctx }) {
         <div style={{ flex: 1 }} />
         <Btn onClick={exportPdf}><FileText size={16} />PDF</Btn>
         <Btn onClick={exportCsv}><Download size={16} />Export CSV</Btn>
-        <Btn variant="primary" onClick={() => setModal(() => (cc) => <StaffImport ctx={cc} />)}><UserPlus size={16} />Import staff</Btn>
+        {canDo(ctx, "editEmployees") && <Btn variant="primary" onClick={() => setModal(() => (cc) => <StaffImport ctx={cc} />)}><UserPlus size={16} />Import staff</Btn>}
       </Toolbar>
       <Card>
         <DataTable
@@ -2530,11 +2553,11 @@ function Employees({ ctx }) {
             { label: "Department", render: (e) => e.department },
             { label: "Contract", render: (e) => <Tag>{e.contractType}</Tag> },
             { label: "Status", render: (e) => <Pill tone={statusTone[e.status]}>{e.status}</Pill> },
-            { label: "Gross (UGX)", num: true, render: (e) => fmtN(e.grossSalary) },
+            ...(seesPay(ctx) ? [{ label: "Gross (UGX)", num: true, render: (e) => fmtN(e.grossSalary) }] : []),
             { label: "", render: (e) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => openStaffFile(e.id)}>Open file</Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={13} /></Btn>
+                {canDo(ctx, "editEmployees") && <Btn size="sm" onClick={() => setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={13} /></Btn>}
                 {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => del(e)}><Trash2 size={13} /></Btn>}
               </div>
             )},
@@ -2571,8 +2594,8 @@ function EmployeeProfile({ ctx, id }) {
   return (
     <Modal wide title={fullName(e)} sub={`${e.id} · ${e.department}`} onClose={() => ctx.setModal(null)}
       footer={<>
-        <Btn onClick={() => ctx.setModal(() => (cc) => <PayslipModal ctx={cc} id={e.id} />)}><Printer size={15} />Payslip</Btn>
-        <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={15} />Edit</Btn>
+        {seesPay(ctx) && <Btn onClick={() => ctx.setModal(() => (cc) => <PayslipModal ctx={cc} id={e.id} />)}><Printer size={15} />Payslip</Btn>}
+        {canDo(ctx, "editEmployees") && <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={15} />Edit</Btn>}
       </>}>
       <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 18 }}>
         <Avatar emp={e} size={56} />
@@ -2939,7 +2962,8 @@ const TypeTag = ({ type }) => (
 
 function Leave({ ctx }) {
   const [tab, setTab] = useState("requests");
-  const tabs = [["requests", "Requests", CalendarDays], ["rota", "Leave rota", ClipboardCheck], ["back", "Report back to work", CalendarCheck]];
+  // Logging other people's return to work is a leave-management action.
+  const tabs = [["requests", "Requests", CalendarDays], ["rota", "Leave rota", ClipboardCheck], ...(canDo(ctx, "approveLeave") ? [["back", "Report back to work", CalendarCheck]] : [])];
   return (
     <>
       <div style={{ display: "inline-flex", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: 3, gap: 3, marginBottom: 16, flexWrap: "wrap" }}>
@@ -2952,7 +2976,7 @@ function Leave({ ctx }) {
       </div>
       {tab === "requests" && <LeaveRequests ctx={ctx} />}
       {tab === "rota" && <LeaveRota ctx={ctx} />}
-      {tab === "back" && <ReportBack ctx={ctx} />}
+      {tab === "back" && canDo(ctx, "approveLeave") && <ReportBack ctx={ctx} />}
     </>
   );
 }
@@ -2973,8 +2997,8 @@ function LeaveRequests({ ctx }) {
   if (typeFilter) list = list.filter((l) => l.type === typeFilter);
 
   const decide = async (l, decision) => {
-    await leaveApi.update(l.id, { status: decision, decidedBy: "Sarah Nakato (HR)", decidedAt: TODAY });
-    notifyApi.send("leave_decision", l.empId, { decision, type: l.type, startDate: l.startDate, endDate: l.endDate, days: l.days, decidedBy: "Sarah Nakato (HR)" });
+    await leaveApi.update(l.id, { status: decision, decidedBy: actorName(ctx), decidedAt: TODAY });
+    notifyApi.send("leave_decision", l.empId, { decision, type: l.type, startDate: l.startDate, endDate: l.endDate, days: l.days, decidedBy: actorName(ctx) });
     if (decision === "Approved" && l.type === "Annual") {
       const e = empById(l.empId);
       if (e) await employeesApi.update(e.id, { annualUsed: (e.annualUsed || 0) + (l.days || 0) });
@@ -3004,14 +3028,14 @@ function LeaveRequests({ ctx }) {
             { label: "Status", render: (l) => { const b = leaveBackStatus(l); return <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}><Pill tone={leaveTone[l.status]}>{l.status}</Pill>{b && b.key !== "scheduled" && <Pill tone={b.tone}>{b.label}</Pill>}</div>; } },
             { label: "Reason", render: (l) => <span style={{ color: "var(--text-2)" }}>{l.reason || "—"}</span> },
             { label: "", render: (l) => (
-              l.status === "Pending" ? (
+              l.status === "Pending" ? (canDo(ctx, "approveLeave") ? (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   <Btn size="sm" variant="success" onClick={() => decide(l, "Approved")}><Check size={13} />Approve</Btn>
                   <Btn size="sm" variant="danger" onClick={() => decide(l, "Rejected")}><X size={13} />Reject</Btn>
                 </div>
-              ) : (
+              ) : <div style={{ textAlign: "right", fontSize: 12, color: "var(--muted)" }}>Awaiting HR</div>) : (
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                  {l.status === "Approved" && !l.returnedAt && !LEAVE_TYPES[l.type]?.duty && <Btn size="sm" variant="success" onClick={() => reportBack(l)} title="Mark reported back to work"><CalendarCheck size={13} />Report back</Btn>}
+                  {canDo(ctx, "approveLeave") && l.status === "Approved" && !l.returnedAt && !LEAVE_TYPES[l.type]?.duty && <Btn size="sm" variant="success" onClick={() => reportBack(l)} title="Mark reported back to work"><CalendarCheck size={13} />Report back</Btn>}
                   {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={leaveApi} id={l.id} label={l.id} />)}><Trash2 size={13} /></Btn>}
                 </div>
               )
@@ -5655,7 +5679,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           body: (e.academicQualifications || []).map((r) => [na(r.title), na(r.institution), fmtDateLong(r.awardDate), r.highest || "No", na(r.status)]), empty: "No academic records on record" },
         { heading: "Terms of Employment", type: "kv", rows: [
           ["Terms of Employment", na(tm.terms)], ["Start Date", fmtDateLong(tm.startDate)], ["End Date", fmtDateLong(tm.endDate)],
-          ["Entry Salary", na(tm.entrySalary)], ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
+          ...(seesPay(ctx) ? [["Entry Salary", na(tm.entrySalary)]] : []), ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
           ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
         ] },
         { heading: "Professional Specialization", type: "table", head: ["Specialization", "Institution", "Year"],
@@ -5682,7 +5706,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
         <Btn onClick={back}><ChevronLeft size={16} />Back</Btn>
         <Btn onClick={exportPdf}><FileText size={15} />Download PDF</Btn>
         <Btn onClick={() => window.print()}><Printer size={15} />Print</Btn>
-        <Btn variant="primary" onClick={openEdit}><Pencil size={15} />Update Staff File</Btn>
+        {canDo(ctx, "editEmployees") && <Btn variant="primary" onClick={openEdit}><Pencil size={15} />Update Staff File</Btn>}
       </div>
 
       {/* print-only letterhead */}
@@ -5805,7 +5829,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ["Terms of Employment", na(e.terms.terms)],
           ["Start Date", fmtDateLong(e.terms.startDate)],
           ["End Date", fmtDateLong(e.terms.endDate)],
-          ["Entry Salary", na(e.terms.entrySalary)],
+          ...(seesPay(ctx) ? [["Entry Salary", na(e.terms.entrySalary)]] : []),
           ["Appointment Authority", na(e.terms.appointmentAuthority)],
           ["Source of Payment", na(e.terms.sourceOfPayment)],
           ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
@@ -6477,8 +6501,11 @@ function AreaTrend({ points, color = "var(--brand)", height = 168 }) {
 }
 
 function Reports({ ctx }) {
-  const [tab, setTab] = useState("attendance");
-  const groups = [
+  // Each report tab needs the module it reports on (payroll reports need Payroll).
+  const TAB_MODULE = { attendance: "attendance", "geo-map": "attendance", workforce: "employees", leave: "leave",
+    payroll: "payroll", statement: "payroll", paye: "payroll", nssf: "payroll",
+    "supplier-statement": "suppliers", "stock-reports": "stock" };
+  const allGroups = [
     { key: "staff", label: "Staff reports", accent: "#2f6f9f", GroupIcon: Users, tabs: [
       ["attendance", "Attendance", Clock], ["geo-map", "Clock-in Map", MapPin], ["workforce", "Workforce", Users], ["leave", "Leave", CalendarDays],
       ["payroll", "Payroll", Wallet], ["statement", "Statement", Banknote], ["paye", "PAYE", FileText], ["nssf", "NSSF", Building2],
@@ -6490,6 +6517,13 @@ function Reports({ ctx }) {
       ["stock-reports", "Inventory", Boxes],
     ] },
   ];
+  const groups = allGroups
+    .map((g) => ({ ...g, tabs: g.tabs.filter(([id]) => can(ctx, TAB_MODULE[id] || id)) }))
+    .filter((g) => g.tabs.length);
+  const firstTab = (groups[0] && groups[0].tabs[0] && groups[0].tabs[0][0]) || "";
+  const [tabState, setTab] = useState(firstTab);
+  const tab = groups.some((g) => g.tabs.some(([id]) => id === tabState)) ? tabState : firstTab;
+  if (!groups.length) return <Card pad><div style={{ padding: 24, color: "var(--muted)" }}>No reports are available for your role.</div></Card>;
   return (
     <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 18, alignItems: "stretch" }}>
