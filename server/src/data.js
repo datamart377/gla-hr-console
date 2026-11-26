@@ -344,6 +344,7 @@ export const PERMISSION_MODULES = [
   ["dashboard", "Dashboard"], ["employees", "Employees"], ["leave", "Leave"],
   ["attendance", "Attendance"], ["payroll", "Payroll"], ["advances", "Salary Advances"],
   ["suppliers", "Suppliers"], ["stock", "Stock"], ["appraisals", "Appraisals"], ["reports", "Reports"], ["settings", "Settings"],
+  ["selfservice", "My self-service (own portal)"],
 ];
 export const PERMISSION_ACTIONS = [
   ["editEmployees", "Add / edit employee records"],
@@ -381,9 +382,9 @@ data.settings = {
     ] },
   ],
   roles: [
-    { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: allMods(true), actions: allActs(true) },
-    { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
-    { id: "finance", name: "Finance Officer", description: "Advances, suppliers, stock and reports.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
+    { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: { ...allMods(true), selfservice: false }, actions: allActs(true) },
+    { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false, selfservice: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
+    { id: "finance", name: "Finance Officer", description: "Full staff self-service plus advances, suppliers, purchase orders, requisition payments and stock.", modules: { dashboard: true, employees: true, leave: false, attendance: false, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: true, settings: false, selfservice: true }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [

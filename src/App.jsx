@@ -292,6 +292,15 @@ function Rating({ value }) {
 /* ================================== APP =================================== */
 const NAV = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "Overview" },
+  // The staff self-service portal, for console roles that also have it
+  // (module "selfservice" — e.g. Finance). Requisitions already covers "My requests".
+  { id: "myportal", label: "My Portal", Icon: LayoutDashboard, section: "My self-service" },
+  { id: "myprofile", label: "Update My Details", Icon: Contact, section: "My self-service" },
+  { id: "clockin", label: "Clock In", Icon: LocateFixed, section: "My self-service" },
+  { id: "myleave", label: "My Leave", Icon: CalendarDays, section: "My self-service" },
+  { id: "mypayslip", label: "My Payslip", Icon: Wallet, section: "My self-service" },
+  { id: "myadvance", label: "My Salary Advance", Icon: Banknote, section: "My self-service" },
+  { id: "myfile", label: "My File", Icon: IdCard, section: "My self-service" },
   { id: "employees", label: "Employees", Icon: Users, section: "People" },
   { id: "approvals", label: "Profile Approvals", Icon: ClipboardCheck, section: "People" },
   { id: "attendance", label: "Attendance", Icon: Clock, section: "People" },
@@ -318,6 +327,10 @@ function currentRole(ctx) {
   return find(rid) || find("staff") || roleById("admin");
 }
 const can = (ctx, moduleId) => { const r = currentRole(ctx); return !r || r.modules?.[moduleId] !== false; };
+// Self-service views inside the console: need the "selfservice" module and a
+// linked employee record (the portal is always about the signed-in person).
+const MY_VIEWS = new Set(["myportal", "myprofile", "clockin", "myleave", "mypayslip", "myadvance", "myfile"]);
+const canView = (ctx, id) => MY_VIEWS.has(id) ? (can(ctx, "selfservice") && !!(ctx && ctx.currentEmp)) : can(ctx, id);
 const canDo = (ctx, action) => { const r = currentRole(ctx); return !r || r.actions?.[action] !== false; };
 // Salary figures are payroll data — only roles with the Payroll module see them.
 const seesPay = (ctx) => can(ctx, "payroll");
@@ -496,16 +509,17 @@ function AdminConsole({ ctx }) {
   const navView = view === "staffFile" ? "employees" : view;
   const _isAdmin = ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role)) === "admin";
   const _isAdminOrHr = ["admin", "hr"].includes((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role));
-  const nav = NAV.filter((n) => can(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (n.id !== "sessions" || _isAdminOrHr));
-  const [title, sub] = VIEW_META[view];
+  const nav = NAV.filter((n) => canView(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (n.id !== "sessions" || _isAdminOrHr));
+  const [title, sub] = VIEW_META[view] || STAFF_META[view] || ["", ""];
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView }[view];
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
+    myportal: ConsoleMyPortal, myprofile: MyProfileEdit, clockin: MyClockIn, myleave: MyLeave, mypayslip: MyPayslip, myadvance: MyAdvance, myfile: ConsoleMyFile }[view];
   // Defence in depth: even if a view is reached directly (not via the sidebar),
   // enforce the same role gate the navigation uses.
   const viewAllowed = view === "staffFile" || view === "dashboard" ||
-    (can(ctx, view) && (view !== "approvals" || _isAdmin) && (view !== "sessions" || _isAdminOrHr));
+    (canView(ctx, view) && (view !== "approvals" || _isAdmin) && (view !== "sessions" || _isAdminOrHr));
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -526,6 +540,13 @@ function AdminConsole({ ctx }) {
       </div>
     </div>
   );
+}
+
+// Staff-portal pages hosted inside the console (self-service for console roles).
+function ConsoleMyPortal({ ctx }) { return <MyPortal ctx={ctx} setSv={ctx.setView} />; }
+function ConsoleMyFile({ ctx }) {
+  const me = ctx.currentEmp;
+  return me ? <StaffFile ctx={ctx} id={me.id} onBack={() => ctx.setView("myportal")} backLabel="My Portal" /> : null;
 }
 
 /* ============================ Idle-logout warning ============================ */
@@ -5679,7 +5700,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           body: (e.academicQualifications || []).map((r) => [na(r.title), na(r.institution), fmtDateLong(r.awardDate), r.highest || "No", na(r.status)]), empty: "No academic records on record" },
         { heading: "Terms of Employment", type: "kv", rows: [
           ["Terms of Employment", na(tm.terms)], ["Start Date", fmtDateLong(tm.startDate)], ["End Date", fmtDateLong(tm.endDate)],
-          ...(seesPay(ctx) ? [["Entry Salary", na(tm.entrySalary)]] : []), ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
+          ...((seesPay(ctx) || (ctx.currentEmp && ctx.currentEmp.id === e.id)) ? [["Entry Salary", na(tm.entrySalary)]] : []), ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
           ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
         ] },
         { heading: "Professional Specialization", type: "table", head: ["Specialization", "Institution", "Year"],
@@ -5829,7 +5850,7 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ["Terms of Employment", na(e.terms.terms)],
           ["Start Date", fmtDateLong(e.terms.startDate)],
           ["End Date", fmtDateLong(e.terms.endDate)],
-          ...(seesPay(ctx) ? [["Entry Salary", na(e.terms.entrySalary)]] : []),
+          ...((seesPay(ctx) || (ctx.currentEmp && ctx.currentEmp.id === e.id)) ? [["Entry Salary", na(e.terms.entrySalary)]] : []),
           ["Appointment Authority", na(e.terms.appointmentAuthority)],
           ["Source of Payment", na(e.terms.sourceOfPayment)],
           ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
