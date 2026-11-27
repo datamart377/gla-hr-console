@@ -6523,12 +6523,12 @@ function AreaTrend({ points, color = "var(--brand)", height = 168 }) {
 
 function Reports({ ctx }) {
   // Each report tab needs the module it reports on (payroll reports need Payroll).
-  const TAB_MODULE = { attendance: "attendance", "geo-map": "attendance", workforce: "employees", leave: "leave",
+  const TAB_MODULE = { attendance: "attendance", daily: "attendance", "geo-map": "attendance", workforce: "employees", leave: "leave",
     payroll: "payroll", statement: "payroll", paye: "payroll", nssf: "payroll",
     "supplier-statement": "suppliers", "stock-reports": "stock" };
   const allGroups = [
     { key: "staff", label: "Staff reports", accent: "#2f6f9f", GroupIcon: Users, tabs: [
-      ["attendance", "Attendance", Clock], ["geo-map", "Clock-in Map", MapPin], ["workforce", "Workforce", Users], ["leave", "Leave", CalendarDays],
+      ["attendance", "Attendance", Clock], ["daily", "Daily Register", ClipboardCheck], ["geo-map", "Clock-in Map", MapPin], ["workforce", "Workforce", Users], ["leave", "Leave", CalendarDays],
       ["payroll", "Payroll", Wallet], ["statement", "Statement", Banknote], ["paye", "PAYE", FileText], ["nssf", "NSSF", Building2],
     ] },
     { key: "suppliers", label: "Supplier reports", accent: "#b8860b", GroupIcon: Landmark, tabs: [
@@ -6573,6 +6573,7 @@ function Reports({ ctx }) {
         ))}
       </div>
       {tab === "attendance" && <AttendanceReport ctx={ctx} />}
+      {tab === "daily" && <DailyRegister ctx={ctx} />}
       {tab === "geo-map" && <GeoMapReport ctx={ctx} />}
       {tab === "workforce" && <WorkforceReport ctx={ctx} />}
       {tab === "leave" && <LeaveReport ctx={ctx} />}
@@ -7535,6 +7536,178 @@ function StaffAttendanceAnalysis({ ctx, emp, start, end, weekdays, periodLabel, 
         </div>
       </Card>
     </Modal>
+  );
+}
+
+/* ------------------------- Daily clock-in register ------------------------
+   Every staff member's attendance for ONE chosen day: who clocked in and when,
+   clock-out, hours, site and geo-fence result — plus who is on leave and who
+   hasn't clocked in. Exports to PDF, Excel and CSV, or prints. */
+const geoVerdictText = (a) => {
+  if (!a || a.lat == null) return "No GPS";
+  const v = geoVerdictOf(a);
+  return v === "in" ? "Within fence" : v === "near" ? "Within (weak GPS)" : "Outside fence";
+};
+function DailyRegister({ ctx }) {
+  const { store } = ctx;
+  const [date, setDate] = useState(TODAY);
+  const [filter, setFilter] = useState("all");
+  const [dept, setDept] = useState("");
+  const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState("time");
+
+  const shift = (n) => { const d = new Date(date + "T00:00:00"); d.setDate(d.getDate() + n); const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; if (iso <= TODAY) setDate(iso); };
+  const wd = new Date(date + "T00:00:00").getDay();
+  const weekend = wd === 0 || wd === 6;
+  const dayLabel = new Date(date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+  // Staff on the register that day: not terminated, and employed by then.
+  const emps = store.employees.filter((e) => e.status !== "Terminated" && (!e.employmentDate || e.employmentDate <= date));
+  const dayRecs = (store.attendance || []).filter((a) => a.date === date);
+  const byEmp = {};
+  dayRecs.forEach((a) => { (byEmp[a.empId] = byEmp[a.empId] || []).push(a); });
+  // Records for people no longer on the register still belong on the day's list.
+  const extraIds = Object.keys(byEmp).filter((id) => !emps.some((e) => e.id === id));
+
+  const leaveOn = (empId) => (store.leave || []).find((l) => l.empId === empId && l.status === "Approved" && l.startDate <= date && date <= l.endDate);
+  const rowFor = (empId, e) => {
+    const rs = (byEmp[empId] || []).slice().sort((a, b) => String(a.clockIn || "99").localeCompare(String(b.clockIn || "99")));
+    const ins = rs.filter((a) => a.clockIn && a.status !== "Absent");
+    const first = ins[0] || null;
+    const outs = rs.map((a) => a.clockOut).filter(Boolean).sort();
+    const lastOut = outs.length ? outs[outs.length - 1] : "";
+    const lv = leaveOn(empId);
+    let status, tone, rank;
+    if (first) {
+      const late = timeToMinutes(first.clockIn) > LATE_THRESHOLD_MIN;
+      status = late ? "Late" : "On time"; tone = late ? "warning" : "success"; rank = 0;
+    } else if (rs.some((a) => a.status === "Absent")) { status = "Absent"; tone = "danger"; rank = 2; }
+    else if (lv) { status = LEAVE_TYPES[lv.type]?.duty ? `On duty · ${lv.type}` : `On leave · ${lv.type}`; tone = "info"; rank = 1; }
+    else if (weekend) { status = "Weekend"; tone = "muted"; rank = 3; }
+    else { status = "Not clocked in"; tone = "danger"; rank = 2; }
+    const mins = first && lastOut ? timeToMinutes(lastOut) - timeToMinutes(first.clockIn) : null;
+    return {
+      empId, e, name: e ? fullName(e) : `${empId} (not on register)`, dept: e ? e.department : "", job: e ? e.jobTitle : "",
+      rec: first, clockIn: first ? first.clockIn : "", clockOut: lastOut, hours: mins != null && mins > 0 ? (mins / 60).toFixed(1) : "",
+      site: first ? (first.geoSite || first.site || "") : "", geo: first ? geoVerdictText(first) : "",
+      dist: first && first.distanceM != null ? Math.round(first.distanceM) : "", acc: first && first.accuracy != null ? Math.round(first.accuracy) : "",
+      count: ins.length, status, tone, rank, late: status === "Late", outside: !!(first && first.lat != null && geoVerdictOf(first) === "out"),
+    };
+  };
+  const all = [...emps.map((e) => rowFor(e.id, e)), ...extraIds.map((id) => rowFor(id, null))];
+
+  const clocked = all.filter((r) => r.rank === 0);
+  const sum = {
+    staff: emps.length, clocked: clocked.length,
+    onTime: clocked.filter((r) => !r.late).length, late: clocked.filter((r) => r.late).length,
+    leave: all.filter((r) => r.rank === 1).length, notIn: all.filter((r) => r.status === "Not clocked in" || r.status === "Absent").length,
+    outside: all.filter((r) => r.outside).length,
+  };
+  const avgIn = clocked.length ? minutesToTime(clocked.reduce((s, r) => s + timeToMinutes(r.clockIn), 0) / clocked.length) : "—";
+
+  let rows = all;
+  if (filter === "clocked") rows = rows.filter((r) => r.rank === 0);
+  if (filter === "late") rows = rows.filter((r) => r.late);
+  if (filter === "notin") rows = rows.filter((r) => r.status === "Not clocked in" || r.status === "Absent");
+  if (filter === "leave") rows = rows.filter((r) => r.rank === 1);
+  if (filter === "outside") rows = rows.filter((r) => r.outside);
+  if (dept) rows = rows.filter((r) => r.dept === dept);
+  if (q.trim()) { const t = q.trim().toLowerCase(); rows = rows.filter((r) => [r.name, r.empId, r.job, r.site].join(" ").toLowerCase().includes(t)); }
+  rows = rows.slice().sort(sortBy === "name"
+    ? (a, b) => a.name.localeCompare(b.name)
+    : (a, b) => a.rank - b.rank || String(a.clockIn || "99").localeCompare(String(b.clockIn || "99")) || a.name.localeCompare(b.name));
+
+  const filterLabel = { all: "All staff", clocked: "Clocked in", late: "Late arrivals", notin: "Not clocked in", leave: "On leave / duty", outside: "Outside geo-fence" }[filter];
+  const scope = [filterLabel, dept].filter(Boolean).join(" · ");
+  const summaryLine = `On register: ${sum.staff}   Clocked in: ${sum.clocked} (on time ${sum.onTime}, late ${sum.late})   On leave: ${sum.leave}   Not clocked in: ${sum.notIn}   Outside fence: ${sum.outside}   Avg clock-in: ${avgIn}`;
+  const fileTag = `${date}${filter !== "all" ? "-" + filter : ""}`;
+
+  const exportCsv = () => {
+    const head = ["#", "Staff ID", "Name", "Department", "Job title", "Status", "Clock in", "Clock out", "Hours", "Site", "Geo-fence", "Distance (m)", "GPS accuracy (m)", "Clock-ins that day"];
+    const lines = [`"Daily Clock-in Register — ${dayLabel}"`, `"${scope}"`, `"${summaryLine}"`, "", head.join(",")]
+      .concat(rows.map((r, i) => [i + 1, r.empId, r.name, r.dept, r.job, r.status, r.clockIn, r.clockOut, r.hours, r.site, r.geo, r.dist, r.acc, r.count || ""].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")));
+    downloadFile(`gla-daily-register-${fileTag}.csv`, lines.join("\n"));
+  };
+  const exportPdf = () => downloadReportPdf({
+    filename: `GLA-Daily-Register-${fileTag}.pdf`,
+    eyebrow: "Attendance · Daily Register",
+    title: "Daily Clock-in Register",
+    subtitle: `${dayLabel} · ${scope}`,
+    meta: [summaryLine, ...(weekend ? ["Weekend — attendance not expected."] : [])],
+    head: ["#", "Staff ID", "Name", "Department", "Status", "In", "Out", "Hours", "Site", "Geo-fence"],
+    body: rows.map((r, i) => [i + 1, r.empId, r.name, r.dept, r.status, r.clockIn || "—", r.clockOut || "—", r.hours || "—", r.site || "—", r.geo || "—"]),
+    orientation: "landscape",
+  });
+  const exportExcel = () => downloadScheduleXlsx({
+    title: "Daily Clock-in Register", eyebrow: "ATTENDANCE · DAILY REGISTER",
+    subtitle: `${dayLabel} · ${scope}`,
+    meta: [summaryLine],
+    columns: [
+      { header: "#", width: 5 }, { header: "Staff ID", width: 11 }, { header: "Name", width: 26 }, { header: "Department", width: 28 },
+      { header: "Status", width: 22 }, { header: "Clock in", width: 10 }, { header: "Clock out", width: 10 }, { header: "Hours", width: 8 },
+      { header: "Site", width: 28 }, { header: "Geo-fence", width: 18 },
+    ],
+    rows: rows.map((r, i) => [i + 1, r.empId, r.name, r.dept, r.status, r.clockIn || "—", r.clockOut || "—", r.hours || "—", r.site || "—", r.geo || "—"]),
+    signatories: false,
+    filename: `GLA-Daily-Register-${fileTag}.xlsx`,
+  });
+  const depts = [...new Set(all.map((r) => r.dept).filter(Boolean))].sort();
+
+  return (
+    <>
+      <Toolbar>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Btn size="sm" onClick={() => shift(-1)} title="Previous day"><ChevronLeft size={15} /></Btn>
+          <Input type="date" value={date} max={TODAY} onChange={(e) => e.target.value && setDate(e.target.value > TODAY ? TODAY : e.target.value)} style={{ width: 160 }} />
+          <Btn size="sm" onClick={() => shift(1)} disabled={date >= TODAY} title="Next day"><ChevronRight size={15} /></Btn>
+          {date !== TODAY && <Btn size="sm" onClick={() => setDate(TODAY)}>Today</Btn>}
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-2)" }}><b style={{ color: "var(--text)" }}>{dayLabel}</b>{weekend && <span style={{ marginLeft: 8 }}><Pill tone="muted">Weekend</Pill></span>}</div>
+        <div style={{ flex: 1 }} />
+        <Btn onClick={exportPdf}><FileText size={15} />PDF</Btn>
+        <Btn onClick={exportExcel}><Download size={15} />Excel</Btn>
+        <Btn onClick={exportCsv}><Download size={15} />CSV</Btn>
+        <Btn onClick={() => window.print()}><Printer size={15} />Print</Btn>
+      </Toolbar>
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={Users} label="On register" value={sum.staff} meta="active staff that day" tone="brand" />
+        <StatCard Icon={Check} label="Clocked in" value={sum.clocked} meta={`avg ${avgIn}`} tone="success" />
+        <StatCard Icon={Timer} label="Late" value={sum.late} meta={`after ${minutesToTime(LATE_THRESHOLD_MIN)}`} tone={sum.late ? "warning" : "success"} />
+        <StatCard Icon={CalendarDays} label="On leave / duty" value={sum.leave} meta="approved leave" tone="accent" />
+        <StatCard Icon={X} label="Not clocked in" value={sum.notIn} meta={weekend ? "weekend" : "no record"} tone={sum.notIn && !weekend ? "danger" : "brand"} />
+        <StatCard Icon={LocateFixed} label="Outside fence" value={sum.outside} meta="clock-ins off-site" tone={sum.outside ? "warning" : "success"} />
+      </div>
+
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search name, ID, job or site…" />
+        <Select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: "auto" }} options={[
+          { value: "all", label: `All staff (${all.length})` }, { value: "clocked", label: `Clocked in (${sum.clocked})` },
+          { value: "late", label: `Late arrivals (${sum.late})` }, { value: "notin", label: `Not clocked in (${sum.notIn})` },
+          { value: "leave", label: `On leave / duty (${sum.leave})` }, { value: "outside", label: `Outside geo-fence (${sum.outside})` },
+        ]} />
+        {depts.length > 1 && <Select value={dept} onChange={(e) => setDept(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All departments" }, ...depts]} />}
+        <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ width: "auto" }} options={[{ value: "time", label: "Sort: clock-in time" }, { value: "name", label: "Sort: name" }]} />
+      </Toolbar>
+
+      <Card>
+        <CardHead title={`Daily Clock-in Register — ${fmtDate(date)}`} right={<span style={{ fontSize: 12, color: "var(--muted)" }}>{rows.length} of {all.length} staff · {scope}</span>} />
+        <DataTable
+          columns={[
+            { label: "#", render: (r) => <span className="mono" style={{ color: "var(--muted)" }}>{rows.indexOf(r) + 1}</span> },
+            { label: "Employee", render: (r) => r.e ? <EmpCell emp={r.e} /> : <span style={{ color: "var(--muted)" }}>{r.name}</span> },
+            { label: "Status", render: (r) => <Pill tone={r.tone}>{r.status}</Pill> },
+            { label: "Clock in", render: (r) => <span className="mono" style={{ fontWeight: 600, color: r.late ? "var(--warning)" : "var(--text)" }}>{r.clockIn || "—"}</span> },
+            { label: "Clock out", render: (r) => <span className="mono">{r.clockOut || "—"}</span> },
+            { label: "Hours", num: true, render: (r) => r.hours || "—" },
+            { label: "Site", render: (r) => <span style={{ color: "var(--text-2)" }}>{r.site || "—"}{r.count > 1 ? <span style={{ color: "var(--muted)" }}> · {r.count} clock-ins</span> : null}</span> },
+            { label: "Geo-fence", render: (r) => r.rec ? <GeoPill a={r.rec} /> : <span style={{ color: "var(--muted)" }}>—</span> },
+          ]}
+          rows={rows}
+          empty={filter === "all" ? "No staff on the register for this day." : "No staff match this filter for the day."}
+        />
+      </Card>
+    </>
   );
 }
 
