@@ -125,6 +125,10 @@ if (fs.existsSync(path.join(distDir, "index.html"))) {
       }
     },
   }));
+  // A missing hashed asset (e.g. from a deploy before this one) is a real 404 —
+  // never answer it with the HTML page, so the browser fails fast and the app
+  // can reload to the new version.
+  app.get(/^\/assets\//, (req, res) => res.status(404).type("text/plain").send("Not found"));
   // SPA fallback for any non-API GET route.
   app.get(/^(?!\/api\/).*/, (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
