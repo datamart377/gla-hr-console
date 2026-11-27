@@ -157,6 +157,7 @@ export const authApi = {
   login: (email, _password, _remember) => {
     const e = data.employees.find((x) => (x.email || "").toLowerCase() === String(email || "").trim().toLowerCase());
     if (!e) return Promise.reject(new Error("No staff account matches that email."));
+    if (e.status === "Terminated") return Promise.reject(new Error("Your access to IHRSM has ended because your employment record is closed. Please contact HR & Admin if you think this is a mistake."));
     const role = ({ "GLA-001": "admin", "GLA-002": "hr", "GLA-003": "finance" })[e.id] || e.role || "staff";
     return respond({ token: null, user: { id: e.id, email: e.email, name: `${e.firstName} ${e.lastName}`, role, empId: e.id } });
   },

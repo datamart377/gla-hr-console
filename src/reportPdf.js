@@ -622,6 +622,82 @@ export function downloadQuotationPdf(q) {
   doc.save(`Quotation-${String(ref).replace(/[/\\]/g, "-")}${draft ? "-DRAFT" : ""}.pdf`);
 }
 
+/* -------------------------- certificate of service ------------------------- */
+/**
+ * downloadServiceCertificatePdf(emp) — the certificate of service an employer
+ * issues when employment ends (Employment Act, 2006): who the employer and
+ * employee are, the work done, and the dates of service. Deliberately says
+ * nothing about the reason for leaving, conduct or performance.
+ */
+export function downloadServiceCertificatePdf(e) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const guard = letterheadGuard();
+  const name = `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.id;
+  const longDate = (s) => { if (!s) return "—"; const d = new Date(String(s).slice(0, 10) + "T00:00:00"); return isNaN(d) ? String(s) : d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }); };
+  const months = (() => {
+    if (!e.employmentDate || !e.exitDate) return 0;
+    const a = new Date(e.employmentDate + "T00:00:00"), b = new Date(e.exitDate + "T00:00:00");
+    let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()); if (b.getDate() < a.getDate()) m -= 1; return Math.max(0, m);
+  })();
+  const service = (() => { const y = Math.floor(months / 12), r = months % 12; if (!y && !r) return "less than one month"; return [y && `${y} year${y === 1 ? "" : "s"}`, r && `${r} month${r === 1 ? "" : "s"}`].filter(Boolean).join(" and "); })();
+  const ref = `GLA/HR/COS/${e.id}`;
+  const company = COMPANY.name || "Global Link Associates Ltd";
+
+  let y = drawLetterhead(doc);
+  drawTopRightQR(doc, reportQrText({ title: "Certificate of Service", subtitle: `${name} · ${e.id}`, reference: ref, generated: todayLong() }));
+  y = drawTitleBlock(doc, y, { eyebrow: "Human Resources", title: "CERTIFICATE OF SERVICE", subtitle: `${name} · ${e.id}`, meta: [], reference: ref });
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(...INK);
+  doc.text("TO WHOM IT MAY CONCERN", MARGIN, y + 14);
+  y += 32;
+  const para = `This is to certify that ${name} was employed by ${company} as ${e.jobTitle || e.position || "a member of staff"}${e.department ? " in the " + e.department : ""} from ${longDate(e.employmentDate)} to ${longDate(e.exitDate)}, a period of ${service}.`;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(...BODY);
+  const pl = doc.splitTextToSize(para, pageW - MARGIN * 2);
+  doc.text(pl, MARGIN, y, { lineHeightFactor: 1.5 });
+  y += pl.length * 15.75 + 10;
+
+  y = runTable(doc, {
+    startY: y, guard,
+    body: [
+      ["Employer", `${company}, P.O. Box 71674, Kampala, Uganda`],
+      ["Employee", name],
+      ["Staff ID", e.id],
+      ...(e.nationalId ? [["National ID (NIN)", e.nationalId]] : []),
+      ...(e.nssfNumber && !/^n\/?a$/i.test(e.nssfNumber) ? [["NSSF number", e.nssfNumber]] : []),
+      ["Position held", e.jobTitle || e.position || "—"],
+      ["Department", e.department || "—"],
+      ["Nature of employment", e.contractType || "—"],
+      ["Date of engagement", longDate(e.employmentDate)],
+      ["Date of termination", longDate(e.exitDate)],
+      ["Length of service", service.charAt(0).toUpperCase() + service.slice(1)],
+    ],
+    columnStyles: { 0: { cellWidth: (pageW - MARGIN * 2) * 0.36, fontStyle: "bold", textColor: INK, fillColor: KVFILL } },
+  });
+
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(...BODY);
+  const close = doc.splitTextToSize("This certificate is issued in accordance with the Employment Act, 2006. We wish them every success in their future endeavours.", pageW - MARGIN * 2);
+  doc.text(close, MARGIN, y + 22, { lineHeightFactor: 1.5 });
+  y += 22 + close.length * 15.75;
+
+  const sig = SIGNATORIES[0] || {};
+  let sy = y + 26;
+  if (sy + 110 > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
+  doc.setFont("helvetica", "bolditalic"); doc.setFontSize(10); doc.setTextColor(...INK);
+  doc.text(`For and on behalf of ${company}`, MARGIN, sy);
+  const img = sigImageOf(sig);
+  if (img) drawSigImage(doc, img, MARGIN + 330, sy + 70, 150, 66);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...INK);
+  doc.text(String(sig.name || ""), MARGIN, sy + 22);
+  let ly = sy + 22;
+  if (sig.title) { ly += 13; doc.setFont("helvetica", "bold"); doc.setFontSize(8.8); doc.setTextColor(...BRAND); doc.text(String(sig.title), MARGIN, ly); }
+  ly += 13; doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY); doc.text(`Date: ${longDate(new Date().toISOString().slice(0, 10))}`, MARGIN, ly);
+
+  drawFooters(doc);
+  doc.save(`Certificate-of-Service-${e.id}.pdf`);
+}
+
 /* ---------------------------- purchase order ----------------------------- */
 /**
  * downloadPurchaseOrderPdf(po) — a branded Purchase Order issued to a supplier

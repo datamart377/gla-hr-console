@@ -20,6 +20,49 @@ export const DEPARTMENTS = [
 ];
 export const CONTRACT_TYPES = ["Permanent", "Fixed-term", "Casual"];
 export const EMP_STATUSES = ["Active", "On Leave", "Suspended", "Terminated"];
+
+/* ---------------------------- exits / termination ---------------------------- */
+export const EXIT_TYPES = ["Resignation", "End of contract", "Dismissal", "Redundancy", "Retirement", "Mutual separation", "Abscondment", "Death", "Other"];
+export const isExited = (e) => !!e && e.status === "Terminated";
+
+// Whole months of service between two YYYY-MM-DD dates.
+export function serviceMonths(from, to) {
+  if (!from || !to) return 0;
+  const a = new Date(from + "T00:00:00"), b = new Date(to + "T00:00:00");
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (b.getDate() < a.getDate()) m -= 1;
+  return Math.max(0, m);
+}
+export function serviceLabel(from, to) {
+  if (!from || !to) return "—";
+  const m = serviceMonths(from, to);
+  const y = Math.floor(m / 12), r = m % 12;
+  if (!y && !r) return "Less than a month";
+  return [y && `${y} year${y === 1 ? "" : "s"}`, r && `${r} month${r === 1 ? "" : "s"}`].filter(Boolean).join(", ");
+}
+// Minimum notice under the Employment Act 2006, s.58(3), by length of service.
+export function statutoryNotice(from, to) {
+  const m = serviceMonths(from, to);
+  if (m < 6) return { label: "No statutory minimum (under 6 months' service)", days: 0 };
+  if (m < 12) return { label: "2 weeks", days: 14 };
+  if (m < 60) return { label: "1 month", days: 30 };
+  if (m < 120) return { label: "2 months", days: 60 };
+  return { label: "3 months", days: 90 };
+}
+// An exited employee is still paid for the month they leave in, pro-rated by
+// calendar days up to and including their last working day. Returns the
+// employee to put on that month's payroll (or null if they shouldn't be on it).
+export function payrollEmployee(e, monthKey) {
+  if (!isExited(e)) return e;
+  const exit = String(e.exitDate || "");
+  if (!exit || exit.slice(0, 7) !== monthKey) return null;
+  const [y, mo, d] = exit.split("-").map(Number);
+  const dim = new Date(y, mo, 0).getDate();
+  const days = Math.min(dim, Math.max(0, d || 0));
+  if (days >= dim) return { ...e, _finalPay: { days, of: dim } };
+  return { ...e, grossSalary: Math.round((Number(e.grossSalary) || 0) * days / dim), _finalPay: { days, of: dim, fullGross: Number(e.grossSalary) || 0 } };
+}
 export const MARITAL_STATUSES = ["single", "married", "divorced", "widowed", "N/A"];
 export const TERMS_TYPES = ["confirmed-contract", "probation", "temporary", "contract", "permanent"];
 export const QUALIFICATION_TYPES = ["CERTIFICATE", "DIPLOMA", "DEGREE", "MASTERS", "PHD", "OTHER"];

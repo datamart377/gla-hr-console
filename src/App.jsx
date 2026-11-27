@@ -7,11 +7,11 @@ import {
   HeartHandshake, Baby, IdCard, FileCheck, Contact,
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
-  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
+  LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff, UserX,
   Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart, FileSignature, Copy, ChevronUp,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
-import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf } from "./reportLazy.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf, downloadServiceCertificatePdf } from "./reportLazy.js";
 import { COMPANY, SIGNATORIES, PAYROLL_SIGNATORIES, ALL_SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
@@ -21,7 +21,7 @@ import {
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
-  data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, SITES, LEAVE_TYPES, LEAVE_COLORS,
+  data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
@@ -2432,7 +2432,7 @@ function Sidebar({ view, setView, store, nav = NAV }) {
   const onSelfView = nav.some((n) => n.section === SELF_SECTION && n.id === view);
   const selfShown = selfOpen || onSelfView;
   const counts = {
-    employees: store.employees.length,
+    employees: store.employees.filter((e) => !isExited(e)).length,
     leave: store.leave.filter((l) => l.status === "Pending").length || "",
     attendance: store.attendance.filter((a) => a.date === TODAY).length,
   };
@@ -2722,11 +2722,20 @@ function SearchBox({ value, onChange, placeholder }) {
 function Employees({ ctx }) {
   const { store, setModal, openStaffFile } = ctx;
   const [q, setQ] = useState("");
+  const [scope, setScope] = useState("current"); // current | former
 
+  const formerCount = store.employees.filter(isExited).length;
+  const currentCount = store.employees.length - formerCount;
+  const former = scope === "former";
   const list = useMemo(() => store.employees.filter((e) => {
+    if (isExited(e) !== former) return false;
     if (!q) return true;
-    return [fullName(e), e.id, e.jobTitle, e.department].join(" ").toLowerCase().includes(q.toLowerCase());
-  }), [store.employees, q]);
+    return [fullName(e), e.id, e.jobTitle, e.department, e.exitType].join(" ").toLowerCase().includes(q.toLowerCase());
+  }).sort((a, b) => (former ? String(b.exitDate || "").localeCompare(String(a.exitDate || "")) : 0)), [store.employees, q, former]);
+  const canEdit = canDo(ctx, "editEmployees");
+  const isSelf = (e) => !!(ctx.currentEmp && ctx.currentEmp.id === e.id);
+  const terminate = (e) => setModal(() => (cc) => <TerminateEmployee ctx={cc} id={e.id} />);
+  const reinstate = (e) => setModal(() => (cc) => <ReinstateEmployee ctx={cc} id={e.id} />);
 
   const del = (e) => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={employeesApi} id={e.id} label={fullName(e)} />);
 
@@ -2736,13 +2745,17 @@ function Employees({ ctx }) {
     downloadFile("gla-employees.csv", lines.join("\n"));
   };
   const exportPdf = () => downloadReportPdf({
-    filename: "GLA-Employee-Register.pdf",
+    filename: former ? "GLA-Former-Staff.pdf" : "GLA-Employee-Register.pdf",
     eyebrow: "Register",
-    title: "Employee Register",
-    subtitle: "Staff records, contracts and statutory details",
-    meta: [`Total staff: ${list.length}`],
-    head: ["#", "Name", "Staff ID", "Unit", "Job Title", "Contract", "Status", ...(seesPay(ctx) ? ["Gross (UGX)"] : [])],
-    body: list.map((e, i) => [i + 1, fullName(e), e.id, e.department, e.jobTitle, e.contractType, e.status, ...(seesPay(ctx) ? [fmtN(e.grossSalary)] : [])]),
+    title: former ? "Former Staff Register" : "Employee Register",
+    subtitle: former ? "Staff who have left Global Link Associates" : "Staff records, contracts and statutory details",
+    meta: [former ? `Former staff: ${list.length}` : `Total staff: ${list.length}`],
+    head: former
+      ? ["#", "Name", "Staff ID", "Unit", "Job Title", "Joined", "Last day", "Service", "Exit type"]
+      : ["#", "Name", "Staff ID", "Unit", "Job Title", "Contract", "Status", ...(seesPay(ctx) ? ["Gross (UGX)"] : [])],
+    body: former
+      ? list.map((e, i) => [i + 1, fullName(e), e.id, e.department, e.jobTitle, fmtDate(e.employmentDate), fmtDate(e.exitDate), serviceLabel(e.employmentDate, e.exitDate), e.exitType || "—"])
+      : list.map((e, i) => [i + 1, fullName(e), e.id, e.department, e.jobTitle, e.contractType, e.status, ...(seesPay(ctx) ? [fmtN(e.grossSalary)] : [])]),
     orientation: "landscape",
   });
 
@@ -2750,6 +2763,15 @@ function Employees({ ctx }) {
     <>
       <Toolbar>
         <SearchBox value={q} onChange={setQ} placeholder="Search name, ID or title…" />
+        <div style={{ display: "inline-flex", gap: 4, padding: 3, borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+          {[["current", "Current staff", currentCount], ["former", "Former staff", formerCount]].map(([k, label, n]) => (
+            <button key={k} type="button" onClick={() => setScope(k)}
+              style={{ border: 0, cursor: "pointer", padding: "6px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)",
+                background: scope === k ? "var(--surface)" : "transparent", color: scope === k ? "var(--text)" : "var(--muted)", boxShadow: scope === k ? "var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08))" : "none" }}>
+              {label} <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.8 }}>{n}</span>
+            </button>
+          ))}
+        </div>
         <div style={{ flex: 1 }} />
         <Btn onClick={exportPdf}><FileText size={16} />PDF</Btn>
         <Btn onClick={exportCsv}><Download size={16} />Export CSV</Btn>
@@ -2761,22 +2783,152 @@ function Employees({ ctx }) {
             { label: "Employee", render: (e) => <EmpCell emp={e} /> },
             { label: "Staff ID", render: (e) => <Tag>{e.id}</Tag> },
             { label: "Department", render: (e) => e.department },
-            { label: "Contract", render: (e) => <Tag>{e.contractType}</Tag> },
-            { label: "Status", render: (e) => <Pill tone={statusTone[e.status]}>{e.status}</Pill> },
-            ...(seesPay(ctx) ? [{ label: "Gross (UGX)", num: true, render: (e) => fmtN(e.grossSalary) }] : []),
+            ...(former ? [
+              { label: "Last day", render: (e) => fmtDate(e.exitDate) },
+              { label: "Exit", render: (e) => <div><Pill tone="danger">{e.exitType || "Terminated"}</Pill><div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>{serviceLabel(e.employmentDate, e.exitDate)} service</div></div> },
+            ] : [
+              { label: "Contract", render: (e) => <Tag>{e.contractType}</Tag> },
+              { label: "Status", render: (e) => <Pill tone={statusTone[e.status]}>{e.status}</Pill> },
+              ...(seesPay(ctx) ? [{ label: "Gross (UGX)", num: true, render: (e) => fmtN(e.grossSalary) }] : []),
+            ]),
             { label: "", render: (e) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 <Btn size="sm" onClick={() => openStaffFile(e.id)}>Open file</Btn>
-                {canDo(ctx, "editEmployees") && <Btn size="sm" onClick={() => setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)}><Pencil size={13} /></Btn>}
-                {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => del(e)}><Trash2 size={13} /></Btn>}
+                {canEdit && !former && <Btn size="sm" onClick={() => setModal(() => (cc) => <EmployeeForm ctx={cc} id={e.id} />)} title="Edit"><Pencil size={13} /></Btn>}
+                {canEdit && !former && <Btn size="sm" variant="danger" disabled={isSelf(e)} onClick={() => terminate(e)} title={isSelf(e) ? "You can't terminate your own record" : "Terminate employment"}><UserX size={13} />Terminate</Btn>}
+                {canEdit && former && <Btn size="sm" onClick={() => reinstate(e)} title="Reinstate this staff member"><RotateCcw size={13} />Reinstate</Btn>}
+                {canDo(ctx, "deleteRecords") && <Btn size="sm" variant="danger" onClick={() => del(e)} title="Delete record permanently"><Trash2 size={13} /></Btn>}
               </div>
             )},
           ]}
           rows={list}
-          empty="No employees match your filters."
+          empty={former ? "No former staff on record." : "No employees match your filters."}
         />
       </Card>
     </>
+  );
+}
+
+// Terminate a staff member's employment: records the exit (type, notice, last
+// working day, reason), moves them to Former staff, ends their system access
+// (the server refuses sign-in for exited staff) and takes them off payroll after
+// a pro-rated final month. The record is kept, never deleted.
+function TerminateEmployee({ ctx, id }) {
+  const e = ctx.empById(id);
+  const [f, setF] = useState({ exitType: "Resignation", noticeDate: TODAY, exitDate: TODAY, exitReason: "", exitNotes: "" });
+  const [ack, setAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!e) return null;
+  const set = (k) => (ev) => setF((x) => ({ ...x, [k]: ev.target.value }));
+  const self = !!(ctx.currentEmp && ctx.currentEmp.id === e.id);
+  const notice = statutoryNotice(e.employmentDate, f.noticeDate || f.exitDate);
+  const annual = deriveLeaveBalance(e, "Annual");
+  const owed = (ctx.store.advances || []).filter((a) => a.empId === e.id && a.status === "Approved")
+    .reduce((s, a) => s + advanceProgress(a, ctx.store.payrollRuns).outstanding, 0);
+  const sameMonth = String(f.exitDate || "").slice(0, 7) === CURRENT_MONTH;
+  const valid = f.exitType && f.exitDate && f.exitReason.trim().length >= 3 && ack && !self && (!f.noticeDate || f.noticeDate <= f.exitDate) && (!e.employmentDate || f.exitDate >= e.employmentDate);
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr("");
+    try {
+      await employeesApi.update(e.id, {
+        status: "Terminated",
+        statusBeforeExit: e.status === "Terminated" ? "Active" : (e.status || "Active"),
+        exitType: f.exitType, exitDate: f.exitDate, noticeDate: f.noticeDate || "", exitReason: f.exitReason.trim(), exitNotes: f.exitNotes.trim(),
+        terminatedBy: actorName(ctx), terminatedAt: new Date().toISOString(),
+      });
+      // The server ends their open sessions and refuses further sign-ins.
+      await ctx.reload();
+      ctx.setModal(null);
+    } catch (x) { setErr(x.message || "Could not terminate this employee."); setBusy(false); }
+  };
+
+  return (
+    <Modal title="Terminate employment" sub={`${fullName(e)} · ${e.id} · ${e.jobTitle || ""}`} onClose={() => ctx.setModal(null)}
+      footer={<>
+        <Btn onClick={() => ctx.setModal(null)}>Cancel</Btn>
+        <Btn variant="primary" disabled={!valid || busy} style={{ background: "var(--danger)", borderColor: "var(--danger)", color: "#fff" }} onClick={submit}><UserX size={15} />{busy ? "Terminating…" : "Terminate employment"}</Btn>
+      </>}>
+      {self && <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, background: "color-mix(in srgb, var(--danger) 10%, transparent)", color: "var(--danger)", fontSize: 13 }}>You can't terminate your own employment record. Ask another HR or Admin user.</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 16 }}>
+        {[
+          ["Date joined", fmtDate(e.employmentDate)],
+          ["Length of service", serviceLabel(e.employmentDate, f.exitDate)],
+          ["Statutory notice", notice.label],
+          ["Untaken annual leave", `${annual.remaining} day${annual.remaining === 1 ? "" : "s"}`],
+          ...(seesPay(ctx) ? [["Advance outstanding", owed ? ugx(owed) : "None"]] : []),
+        ].map(([k, v]) => (
+          <div key={k} style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>{k}</div>
+            <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)", marginTop: 3 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={formGrid}>
+        <Field label="Type of exit" required><Select value={f.exitType} onChange={set("exitType")} options={EXIT_TYPES} /></Field>
+        <Field label="Notice given on" hint="Date written notice was given or received"><Input type="date" value={f.noticeDate} max={f.exitDate} onChange={set("noticeDate")} /></Field>
+        <Field label="Last working day" required hint={sameMonth ? "Paid pro-rata for this month, then off payroll" : "Payroll stops after this date's month"}><Input type="date" value={f.exitDate} min={e.employmentDate || undefined} onChange={set("exitDate")} /></Field>
+        <Field label="Reason" required full><Textarea value={f.exitReason} onChange={set("exitReason")} placeholder="e.g. Resigned to pursue further studies — letter dated 20 Nov 2026" /></Field>
+        <Field label="Final dues & handover notes" full hint="Leave pay, advance recovery, company property returned, clearance…"><Textarea value={f.exitNotes} onChange={set("exitNotes")} placeholder="e.g. 6 days' leave to be paid; laptop and PPE returned; advance balance recovered from final pay" /></Field>
+      </div>
+      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginTop: 16, fontSize: 13, color: "var(--text-2)", cursor: "pointer" }}>
+        <input type="checkbox" checked={ack} onChange={(ev) => setAck(ev.target.checked)} style={{ marginTop: 2 }} />
+        <span>I confirm this employment is ending. {fullName(e)} will be moved to <b>Former staff</b>, signed out and blocked from IHRSM, and removed from payroll after their final month. Their file and history are kept and they can be reinstated.</span>
+      </label>
+      {err && <div style={{ marginTop: 12, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+// Reverse a termination (e.g. entered in error, or the person is re-hired):
+// restores their previous status and keeps the exit on record in exitHistory.
+function ReinstateEmployee({ ctx, id }) {
+  const e = ctx.empById(id);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
+  if (!e) return null;
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try {
+      const past = { exitType: e.exitType || "", exitDate: e.exitDate || "", noticeDate: e.noticeDate || "", exitReason: e.exitReason || "", exitNotes: e.exitNotes || "",
+        terminatedBy: e.terminatedBy || "", terminatedAt: e.terminatedAt || "", reinstatedBy: actorName(ctx), reinstatedAt: new Date().toISOString(), reinstateNote: note.trim() };
+      await employeesApi.update(e.id, {
+        status: e.statusBeforeExit && e.statusBeforeExit !== "Terminated" ? e.statusBeforeExit : "Active",
+        exitHistory: [...(Array.isArray(e.exitHistory) ? e.exitHistory : []), past],
+        exitType: "", exitDate: "", noticeDate: "", exitReason: "", exitNotes: "", terminatedBy: "", terminatedAt: "", statusBeforeExit: "",
+      });
+      await ctx.reload();
+      ctx.setModal(null);
+    } catch (x) { setErr(x.message || "Could not reinstate this employee."); setBusy(false); }
+  };
+  return (
+    <Modal title="Reinstate staff member" sub={`${fullName(e)} · ${e.id}`} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={submit}><RotateCcw size={15} />{busy ? "Reinstating…" : "Reinstate"}</Btn></>}>
+      <p style={{ marginTop: 0, color: "var(--text-2)", fontSize: 13.5 }}>
+        {fullName(e)} left on <b>{fmtDate(e.exitDate)}</b> ({e.exitType || "Terminated"}). Reinstating moves them back to Current staff and lets them sign in again with their existing login. They return to payroll from the next payroll run. The previous exit stays on their file.
+      </p>
+      <Field label="Note (optional)" full><Textarea value={note} onChange={(ev) => setNote(ev.target.value)} placeholder="e.g. Termination entered in error / re-hired from 1 Dec 2026" /></Field>
+      {err && <div style={{ marginTop: 12, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+// Exit summary shown at the top of an exited employee's file.
+function ExitBanner({ ctx, e }) {
+  if (!isExited(e)) return null;
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "14px 16px", borderRadius: 12, border: "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))", background: "color-mix(in srgb, var(--danger) 7%, var(--surface))" }}>
+      <UserX size={18} style={{ color: "var(--danger)", flex: "none", marginTop: 2 }} />
+      <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.55, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, color: "var(--text)" }}>Former staff · {e.exitType || "Terminated"} · last working day {fmtDate(e.exitDate)}</div>
+        <div>Served {serviceLabel(e.employmentDate, e.exitDate)}{e.noticeDate ? ` · notice given ${fmtDate(e.noticeDate)}` : ""}{e.terminatedBy ? ` · recorded by ${e.terminatedBy}${e.terminatedAt ? " on " + fmtDate(String(e.terminatedAt).slice(0, 10)) : ""}` : ""}</div>
+        {e.exitReason && <div style={{ marginTop: 4 }}><b>Reason:</b> {e.exitReason}</div>}
+        {e.exitNotes && <div><b>Final dues &amp; handover:</b> {e.exitNotes}</div>}
+      </div>
+    </div>
   );
 }
 
@@ -2815,12 +2967,12 @@ function EmployeeProfile({ ctx, id }) {
         </div>
         <div style={{ marginLeft: "auto" }}><Pill tone={statusTone[e.status]}>{e.status}</Pill></div>
       </div>
+      {isExited(e) && <div style={{ marginBottom: 16 }}><ExitBanner ctx={ctx} e={e} /></div>}
       <KVSection title="Employment" pairs={[["Staff ID", e.id], ["Contract", e.contractType], ["Date joined", fmtDate(e.employmentDate)], ["Department", e.department], ["Status", e.status]]} />
       <KVSection title="Personal" pairs={[["Gender", e.gender], ["Date of birth", fmtDate(e.dob)], ["National ID (NIN)", e.nationalId], ["Phone", e.phone], ["Email", e.email], ["Address", e.address]]} />
       <KVSection title="Statutory & payroll" pairs={[["Gross salary", ugx(ps.gross)], ["PAYE (monthly)", ugx(ps.paye)], ["NSSF employee (5%)", ugx(ps.nssfEmp)], ["NSSF employer (10%)", ugx(ps.nssfEr)], ["Net pay", ugx(ps.net)], ["TIN", e.tin], ["NSSF no.", e.nssfNumber], ["Bank", `${e.bankName} · ${e.bankAccount}`]]} />
       <KVSection title="Leave balances" pairs={[["Annual", `${annual.remaining} of ${annual.entitlement} days left`], ["Sick", `${e.sickUsed || 0} of ${LEAVE_TYPES.Sick.entitlement} days used`]]} />
       <KVSection title="Emergency contact" pairs={[["Name", e.emergencyName], ["Relationship", e.emergencyRelation], ["Phone", e.emergencyPhone]]} />
-      <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
       <KVSection title="Next of kin" pairs={[["Name", e.nextOfKinName], ["Details", e.nextOfKinDetails]]} />
     </Modal>
   );
@@ -3055,7 +3207,7 @@ function EmployeeForm({ ctx, id }) {
         })()}
         <Field label="Contract type"><Select value={f.contractType} onChange={set("contractType")} options={CONTRACT_TYPES} /></Field>
         {isAdmin && <Field label="Access role" hint="What this person can see & do once they sign in. Takes effect next time they sign in."><Select value={f.role || "staff"} onChange={set("role")} options={roleOptions} /></Field>}
-        <Field label="Status"><Select value={f.status} onChange={set("status")} options={EMP_STATUSES} /></Field>
+        <Field label="Status" hint={f.status === "Terminated" ? "Use Reinstate on the Former staff tab to bring them back" : "To end employment, use Terminate on the register"}><Select value={f.status} onChange={set("status")} disabled={f.status === "Terminated"} options={f.status === "Terminated" ? EMP_STATUSES : EMP_STATUSES.filter((x) => x !== "Terminated")} /></Field>
         <Field label="Date joined"><Input type="date" value={f.employmentDate} onChange={set("employmentDate")} /></Field>
         <Field label="Gross monthly salary (UGX)" hint="PAYE & NSSF are computed automatically"><Input type="number" value={f.grossSalary} onChange={set("grossSalary")} /></Field>
         <Field label="Employer type (PAYE basis)" hint="Primary → progressive URA bands. Secondary → flat 40% (Global Link is not this person's main employer)."><Select value={f.employerType || "primary"} onChange={set("employerType")} options={[{ value: "primary", label: "Primary employer — progressive PAYE" }, { value: "secondary", label: "Secondary employer — 40% flat" }]} /></Field>
@@ -3817,7 +3969,8 @@ function StaffSalaries({ ctx }) {
   const processMonth = async () => {
     if (!processGate.ok) { alert(`You must pay ${monthLabel(processGate.prev)} before processing ${monthLabel(CURRENT_MONTH)}.\n\nSalary schedules are settled one month at a time, in order.`); return; }
     const emps = store.employees
-      .filter((e) => e.status !== "Terminated" && !e.payrollExcluded)
+      .map((e) => payrollEmployee(e, CURRENT_MONTH))
+      .filter((e) => e && !e.payrollExcluded)
       .map((e) => withAdvanceDeductions(e, store.advances, CURRENT_MONTH));
     // Carry forward the previous month's schedule: any custom allowance/deduction
     // value entered last month persists into this month unless changed since.
@@ -4150,9 +4303,11 @@ function LedgerLive({ ctx, prevMonthLabel }) {
   const { store, setModal, reload } = ctx;
   const [chequeNo, setChequeNo] = useState("");
   const emps = store.employees
-    .filter((e) => e.status !== "Terminated" && !e.payrollExcluded)
+    .map((e) => payrollEmployee(e, CURRENT_MONTH))
+    .filter((e) => e && !e.payrollExcluded)
     .map((e) => withAdvanceDeductions(e, store.advances, CURRENT_MONTH));
   const excluded = store.employees.filter((e) => e.status !== "Terminated" && e.payrollExcluded);
+  const finalPay = emps.filter((e) => e._finalPay);
   const cols = store.ledgerColumns || [];
   const t = emps.reduce((acc, e) => {
     const p = derivePayslip(e);
@@ -4349,6 +4504,12 @@ function LedgerLive({ ctx, prevMonthLabel }) {
           <AlertTriangle size={15} style={{ color: "var(--warning)" }} />
           <span><b>{excluded.length}</b> {excluded.length === 1 ? "staff member is" : "staff members are"} off this payroll ({excluded.map((e) => fullName(e)).join(", ")}).</span>
           <Btn size="sm" onClick={() => setModal(() => (cc) => <ManagePayrollStaff ctx={cc} />)}><Users size={13} />Manage staff</Btn>
+        </div>
+      )}
+      {finalPay.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", alignItems: "flex-start", gap: 10, fontSize: 12.5, color: "var(--text-2)" }}>
+          <UserX size={15} style={{ color: "var(--danger)", flex: "none", marginTop: 1 }} />
+          <span><b>Final pay this month:</b> {finalPay.map((e) => `${fullName(e)} (last day ${fmtDate(e.exitDate)}${e._finalPay.fullGross != null ? ` · gross pro-rated ${e._finalPay.days}/${e._finalPay.of} days` : ""})`).join("; ")}. They drop off payroll from next month.</span>
         </div>
       )}
     </>
@@ -6292,6 +6453,10 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
           ...((seesPay(ctx) || (ctx.currentEmp && ctx.currentEmp.id === e.id)) ? [["Entry Salary", na(tm.entrySalary)]] : []), ["Appointment Authority", na(tm.appointmentAuthority)], ["Source of Payment", na(tm.sourceOfPayment)],
           ["Employer Type (PAYE)", e.employerType === "secondary" ? "Secondary employer — 40% flat" : "Primary employer — progressive PAYE"],
         ] },
+        ...(isExited(e) ? [{ heading: "Exit", type: "kv", rows: [
+          ["Type of exit", na(e.exitType)], ["Notice given", fmtDateLong(e.noticeDate)], ["Last working day", fmtDateLong(e.exitDate)],
+          ["Length of service", serviceLabel(e.employmentDate, e.exitDate)], ["Reason", na(e.exitReason)], ["Final dues & handover", na(e.exitNotes)], ["Recorded by", na(e.terminatedBy)],
+        ] }] : []),
         { heading: "Professional Specialization", type: "table", head: ["Specialization", "Institution", "Year"],
           body: (e.professionalSpecialization || []).map((r) => [na(r.area), na(r.institution), na(r.year)]), empty: "No specialization on record" },
         { heading: "Professional Membership", type: "table", head: ["Organization", "Membership Number", "Date Joined", "Status"],
@@ -6316,8 +6481,12 @@ function StaffFile({ ctx, id, onBack, backLabel = "Employees" }) {
         <Btn onClick={back}><ChevronLeft size={16} />Back</Btn>
         <Btn onClick={exportPdf}><FileText size={15} />Download PDF</Btn>
         <Btn onClick={() => window.print()}><Printer size={15} />Print</Btn>
+        {isExited(e) && <Btn onClick={() => downloadServiceCertificatePdf(e)}><Award size={15} />Certificate of service</Btn>}
+        {canDo(ctx, "editEmployees") && !isExited(e) && !(ctx.currentEmp && ctx.currentEmp.id === e.id) && <Btn variant="danger" onClick={() => ctx.setModal(() => (cc) => <TerminateEmployee ctx={cc} id={e.id} />)}><UserX size={15} />Terminate</Btn>}
+        {canDo(ctx, "editEmployees") && isExited(e) && <Btn onClick={() => ctx.setModal(() => (cc) => <ReinstateEmployee ctx={cc} id={e.id} />)}><RotateCcw size={15} />Reinstate</Btn>}
         {canDo(ctx, "editEmployees") && <Btn variant="primary" onClick={openEdit}><Pencil size={15} />Update Staff File</Btn>}
       </div>
+      {isExited(e) && <div className="no-print"><ExitBanner ctx={ctx} e={e} /></div>}
 
       {/* print-only letterhead */}
       <div className="print-only sf-letterhead">

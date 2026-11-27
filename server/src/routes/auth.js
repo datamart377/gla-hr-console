@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { body } from "express-validator";
 import { query } from "../db.js";
 import { config } from "../config.js";
-import { signToken, requireAuth } from "../middleware/auth.js";
+import { signToken, requireAuth, EXITED_MSG } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { sendResetMail } from "../email.js";
 import { passwordProblem, isWeakPassword } from "../passwordPolicy.js";
@@ -35,6 +35,10 @@ router.post(
       // Constant-ish comparison path — always run bcrypt to avoid user enumeration.
       const ok = user ? await bcrypt.compare(password, user.password_hash) : await bcrypt.compare(password, "$2a$10$invalidinvalidinvalidinvalidinv");
       if (!user || !ok) return res.status(401).json({ error: "Invalid email or password." });
+      if (user.emp_id) {
+        const emp = await query(`SELECT doc->>'status' AS status FROM employees WHERE id = $1`, [user.emp_id]);
+        if (emp.rows[0] && emp.rows[0].status === "Terminated") return res.status(403).json({ error: EXITED_MSG, code: "ACCOUNT_DEACTIVATED" });
+      }
       const token = signToken(user, { expiresIn: remember ? (process.env.JWT_REMEMBER_EXPIRES || "30d") : config.jwt.expiresIn });
       // A default / weak password must be replaced before the account can be used.
       const mustChange = !!user.must_change_password || isWeakPassword(password, user.email);

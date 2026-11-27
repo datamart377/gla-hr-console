@@ -402,6 +402,10 @@ export function crudRouter(table) {
           return res.status(403).json({ error: "You can't decide on your own request — HR & Admin will review it." });
         }
       }
+      // Nobody can terminate their own employment record.
+      if (table === "employees" && patch.status === "Terminated" && req.params.id === req.user.empId) {
+        return res.status(403).json({ error: "You can't terminate your own employment record. Ask another HR or Admin user." });
+      }
       if (!(await mgmtFor(req, table, "write"))) {
         const empId = req.user.empId;
         const fields = STAFF_UPDATE_FIELDS[table];
@@ -429,6 +433,10 @@ export function crudRouter(table) {
         [req.params.id, JSON.stringify(patch)],
       );
       if (!rows.length) return res.status(404).json({ error: "Record not found." });
+      // Terminating employment ends every open session for that person's login.
+      if (table === "employees" && patch.status === "Terminated") {
+        await query(`UPDATE users SET token_epoch = token_epoch + 1, updated_at = now() WHERE emp_id = $1`, [req.params.id]);
+      }
       res.json(rowToRecord(rows[0]));
     } catch (e) { next(e); }
   };

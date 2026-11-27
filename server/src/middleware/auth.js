@@ -14,6 +14,8 @@ export function signToken(user, { expiresIn } = {}) {
   );
 }
 
+export const EXITED_MSG = "Your access to IHRSM has ended because your employment record is closed. Please contact HR & Admin if you think this is a mistake.";
+
 // Requires a valid Bearer token whose epoch still matches the user's; attaches req.user.
 export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
@@ -26,10 +28,19 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: "Invalid or expired session. Please sign in again." });
   }
   try {
-    const { rows } = await query(`SELECT token_epoch, must_change_password FROM users WHERE id = $1`, [payload.sub]);
+    const { rows } = await query(
+      `SELECT u.token_epoch, u.must_change_password, e.doc->>'status' AS emp_status
+         FROM users u LEFT JOIN employees e ON e.id = u.emp_id
+        WHERE u.id = $1`,
+      [payload.sub],
+    );
     if (!rows.length) return res.status(401).json({ error: "This account no longer exists. Please sign in again." });
     if ((rows[0].token_epoch || 0) !== (payload.te || 0)) {
       return res.status(401).json({ error: "This session was ended. Please sign in again." });
+    }
+    // Former staff lose access the moment their employment is terminated.
+    if (rows[0].emp_status === "Terminated") {
+      return res.status(401).json({ error: EXITED_MSG, code: "ACCOUNT_DEACTIVATED" });
     }
     // An account on a default/temporary password can only identify itself and
     // change its password until it chooses its own.
