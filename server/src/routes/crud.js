@@ -42,7 +42,8 @@ const isMgmt = (req) => MGMT.has(req.user && req.user.role);
 // self-service rules as staff (own records only). Admin is always full access.
 // Absent keys count as allowed, matching the web client's can()/canDo().
 let rolesCache = { at: 0, roles: null };
-async function liveRole(roleId) {
+export function resetRolesCache() { rolesCache = { at: 0, roles: null }; }
+export async function liveRole(roleId) {
   const now = Date.now();
   if (!rolesCache.roles || now - rolesCache.at > 10000) {
     try {
@@ -53,7 +54,7 @@ async function liveRole(roleId) {
   }
   return rolesCache.roles.find((x) => x && x.id === roleId) || null;
 }
-const permits = (role, gate) => !role || !gate || ((role[gate[0]] || {})[gate[1]] !== false);
+export const permits = (role, gate) => !role || !gate || ((role[gate[0]] || {})[gate[1]] !== false);
 // Without these, a management user reads the collection like staff would.
 const READ_GATE = { payroll_runs: ["modules", "payroll"] };
 // Without these, a management user writes the collection like staff would.

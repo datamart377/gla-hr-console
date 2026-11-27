@@ -382,8 +382,8 @@ data.settings = {
     ] },
   ],
   roles: [
-    { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action.", modules: { ...allMods(true), selfservice: false }, actions: allActs(true) },
-    { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll.", modules: { ...allMods(true), stock: false, settings: false, selfservice: false }, actions: { ...allActs(true), manageSettings: false, manageStock: false } },
+    { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
+    { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll, stock and settings, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
     { id: "finance", name: "Finance Officer", description: "Staff self-service plus salary advances, suppliers & purchase orders, requisition payments and stock.", modules: { dashboard: true, employees: false, leave: true, attendance: true, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: false, settings: false, selfservice: true }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
