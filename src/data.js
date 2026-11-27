@@ -1400,25 +1400,30 @@ export function getGeofences() { return _geofences; }
 //            circle still reaches the fence, so weak GPS can neither confirm
 //            nor rule out the site — treated as on-site, flagged low-accuracy
 //   "out"  – beyond the fence even allowing for the whole error margin
-export function matchGeofence(lat, lng, accuracy) {
-  const acc = Math.max(0, Number(accuracy) || 0);
-  let best = null;
-  for (const g of _geofences) {
-    const radius = Number(g.radius) || 150;
-    const d = distanceMeters(lat, lng, Number(g.lat), Number(g.lng));
-    if (!best || d < best.distanceM) best = { fence: { ...g, radius }, distanceM: d };
-  }
-  if (!best) return null;
-  const radius = best.fence.radius, d = best.distanceM;
+// Grade one site against a GPS fix: in (inside, precise) / near (accuracy circle
+// reaches it) / out.
+function gradeFence(g, d, acc) {
+  const radius = Number(g.radius) || 150;
   const reliable = acc <= radius;              // fix precise relative to the fence
   const inside = d <= radius;                  // best estimate inside the fence
   const reaches = d <= radius + acc;           // accuracy circle still touches the fence
   const verdict = inside && reliable ? "in" : reaches ? "near" : "out";
-  best.verdict = verdict;
-  best.within = verdict !== "out";             // counts as on-site for attendance
-  best.accuracy = acc;
-  best.lowAccuracy = acc > radius;
-  return best;
+  return { fence: { ...g, radius }, distanceM: d, verdict, within: verdict !== "out", accuracy: acc, lowAccuracy: acc > radius };
+}
+// Match a GPS fix to a site. Returns the nearest site, plus `candidates`: every
+// site the fix can't rule out (its accuracy circle reaches the site's fence),
+// nearest first. When more than one site is a candidate the reading can't tell
+// them apart (`ambiguous`) and the person confirms which one they're at;
+// `preferId` selects that site (only honoured if it's a candidate).
+export function matchGeofence(lat, lng, accuracy, preferId) {
+  const acc = Math.max(0, Number(accuracy) || 0);
+  const all = _geofences
+    .map((g) => gradeFence(g, distanceMeters(lat, lng, Number(g.lat), Number(g.lng)), acc))
+    .sort((a, b) => a.distanceM - b.distanceM);
+  if (!all.length) return null;
+  const candidates = all.filter((m) => m.verdict !== "out").slice(0, 8);
+  const pick = (preferId && candidates.find((m) => m.fence.id === preferId)) || all[0];
+  return { ...pick, candidates, ambiguous: candidates.length > 1, chosen: !!(preferId && pick.fence.id === preferId && candidates.length > 1) };
 }
 // Grade an already-stored attendance record (which carries distanceM +
 // accuracy but may predate the verdict field) into in / near / out.

@@ -3379,22 +3379,54 @@ function ClockInModal({ ctx, empId }) {
   const [phase, setPhase] = useState("geo"); // geo | locating | located | error
   const [pos, setPos] = useState(null);
   const [match, setMatch] = useState(null);
+  const [siteId, setSiteId] = useState("");
   const [errMsg, setErrMsg] = useState("");
+  const [live, setLive] = useState(null);       // best reading so far while locating
+  const watchRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const bestRef = React.useRef(null);
 
-  const close = () => { ctx.setModal(null); };
+  const stopWatch = () => {
+    if (watchRef.current != null && navigator.geolocation) navigator.geolocation.clearWatch(watchRef.current);
+    watchRef.current = null;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
+  useEffect(() => stopWatch, []);
+  const close = () => { stopWatch(); ctx.setModal(null); };
 
   // ---- location capture ----
-  const applyPos = (lat, lng, accuracy, method) => { setPos({ lat, lng, accuracy, method }); setMatch(matchGeofence(lat, lng, accuracy)); setPhase("located"); };
+  // A phone's first reading is often a rough network fix (hundreds of metres
+  // off), which can land on a neighbouring station. Watch the GPS for up to
+  // ~15 s and keep the most precise reading, finishing early once it's sharp.
+  const GOOD_FIX_M = 25, MAX_WAIT_MS = 15000;
+  const applyPos = (lat, lng, accuracy, method) => {
+    const m = matchGeofence(lat, lng, accuracy);
+    setPos({ lat, lng, accuracy, method }); setMatch(m); setSiteId(m ? m.fence.id : ""); setPhase("located");
+  };
+  const finish = () => {
+    stopWatch();
+    const b = bestRef.current;
+    if (b) applyPos(b.lat, b.lng, b.accuracy, "GPS");
+    else { setPhase("error"); setErrMsg("Couldn't get a GPS reading. Check that location is switched on and try again."); }
+  };
   const useLocation = () => {
-    setErrMsg("");
+    setErrMsg(""); stopWatch(); bestRef.current = null; setLive(null);
     if (!navigator.geolocation) { setPhase("error"); setErrMsg("This device has no location services."); return; }
     setPhase("locating");
-    navigator.geolocation.getCurrentPosition(
-      (p) => applyPos(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "GPS"),
-      (e) => { setPhase("error"); setErrMsg(e && e.message ? e.message : "Location permission was blocked."); },
+    watchRef.current = navigator.geolocation.watchPosition(
+      (p) => {
+        const r = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy };
+        if (!bestRef.current || r.accuracy < bestRef.current.accuracy) { bestRef.current = r; setLive(r); }
+        if (r.accuracy <= GOOD_FIX_M) finish();
+      },
+      (e) => { if (!bestRef.current) { stopWatch(); setPhase("error"); setErrMsg(e && e.message ? e.message : "Location permission was blocked."); } },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
+    timerRef.current = setTimeout(finish, MAX_WAIT_MS);
   };
+  // The person confirms the site when the reading fits more than one.
+  const chooseSite = (id) => { setSiteId(id); if (pos) setMatch(matchGeofence(pos.lat, pos.lng, pos.accuracy, id)); };
   const confirm = async () => {
     const now = new Date();
     const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
@@ -3408,6 +3440,11 @@ function ClockInModal({ ctx, empId }) {
       overtime: 0, lat: pos.lat, lng: pos.lng, accuracy: Math.round(pos.accuracy || 0),
       geoSite: site, withinFence: within, verdict, lowAccuracy: match ? match.lowAccuracy : false,
       distanceM: match ? Math.round(match.distanceM) : null, method: pos.method,
+      // Audit trail when the reading fitted several sites and the person picked one.
+      ...(match && match.ambiguous ? {
+        siteConfirmedByUser: true,
+        nearbySites: match.candidates.map((c) => ({ id: c.fence.id, name: c.fence.name, distanceM: Math.round(c.distanceM) })),
+      } : {}),
     });
     await ctx.reload(); close();
   };
@@ -3431,10 +3468,11 @@ function ClockInModal({ ctx, empId }) {
         </div>
       )}
       {phase === "locating" && (
-        <div style={{ textAlign: "center", padding: "34px 0", color: "var(--text-2)" }}>
+        <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-2)" }}>
           <RefreshCw size={26} className="gla-spin" style={{ color: "var(--brand)", marginBottom: 10 }} />
-          <div style={{ fontWeight: 600, color: "var(--text)" }}>Acquiring GPS signal…</div>
-          <div style={{ fontSize: 12.5, marginTop: 4 }}>Allow location access if your browser asks.</div>
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>Getting an accurate GPS fix…</div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}>{live ? <>Current accuracy <b>±{Math.round(live.accuracy)} m</b> — improving. Stay still, ideally outdoors.</> : "Allow location access if your browser asks."}</div>
+          {live && <div style={{ marginTop: 12 }}><Btn size="sm" onClick={finish}>Use this reading now</Btn></div>}
         </div>
       )}
       {phase === "located" && match && (
@@ -3457,6 +3495,13 @@ function ClockInModal({ ctx, empId }) {
               </dl>
             </div>
           </div>
+          {match.ambiguous && (
+            <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 10, background: "var(--warning-dim)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Which site are you at?</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 8 }}>Your GPS reading (±{Math.round(pos.accuracy || 0)} m) fits more than one nearby site, so it can't tell them apart. Pick the one you're at — your choice and the nearby sites are recorded.</div>
+              <Select value={siteId} onChange={(e) => chooseSite(e.target.value)} options={match.candidates.map((c) => ({ value: c.fence.id, label: `${c.fence.name} · ${formatDistance(c.distanceM)} away` }))} />
+            </div>
+          )}
           {match.verdict === "out" && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle}>This point is outside the site geofence. The clock-in will be recorded and flagged for review.</Banner></div>}
           {match.verdict === "near" && <div style={{ marginTop: 14 }}><Banner Icon={AlertTriangle} tone="warning">Your GPS signal is weak (±{Math.round(pos.accuracy || 0)} m), so the exact position can't be confirmed — but it is within range of {match.fence.name}. For a sharper fix, step outside or near a window and re-capture.</Banner></div>}
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -7674,6 +7719,7 @@ function DailyRegister({ ctx }) {
       site: first ? (first.geoSite || first.site || "") : "", geo: first ? geoVerdictText(first) : "",
       dist: first && first.distanceM != null ? Math.round(first.distanceM) : "", acc: first && first.accuracy != null ? Math.round(first.accuracy) : "",
       count: ins.length, status, tone, rank, late: status === "Late", outside: !!(first && first.lat != null && geoVerdictOf(first) === "out"),
+      confirmed: !!(first && first.siteConfirmedByUser),
     };
   };
   const all = [...emps.map((e) => rowFor(e.id, e)), ...extraIds.map((id) => rowFor(id, null))];
@@ -7705,9 +7751,9 @@ function DailyRegister({ ctx }) {
   const fileTag = `${date}${filter !== "all" ? "-" + filter : ""}`;
 
   const exportCsv = () => {
-    const head = ["#", "Staff ID", "Name", "Department", "Job title", "Status", "Clock in", "Clock out", "Hours", "Site", "Geo-fence", "Distance (m)", "GPS accuracy (m)", "Clock-ins that day"];
+    const head = ["#", "Staff ID", "Name", "Department", "Job title", "Status", "Clock in", "Clock out", "Hours", "Site", "Site chosen by staff", "Geo-fence", "Distance (m)", "GPS accuracy (m)", "Clock-ins that day"];
     const lines = [`"Daily Clock-in Register — ${dayLabel}"`, `"${scope}"`, `"${summaryLine}"`, "", head.join(",")]
-      .concat(rows.map((r, i) => [i + 1, r.empId, r.name, r.dept, r.job, r.status, r.clockIn, r.clockOut, r.hours, r.site, r.geo, r.dist, r.acc, r.count || ""].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")));
+      .concat(rows.map((r, i) => [i + 1, r.empId, r.name, r.dept, r.job, r.status, r.clockIn, r.clockOut, r.hours, r.site, r.confirmed ? "Yes" : "", r.geo, r.dist, r.acc, r.count || ""].map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")));
     downloadFile(`gla-daily-register-${fileTag}.csv`, lines.join("\n"));
   };
   const exportPdf = () => downloadReportPdf({
@@ -7782,7 +7828,7 @@ function DailyRegister({ ctx }) {
             { label: "Clock in", render: (r) => <span className="mono" style={{ fontWeight: 600, color: r.late ? "var(--warning)" : "var(--text)" }}>{r.clockIn || "—"}</span> },
             { label: "Clock out", render: (r) => <span className="mono">{r.clockOut || "—"}</span> },
             { label: "Hours", num: true, render: (r) => r.hours || "—" },
-            { label: "Site", render: (r) => <span style={{ color: "var(--text-2)" }}>{r.site || "—"}{r.count > 1 ? <span style={{ color: "var(--muted)" }}> · {r.count} clock-ins</span> : null}</span> },
+            { label: "Site", render: (r) => <span style={{ color: "var(--text-2)" }}>{r.site || "—"}{r.confirmed ? <span style={{ color: "var(--muted)" }} title={(r.rec && r.rec.nearbySites || []).map((x) => `${x.name} (${x.distanceM} m)`).join("\n")}> · chosen by staff</span> : null}{r.count > 1 ? <span style={{ color: "var(--muted)" }}> · {r.count} clock-ins</span> : null}</span> },
             { label: "Geo-fence", render: (r) => r.rec ? <GeoPill a={r.rec} /> : <span style={{ color: "var(--muted)" }}>—</span> },
           ]}
           rows={rows}
