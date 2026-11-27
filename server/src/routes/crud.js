@@ -131,7 +131,17 @@ const STAFF_CREATE = new Set(["leave", "attendance", "advances", "requisitions"]
 // Fields a staff user may change on their OWN row. undefined => no updates
 // allowed; a Set => only those fields; null => any field on their own row.
 const STAFF_UPDATE_FIELDS = {
-  employees: new Set(["profileDraft", "profileStatus", "profileSubmittedAt"]),
+  // "Update My Details" saves straight to the record: the self-editable profile
+  // fields (never salary, role, department, job title or status) plus the
+  // change log. Mirrors PROFILE_*_FIELDS in the web client.
+  employees: new Set([
+    "firstName", "lastName", "gender", "dob", "nationalId", "maritalStatus", "religion", "disability", "nationality",
+    "phone", "email", "address", "fileNumber", "tin", "nssfNumber", "bankName", "bankAccount", "bankBranch",
+    "emergencyName", "emergencyRelation", "emergencyPhone", "nextOfKinName", "nextOfKinDetails",
+    "origin", "residence", "contact",
+    "academicQualifications", "bankDetails", "employmentHistory", "professionalSpecialization", "professionalMembership", "children", "nextOfKin",
+    "profileDraft", "profileStatus", "profileSubmittedAt", "profileUpdatedAt", "profileChanges",
+  ]),
   leave: new Set(["returnedAt"]),
   attendance: null,
 };

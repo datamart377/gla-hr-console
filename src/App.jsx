@@ -822,39 +822,52 @@ function profileChanges(emp) {
 
 function MyProfileEdit({ ctx }) {
   const emp = ctx.currentEmp;
-  const pending = emp.profileStatus === "pending";
   const [f, setF] = useState(() => normalizeEmployee({ ...emp, ...(emp.profileDraft || {}) }));
   const [saving, setSaving] = useState(false);
   const [sent, setSent] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const setN = (g, k) => (e) => setF((s) => ({ ...s, [g]: { ...s[g], [k]: e.target.value } }));
   const setArr = (k) => (arr) => setF((s) => ({ ...s, [k]: arr }));
+  // Changes are saved straight to the staff record (no approval step). Each
+  // save is logged on the record — when, by whom and which fields changed.
   const submit = async () => {
     if (!f.firstName || !f.lastName) return alert("First name and surname are required.");
+    const keys = [...PROFILE_FLAT_FIELDS, ...PROFILE_GROUP_FIELDS, ...PROFILE_ARRAY_FIELDS];
+    const base = normalizeEmployee(emp);
+    const same = (a, b) => JSON.stringify(a ?? "") === JSON.stringify(b ?? "");
+    const changed = keys.filter((k) => !same(f[k], base[k]));
+    if (!changed.length && !emp.profileDraft) { setSent("nochange"); return; }
     setSaving(true);
-    const draft = {};
-    [...PROFILE_FLAT_FIELDS, ...PROFILE_GROUP_FIELDS, ...PROFILE_ARRAY_FIELDS].forEach((k) => { draft[k] = f[k]; });
-    await employeesApi.update(emp.id, { profileDraft: draft, profileStatus: "pending", profileSubmittedAt: new Date().toISOString() });
-    await ctx.reload();
-    setSaving(false); setSent(true);
+    const now = new Date().toISOString();
+    const patch = {};
+    keys.forEach((k) => { patch[k] = f[k]; });
+    const log = [{ at: now, by: `${emp.firstName} ${emp.lastName}`.trim(), fields: changed }, ...(Array.isArray(emp.profileChanges) ? emp.profileChanges : [])].slice(0, 50);
+    try {
+      await employeesApi.update(emp.id, { ...patch, profileDraft: null, profileStatus: "updated", profileUpdatedAt: now, profileChanges: log });
+      await ctx.reload();
+      setSent(true);
+    } catch (e) {
+      alert("Your details could not be saved: " + (e && e.message ? e.message : "please try again."));
+    } finally { setSaving(false); }
   };
+  const lastSaved = emp.profileUpdatedAt ? reqDateTime(emp.profileUpdatedAt) : "";
   return (
     <>
-      {(pending || sent) && (
-        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--info-dim)", border: "1px solid var(--border)" }}>
+      {sent === true && (
+        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--success-dim, var(--info-dim))", border: "1px solid var(--border)" }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <Timer size={18} style={{ color: "var(--accent)", flex: "none" }} />
-            <div style={{ fontSize: 13, color: "var(--text)" }}><b>Your changes are awaiting admin approval.</b> The official record stays unchanged until an administrator validates them. You can keep editing and resubmit below.</div>
+            <Check size={18} style={{ color: "var(--success)", flex: "none" }} />
+            <div style={{ fontSize: 13, color: "var(--text)" }}><b>Saved.</b> Your staff record has been updated.</div>
           </div>
         </Card>
       )}
-      {emp.profileStatus === "rejected" && !sent && (
-        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--danger-dim)", border: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 13, color: "var(--text)" }}><b>Your last submission was not approved.</b> Please review your details and resubmit.</div>
+      {sent === "nochange" && (
+        <Card style={{ padding: "14px 18px", marginBottom: 16, background: "var(--info-dim)", border: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 13, color: "var(--text)" }}>Nothing has changed since your last save.</div>
         </Card>
       )}
       <Card style={{ padding: 24 }}>
-        <div style={{ marginBottom: 14, color: "var(--text-2)", fontSize: 12.5 }}>Update your personal, contact, bank and statutory details. Salary and role assignment are managed by HR. Your changes are submitted for admin approval and do not change the official record until approved.</div>
+        <div style={{ marginBottom: 14, color: "var(--text-2)", fontSize: 12.5 }}>Update your personal, contact, bank and statutory details. Changes are saved straight to your staff record. Salary, role and your sign-in email are managed by HR.{lastSaved && <> Last updated {lastSaved}.</>}</div>
         <div style={formGrid}>
           <FieldsetTitle first>Identity</FieldsetTitle>
           <Field label="First name" required><Input value={f.firstName} onChange={set("firstName")} /></Field>
@@ -920,7 +933,7 @@ function MyProfileEdit({ ctx }) {
           <Repeater label="Next of Kin" Icon={HeartHandshake} value={f.nextOfKin} onChange={setArr("nextOfKin")} fields={REPEATER_SCHEMAS.nextOfKin} />
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-          <Btn variant="primary" disabled={saving} onClick={submit}><Check size={15} />{saving ? "Submitting…" : "Submit for approval"}</Btn>
+          <Btn variant="primary" disabled={saving} onClick={submit}><Check size={15} />{saving ? "Saving…" : "Save changes"}</Btn>
         </div>
       </Card>
     </>
@@ -973,7 +986,7 @@ function ProfileApprovals({ ctx }) {
 /* ============================ Staff portal ============================== */
 const STAFF_META = {
   myportal: ["My Portal", "Your self-service dashboard"],
-  myprofile: ["Update My Details", "Submit profile changes for admin approval"],
+  myprofile: ["Update My Details", "Keep your personal, contact and bank details up to date"],
   clockin: ["Clock In", "Capture attendance with your location"],
   myleave: ["My Leave", "Apply for and track your leave"],
   mypayslip: ["My Payslip", "Your monthly pay breakdown"],
@@ -1730,7 +1743,7 @@ function MyPortal({ ctx, setSv }) {
     <>
       <Announcements ctx={ctx} audience="staff" />
       <ActionCenter ctx={ctx} navigate={(m) => setSv(m)} modules={["requisitions"]} title="Awaiting your approval" />
-      {emp.profileStatus === "pending" && <Card style={{ padding: "12px 16px", marginBottom: 14, background: "var(--info-dim)", border: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}><Timer size={16} style={{ color: "var(--accent)" }} /><div style={{ fontSize: 12.5, color: "var(--text)" }}>Your submitted profile changes are awaiting admin approval.</div></Card>}
+      {emp.profileStatus === "pending" && <Card style={{ padding: "12px 16px", marginBottom: 14, background: "var(--info-dim)", border: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}><Timer size={16} style={{ color: "var(--accent)" }} /><div style={{ fontSize: 12.5, color: "var(--text)" }}>You have unsaved profile changes from earlier. Open <b>Update My Details</b> and press <b>Save changes</b> to apply them.</div></Card>}
       <Card style={{ padding: "20px 22px", marginBottom: 16, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <Avatar emp={emp} size={52} />
         <div style={{ flex: 1, minWidth: 200 }}>
