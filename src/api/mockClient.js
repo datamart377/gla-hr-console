@@ -14,7 +14,7 @@
    returns a Promise and clones its payload, mirroring a network boundary —
    swapping in real `fetch` calls later requires no changes in App.jsx.
    ------------------------------------------------------------------------- */
-import { data, normalizeEmployee, normalizeRequisition, normalizePurchaseOrder, normalizeQuotation } from "../data.js";
+import { data, normalizeEmployee, normalizeRequisition, normalizePurchaseOrder, normalizeQuotation, normalizeClient } from "../data.js";
 
 const LATENCY = 130; // ms — simulate a network round-trip
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -117,6 +117,9 @@ requisitionsApi.update = (id, body = {}) => {
 export const quotationsApi = makeCrud("quotations", "QUO");
 const _rawQuoteCreate = quotationsApi.create;
 quotationsApi.create = (record) => _rawQuoteCreate(normalizeQuotation(record));
+export const clientsApi = makeCrud("clients", "CLI");
+const _rawClientCreate = clientsApi.create;
+clientsApi.create = (record) => _rawClientCreate(normalizeClient(record));
 export const purchaseOrdersApi = makeCrud("purchaseOrders", "PO");
 const _rawPoCreate = purchaseOrdersApi.create;
 purchaseOrdersApi.create = (record) => _rawPoCreate(normalizePurchaseOrder(record));

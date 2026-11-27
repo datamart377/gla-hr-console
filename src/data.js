@@ -454,12 +454,37 @@ export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined"];
 export const quoteStatusLabel = (s) => ({ draft: "Draft", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired" }[s] || s);
 export const quoteStatusTone = (s) => ({ draft: "muted", sent: "accent", accepted: "success", declined: "danger", expired: "warning" }[s] || "muted");
 export const QUOTE_UNITS = ["item", "lot", "lsum", "mtrs", "pcs", "nos", "sets", "rolls", "ltrs", "kgs", "days", "hrs", "trips"];
+/* --------------------------------- clients --------------------------------- */
+// The firms Global Link quotes to. Every quotation is raised against one.
+export const CLIENT_STATUSES = ["Active", "Inactive"];
+const splitSites = (v) => (Array.isArray(v) ? v : String(v || "").split(/\r?\n|;/)).map((x) => String(x).trim()).filter(Boolean);
+export function normalizeClient(c = {}) {
+  return {
+    id: c.id,
+    name: String(c.name || "").trim(),
+    contactPerson: c.contactPerson || "",
+    phone: c.phone || "",
+    email: c.email || "",
+    address: c.address || "",
+    tin: c.tin || "",
+    sites: splitSites(c.sites),
+    notes: c.notes || "",
+    status: CLIENT_STATUSES.includes(c.status) ? c.status : "Active",
+    createdAt: c.createdAt || new Date().toISOString(),
+    updatedAt: c.updatedAt || new Date().toISOString(),
+  };
+}
+export const sameClientName = (a, b) => String(a || "").trim().toLowerCase().replace(/\s+/g, " ") === String(b || "").trim().toLowerCase().replace(/\s+/g, " ");
+// The client a quotation belongs to: by clientId, else (older quotes) by name.
+export const clientOfQuote = (q, clients) => (clients || []).find((c) => c.id === q.clientId) || (q.clientId ? null : (clients || []).find((c) => sameClientName(c.name, q.client))) || null;
+
 export function normalizeQuotation(q = {}) {
   const lineItems = (Array.isArray(q.lineItems) ? q.lineItems : [])
     .map((li) => ({ description: li.description || "", unit: li.unit || "item", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 }));
   return {
     id: q.id,
     quoteNo: q.quoteNo || "",
+    clientId: q.clientId || "",
     client: q.client || "",
     attn: q.attn || "",
     scope: q.scope || "",
@@ -504,9 +529,14 @@ export function nextQuoteNumber(existing = []) {
 
 // Demo quotation (mock build only — the live table starts empty): the Global
 // Link "Mayuge pole lights" quote for Vivo Energy.
+data.clients = [
+  normalizeClient({ id: "CLI-0001", name: "VIVO ENERGY", contactPerson: "Irene", phone: "", email: "", address: "Kampala, Uganda", sites: ["SUL Mayuge"], status: "Active", notes: "Shell-branded service stations (Vivo Energy Uganda)." }),
+  normalizeClient({ id: "CLI-0002", name: "TotalEnergies Marketing Uganda", contactPerson: "Procurement", address: "Kampala, Uganda", sites: ["TotalEnergies Ntinda"], status: "Active" }),
+];
+
 data.quotations = [
   normalizeQuotation({
-    id: "QUO-0063", quoteNo: "Gla/063/26", client: "VIVO ENERGY", attn: "Irene",
+    id: "QUO-0063", quoteNo: "Gla/063/26", clientId: "CLI-0001", client: "VIVO ENERGY", attn: "Irene",
     scope: "Repairs to Peripheral area Lighting", sites: "SUL Mayuge", date: "2026-04-01", validityDays: 30, currency: "UGX", vatRate: 18,
     lineItems: [
       { description: "Mobilisation, HSSE and transportation of Human resource and materials to site", unit: "item", qty: 1, rate: 200000 },

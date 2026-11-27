@@ -23,7 +23,7 @@ const PREFIXES = {
   ledger_columns: "col", payroll_runs: "PR", suppliers: "SUP",
   supplier_schedule: "SL", supplier_runs: "SPR", advances: "ADV",
   stock_items: "STK", stock_movements: "MOV", stock_closings: "CLS",
-  bank_approvals: "BAPP", requisitions: "REQ", quotations: "QUO",
+  bank_approvals: "BAPP", requisitions: "REQ", quotations: "QUO", clients: "CLI",
 };
 
 const genId = (table) => {
@@ -56,7 +56,7 @@ export async function liveRole(roleId) {
 }
 export const permits = (role, gate) => !role || !gate || ((role[gate[0]] || {})[gate[1]] !== false);
 // Without these, a management user reads the collection like staff would.
-const READ_GATE = { payroll_runs: ["modules", "payroll"], quotations: ["modules", "quotations"] };
+const READ_GATE = { payroll_runs: ["modules", "payroll"], quotations: ["modules", "quotations"], clients: ["modules", "quotations"] };
 // Without these, a management user writes the collection like staff would.
 const WRITE_GATE = {
   employees: ["actions", "editEmployees"],
@@ -71,6 +71,7 @@ const WRITE_GATE = {
   stock_movements: ["actions", "manageStock"],
   stock_closings: ["actions", "manageStock"],
   quotations: ["modules", "quotations"],
+  clients: ["modules", "quotations"],
 };
 // Does this user act with management powers on `table` for `mode`?
 async function mgmtFor(req, table, mode) {
@@ -186,6 +187,25 @@ function shapeForStaff(table, rec, empId) {
     return { ...rec, rows, totals: null };
   }
   return rec;
+}
+
+// ---- Clients & quotations -------------------------------------------------
+// A quotation must be raised against an existing client: clientId is required
+// and the printed client name is always taken from the client record.
+const normName = (v) => String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+async function linkQuoteClient(doc, creating) {
+  if (!creating && !("clientId" in doc) && !("client" in doc)) return null; // e.g. a status change
+  const clientId = String(doc.clientId || "").trim();
+  if (!clientId) return "Choose an existing client for this quotation (add the client first if they're new).";
+  const { rows } = await query(`SELECT doc FROM clients WHERE id = $1`, [clientId]);
+  if (!rows.length) return "That client no longer exists. Choose an existing client for this quotation.";
+  doc.clientId = clientId;
+  doc.client = rows[0].doc.name || doc.client || "";
+  return null;
+}
+async function clientNameTaken(name, exceptId) {
+  const { rows } = await query(`SELECT id, doc->>'name' AS name FROM clients`);
+  return rows.some((r) => r.id !== exceptId && normName(r.name) === normName(name));
 }
 
 // ---- Requisitions: dedicated create + approval-transition handlers ---------
@@ -374,6 +394,14 @@ export function crudRouter(table) {
         if (!STAFF_CREATE.has(table)) return res.status(403).json({ error: "You do not have permission to create this record." });
         body[OWN_FIELD[table]] = req.user.empId; // force the new row to belong to the caller
       }
+      if (table === "quotations") {
+        const problem = await linkQuoteClient(body, true);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+      if (table === "clients") {
+        if (!String(body.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });
+        if (await clientNameTaken(body.name, null)) return res.status(409).json({ error: `A client named "${String(body.name).trim()}" already exists.` });
+      }
       const id = body.id || genId(table);
       const shaped = table === "purchase_orders" ? await shapePurchaseOrder(req, body, null) : body;
       const { id: _omit, ...doc } = shaped;
@@ -425,6 +453,14 @@ export function crudRouter(table) {
         const cur = await query(`SELECT doc FROM purchase_orders WHERE id = $1`, [req.params.id]);
         patch = await shapePurchaseOrder(req, patch, cur.rows[0] ? cur.rows[0].doc : null);
       }
+      if (table === "quotations") {
+        const problem = await linkQuoteClient(patch, false);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+      if (table === "clients" && "name" in patch) {
+        if (!String(patch.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });
+        if (await clientNameTaken(patch.name, req.params.id)) return res.status(409).json({ error: `A client named "${String(patch.name).trim()}" already exists.` });
+      }
       const { rows } = await query(
         `UPDATE ${table}
             SET doc = doc || $2::jsonb, updated_at = now()
@@ -447,6 +483,10 @@ export function crudRouter(table) {
   router.delete("/:id", async (req, res, next) => {
     try {
       if (!(await mgmtFor(req, table, "delete"))) return res.status(403).json({ error: "You do not have permission to delete this record." });
+      if (table === "clients") {
+        const used = await query(`SELECT count(*)::int AS n FROM quotations WHERE doc->>'clientId' = $1`, [req.params.id]);
+        if (used.rows[0].n) return res.status(409).json({ error: `This client has ${used.rows[0].n} quotation(s) on record and can't be deleted. Mark the client Inactive instead.` });
+      }
       const { rowCount } = await query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
       if (!rowCount) return res.status(404).json({ error: "Record not found." });
       res.json({ id: req.params.id, deleted: true });

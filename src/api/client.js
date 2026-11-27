@@ -30,6 +30,7 @@ export const bankApprovalsApi = impl.bankApprovalsApi;
 export const requisitionsApi = impl.requisitionsApi;
 export const purchaseOrdersApi = impl.purchaseOrdersApi;
 export const quotationsApi = impl.quotationsApi;
+export const clientsApi = impl.clientsApi;
 export const advancesApi = impl.advancesApi;
 export const settingsApi = impl.settingsApi;
 export const notifyApi = impl.notifyApi;

@@ -17,11 +17,11 @@ import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js"
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
-  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi, quotationsApi,
+  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi, quotationsApi, clientsApi,
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
-  data, TODAY, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
+  data, TODAY, normalizeClient, CLIENT_STATUSES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
@@ -346,7 +346,7 @@ const actorName = (ctx) => {
   return n ? (role ? `${n} (${role})` : n) : (role || "HR");
 };
 const VIEW_META = {
-  quotations: ["Quotations", "Client quotations — scope, priced items, 18% VAT and approved signatory"],
+  quotations: ["Quotations", "Client quotations and the client register — scope, priced items, 18% VAT and approved signatory"],
   dashboard: ["Workforce Overview", "Front-end demo — HR snapshot for Global Link Associates Ltd"],
   employees: ["Employee Register", "Staff records, contracts and statutory details"],
   approvals: ["Profile Approvals", "Review and validate staff-submitted profile changes"],
@@ -365,7 +365,7 @@ const VIEW_META = {
 };
 
 export default function App() {
-  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], purchaseOrders: [], quotations: [], settings: null });
+  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], purchaseOrders: [], quotations: [], clients: [], settings: null });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [auth, setAuth] = useState(null); // { empId, role }
@@ -374,14 +374,14 @@ export default function App() {
   const lastPwRef = useRef(""); // the password just typed at sign-in (memory only) — spares re-typing it on the change screen
 
   const reload = async () => {
-    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings, quotations] = await Promise.all([
+    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings, quotations, clients] = await Promise.all([
       employeesApi.list(), leaveApi.list(), attendanceApi.list(), appraisalsApi.list(),
-      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(), quotationsApi.list().catch(() => []),
+      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(), quotationsApi.list().catch(() => []), clientsApi.list().catch(() => []),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
     if (settings && settings.signatories) setReportSignatories(settings.signatories); // dynamic approved signatories
     setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
-    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, quotations, settings });
+    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, quotations, clients, settings });
   };
   useEffect(() => {
     (async () => {
@@ -5664,6 +5664,8 @@ function excelQuote(ctx, raw) {
 
 function Quotations({ ctx }) {
   const { store, setModal } = ctx;
+  const [tab, setTab] = useState("quotes"); // quotes | clients
+  const clients = (store.clients || []).map(normalizeClient);
   const all = (store.quotations || []).map(normalizeQuotation).sort((a, b) => String(b.date + b.createdAt).localeCompare(String(a.date + a.createdAt)));
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
@@ -5681,17 +5683,20 @@ function Quotations({ ctx }) {
     <>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
         <StatCard Icon={FileSignature} label="Quotations" value={all.length} meta={`${withStatus.filter((x) => x._st === "draft").length} draft`} tone="brand" />
-        <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`UGX ${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
-        <StatCard Icon={Check} label="Accepted" value={won.length} meta={`UGX ${ugxShort(ugx(won))} won`} tone="success" />
+        <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
+        <StatCard Icon={Check} label="Accepted" value={won.length} meta={`${ugxShort(ugx(won))} won`} tone="success" />
         <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
       </div>
       <Toolbar>
-        <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
-        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
-        <div style={{ flex: 1 }} />
-        <Btn variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} />)}><Plus size={16} />New quotation</Btn>
+        <SegTabs value={tab} onChange={setTab} options={[["quotes", "Quotations", all.length], ["clients", "Clients", clients.length]]} />
+        {tab === "quotes" && <>
+          <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
+          <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
+          <div style={{ flex: 1 }} />
+          <Btn variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} />)}><Plus size={16} />New quotation</Btn>
+        </>}
       </Toolbar>
-      <Card>
+      {tab === "clients" ? <ClientsPanel ctx={ctx} quotes={withStatus} onShowQuotes={(c) => { setQ(c.name); setSt(""); setTab("quotes"); }} /> : <Card>
         <DataTable
           columns={[
             { label: "Our Ref", render: (x) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span> },
@@ -5713,23 +5718,165 @@ function Quotations({ ctx }) {
             ) },
           ]}
           rows={rows}
-          empty={all.length ? "No quotations match your filters." : "No quotations yet. Click “New quotation” to prepare one."}
+          empty={all.length ? "No quotations match your filters." : clients.length ? "No quotations yet. Click “New quotation” to prepare one for a client." : "No quotations yet. Add your clients on the Clients tab, then click “New quotation”."}
+        />
+      </Card>}
+    </>
+  );
+}
+
+// Segmented tab switch: options = [[value, label, count?], …]
+function SegTabs({ value, onChange, options }) {
+  return (
+    <div style={{ display: "inline-flex", gap: 4, padding: 3, borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+      {options.map(([k, label, n]) => (
+        <button key={k} type="button" onClick={() => onChange(k)}
+          style={{ border: 0, cursor: "pointer", padding: "6px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)",
+            background: value === k ? "var(--surface)" : "transparent", color: value === k ? "var(--text)" : "var(--muted)", boxShadow: value === k ? "var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08))" : "none" }}>
+          {label}{n != null && <> <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.8 }}>{n}</span></>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Client register (Quotations → Clients). A client with quotations can't be
+// deleted — mark it Inactive instead so it stops being offered for new quotes.
+function ClientsPanel({ ctx, quotes, onShowQuotes }) {
+  const { store, setModal } = ctx;
+  const [q, setQ] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const clients = (store.clients || []).map(normalizeClient).sort((a, b) => a.name.localeCompare(b.name));
+  const stats = (c) => {
+    const mine = quotes.filter((x) => x.clientId === c.id);
+    const ugxOf = (l) => l.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
+    return { n: mine.length, quoted: ugxOf(mine), won: ugxOf(mine.filter((x) => x._st === "accepted")), last: mine.map((x) => x.date).sort().pop() || "" };
+  };
+  let rows = clients.filter((c) => showInactive || c.status !== "Inactive");
+  if (q.trim()) { const k = q.trim().toLowerCase(); rows = rows.filter((c) => [c.name, c.contactPerson, c.phone, c.email, c.sites.join(" "), c.tin].join(" ").toLowerCase().includes(k)); }
+  const inactiveCount = clients.filter((c) => c.status === "Inactive").length;
+  const canDel = canDo(ctx, "deleteRecords");
+  return (
+    <>
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search client, contact, site or TIN…" />
+        {inactiveCount > 0 && <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show inactive ({inactiveCount})</label>}
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={null} />)}><Plus size={16} />New client</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Client", render: (c) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{c.name}</div>{c.address && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{c.address}</div>}</div> },
+            { label: "Contact", render: (c) => <div style={{ fontSize: 12.5 }}><div style={{ color: "var(--text)" }}>{c.contactPerson || "—"}</div><div style={{ color: "var(--muted)" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}</div></div> },
+            { label: "Sites", render: (c) => <div style={{ maxWidth: 260, fontSize: 12.5, color: "var(--text-2)" }}>{c.sites.length ? c.sites.join(", ") : "—"}</div> },
+            { label: "Quotations", render: (c) => { const st = stats(c); return st.n ? <span style={{ color: "var(--brand)", fontWeight: 600, cursor: "pointer" }} onClick={() => onShowQuotes(c)} title="Show this client's quotations">{st.n} · last {fmtDate(st.last)}</span> : <span style={{ color: "var(--muted)" }}>None yet</span>; } },
+            { label: "Quoted (UGX)", num: true, render: (c) => { const st = stats(c); return <div><div className="mono">{fmtN(st.quoted)}</div>{st.won > 0 && <div style={{ fontSize: 11, color: "var(--success)" }}>{fmtN(st.won)} won</div>}</div>; } },
+            { label: "Status", render: (c) => <Pill tone={c.status === "Active" ? "success" : "muted"}>{c.status}</Pill> },
+            { label: "", render: (c) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                {c.status === "Active" && <Btn size="sm" variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={c.id} />)} title="New quotation for this client"><Plus size={13} />Quote</Btn>}
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={c.id} />)} title="Edit"><Pencil size={13} /></Btn>
+                {canDel && (stats(c).n
+                  ? <Btn size="sm" disabled title="Has quotations — mark Inactive instead"><Trash2 size={13} /></Btn>
+                  : <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={clientsApi} id={c.id} label={c.name} />)} title="Delete"><Trash2 size={13} /></Btn>)}
+              </div>
+            ) },
+          ]}
+          rows={rows}
+          empty={clients.length ? "No clients match your search." : "No clients yet. Click “New client” to add the first one."}
         />
       </Card>
     </>
   );
 }
 
-function QuotationForm({ ctx, id, copyOf }) {
+// Fields shared by the full client form and the quick-add inside a quotation.
+async function saveClient(ctx, existing, f) {
+  const name = String(f.name || "").trim();
+  if (!name) throw new Error("Enter the client's name.");
+  const clash = (ctx.store.clients || []).find((c) => c.id !== (existing && existing.id) && sameClientName(c.name, name));
+  if (clash) throw new Error(`A client named "${clash.name}" already exists.`);
+  const now = new Date().toISOString();
+  const payload = { ...normalizeClient({ ...f, name }), id: undefined, updatedAt: now };
+  delete payload.id;
+  return existing ? clientsApi.update(existing.id, payload) : clientsApi.create({ ...payload, createdAt: now });
+}
+
+function ClientForm({ ctx, id }) {
+  const existing = id ? (ctx.store.clients || []).find((c) => c.id === id) : null;
+  const [f, setF] = useState(() => { const c = normalizeClient(existing || {}); return { ...c, sites: c.sites.join("\n") }; });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try { await saveClient(ctx, existing, f); await ctx.reload(); ctx.setModal(null); }
+    catch (e) { setErr(e.message || "Couldn't save the client."); setBusy(false); }
+  };
+  return (
+    <Modal title={existing ? "Edit client" : "New client"} sub={existing ? existing.name : "Quotations are raised against clients on this register"} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={submit}><Check size={15} />{busy ? "Saving…" : existing ? "Save changes" : "Add client"}</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Client name" required full hint="As it should appear after “Quote to:” on the quotation"><Input value={f.name} onChange={set("name")} placeholder="e.g. VIVO ENERGY" autoFocus /></Field>
+        <Field label="Contact person (Attn)"><Input value={f.contactPerson} onChange={set("contactPerson")} placeholder="e.g. Irene" /></Field>
+        <Field label="Phone"><Input value={f.phone} onChange={set("phone")} placeholder="+256 …" /></Field>
+        <Field label="Email"><Input type="email" value={f.email} onChange={set("email")} placeholder="procurement@client.co.ug" /></Field>
+        <Field label="TIN"><Input value={f.tin} onChange={set("tin")} /></Field>
+        <Field label="Address" full><Input value={f.address} onChange={set("address")} placeholder="Plot, street, town" /></Field>
+        <Field label="Sites / stations" full hint="One per line — offered when you fill in “Sites” on a quotation"><Textarea value={f.sites} onChange={set("sites")} placeholder={"SUL Mayuge\nShell Ndeeba"} /></Field>
+        <Field label="Status" hint="Inactive clients aren't offered for new quotations"><Select value={f.status} onChange={set("status")} options={CLIENT_STATUSES} /></Field>
+        <Field label="Notes" full><Textarea value={f.notes} onChange={set("notes")} /></Field>
+      </div>
+      {err && <div style={{ marginTop: 12, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const { store, setModal, reload } = ctx;
   const list = store.quotations || [];
+  const allClients = (store.clients || []).map(normalizeClient);
   const existing = id ? list.find((x) => x.id === id) : null;
   const source = copyOf ? list.find((x) => x.id === copyOf) : null;
   const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "");
-  const [f, setF] = useState(() => existing ? normalizeQuotation(existing) : normalizeQuotation({
-    ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined } : {}),
-    quoteNo: nextQuoteNumber(list), date: TODAY, preparedBy: me,
-  }));
+  const [f, setF] = useState(() => {
+    const base = existing ? normalizeQuotation(existing) : normalizeQuotation({
+      ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined } : {}),
+      quoteNo: nextQuoteNumber(list), date: TODAY, preparedBy: me,
+    });
+    // Link to the client record (older quotations are matched by name).
+    const c = presetClientId ? allClients.find((x) => x.id === presetClientId) : clientOfQuote(base, allClients);
+    if (!c) return { ...base, clientId: "" };
+    return { ...base, clientId: c.id, client: c.name, attn: base.attn || c.contactPerson, sites: base.sites || (c.sites.length === 1 ? c.sites[0] : "") };
+  });
+  const [adding, setAdding] = useState(() => !(store.clients || []).length);
+  const [nc, setNc] = useState({ name: "", contactPerson: "", phone: "", email: "", sites: "" });
+  const [ncErr, setNcErr] = useState("");
+  const [ncBusy, setNcBusy] = useState(false);
+  const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
+  const selClient = allClients.find((c) => c.id === f.clientId) || null;
+  // Switch client: Attn and Sites follow the client unless they were typed in.
+  const applyClient = (s, c) => {
+    const prev = allClients.find((x) => x.id === s.clientId);
+    const attnWasDefault = !s.attn || (prev && s.attn === prev.contactPerson);
+    const sitesWasDefault = !s.sites || (prev && prev.sites.includes(s.sites));
+    return { ...s, clientId: c ? c.id : "", client: c ? c.name : "",
+      attn: attnWasDefault ? (c ? c.contactPerson : "") : s.attn,
+      sites: sitesWasDefault ? (c && c.sites.length === 1 ? c.sites[0] : "") : s.sites };
+  };
+  const pickClient = (cid) => setF((s) => applyClient(s, allClients.find((x) => x.id === cid)));
+  const addClient = async () => {
+    setNcBusy(true); setNcErr("");
+    try {
+      const saved = await saveClient(ctx, null, nc);
+      await reload();
+      const c = normalizeClient(saved);
+      setF((s) => { const r = applyClient(s, c); return { ...r, attn: r.attn || c.contactPerson, sites: r.sites || (c.sites.length === 1 ? c.sites[0] : "") }; });
+      setNc({ name: "", contactPerson: "", phone: "", email: "", sites: "" }); setAdding(false);
+    } catch (e) { setNcErr(e.message || "Couldn't add the client."); }
+    setNcBusy(false);
+  };
   const [busy, setBusy] = useState(false);
   const [printAfter, setPrintAfter] = useState(true);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -5739,9 +5886,8 @@ function QuotationForm({ ctx, id, copyOf }) {
   const moveItem = (i, d) => setF((s) => { const a = [...s.lineItems]; const j = i + d; if (j < 0 || j >= a.length) return s; [a[i], a[j]] = [a[j], a[i]]; return { ...s, lineItems: a }; });
   const t = quoteTotals(f);
   const cur = f.currency || "UGX";
-  const clients = [...new Set(list.map((x) => x.client).filter(Boolean))].sort();
   const save = async (status) => {
-    if (!String(f.client).trim()) return alert("Enter who the quotation is for (Quote to).");
+    if (!f.clientId || !allClients.some((c) => c.id === f.clientId)) return alert("Choose the client this quotation is for. If they're new, add them first with “New client”.");
     if (!String(f.quoteNo).trim()) return alert("Enter the quotation reference (Our Ref).");
     const valid = f.lineItems.filter((it) => String(it.description || "").trim());
     if (!valid.length) return alert("Add at least one item with a description.");
@@ -5752,7 +5898,7 @@ function QuotationForm({ ctx, id, copyOf }) {
       const now = new Date().toISOString();
       const nextStatus = status || f.status;
       const payload = {
-        ...f, client: f.client.trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
+        ...f, client: (selClient && selClient.name) || f.client.trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
         lineItems: valid.map((it) => ({ description: String(it.description).trim(), unit: String(it.unit || "").trim() || "item", qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
         status: nextStatus, sentAt: nextStatus === "sent" ? (f.sentAt || now) : f.sentAt, preparedBy: f.preparedBy || me, updatedAt: now,
       };
@@ -5777,10 +5923,33 @@ function QuotationForm({ ctx, id, copyOf }) {
         <Card style={{ padding: 0 }}>
           <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Quote to" required><Input list="gla-quote-clients" value={f.client} onChange={set("client")} placeholder="e.g. VIVO ENERGY" /><datalist id="gla-quote-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist></Field>
-            <Field label="Attn"><Input value={f.attn} onChange={set("attn")} placeholder="Contact person" /></Field>
+            <Field label="Quote to (client)" required hint={clientOpts.length ? "Only clients on the register can be quoted" : "No clients yet — add one below"}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Select value={f.clientId} onChange={(e) => pickClient(e.target.value)} style={{ flex: 1, minWidth: 0 }}
+                  options={[{ value: "", label: clientOpts.length ? "Select a client…" : "No clients on the register" }, ...clientOpts.map((c) => ({ value: c.id, label: c.status === "Inactive" ? `${c.name} (inactive)` : c.name }))]} />
+                <Btn onClick={() => setAdding((v) => !v)} title="Add a new client to the register"><Plus size={14} />New client</Btn>
+              </div>
+            </Field>
+            <Field label="Attn"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
+            {adding && (
+              <div style={{ gridColumn: "1 / -1", border: "1px dashed var(--border-strong)", borderRadius: 10, padding: 14, background: "var(--surface-2)" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>Add a new client</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                  <Field label="Client name" required><Input value={nc.name} onChange={(e) => setNc((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. VIVO ENERGY" /></Field>
+                  <Field label="Contact person"><Input value={nc.contactPerson} onChange={(e) => setNc((x) => ({ ...x, contactPerson: e.target.value }))} /></Field>
+                  <Field label="Phone"><Input value={nc.phone} onChange={(e) => setNc((x) => ({ ...x, phone: e.target.value }))} /></Field>
+                  <Field label="Email"><Input value={nc.email} onChange={(e) => setNc((x) => ({ ...x, email: e.target.value }))} /></Field>
+                  <Field label="Sites (separate with ;)" full><Input value={nc.sites} onChange={(e) => setNc((x) => ({ ...x, sites: e.target.value }))} placeholder="e.g. SUL Mayuge; Shell Ndeeba" /></Field>
+                </div>
+                {ncErr && <div style={{ marginTop: 8, color: "var(--danger)", fontSize: 12.5 }}>{ncErr}</div>}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+                  {(store.clients || []).length > 0 && <Btn size="sm" onClick={() => { setAdding(false); setNcErr(""); }}>Cancel</Btn>}
+                  <Btn size="sm" variant="primary" disabled={ncBusy || !nc.name.trim()} onClick={addClient}><Check size={13} />{ncBusy ? "Adding…" : "Add client & use"}</Btn>
+                </div>
+              </div>
+            )}
             <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
-            <Field label="Sites" full><Input value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /></Field>
+            <Field label="Sites" full hint={selClient && selClient.sites.length ? `${selClient.name} sites: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
             <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
             <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>

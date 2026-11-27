@@ -120,6 +120,7 @@ export const bankApprovalsApi = makeCrud("bank-approvals");
 export const requisitionsApi = makeCrud("requisitions");
 export const purchaseOrdersApi = makeCrud("purchase-orders");
 export const quotationsApi = makeCrud("quotations");
+export const clientsApi = makeCrud("clients");
 
 // Payroll register is derived server-side from employees in a full build; here
 // it simply reads the employees collection to mirror the mock's shape.
