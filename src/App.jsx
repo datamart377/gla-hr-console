@@ -334,6 +334,8 @@ const canView = (ctx, id) => MY_VIEWS.has(id) ? (can(ctx, "selfservice") && !!(c
 const canDo = (ctx, action) => { const r = currentRole(ctx); return !r || r.actions?.[action] !== false; };
 // Salary figures are payroll data — only roles with the Payroll module see them.
 const seesPay = (ctx) => can(ctx, "payroll");
+// HR & Admin approve purchase orders; anyone else's PO waits for them.
+const isHrOrAdmin = (ctx) => ["admin", "hr"].includes(ctx && ctx.auth && ctx.auth.role);
 // Who is acting — stamped on decisions (leave, advances) instead of a fixed name.
 const actorName = (ctx) => {
   const e = ctx && ctx.currentEmp;
@@ -2403,6 +2405,10 @@ function actionAlertsFor(ctx) {
   if (hrAdmin) {
     const n = (store.requisitions || []).filter((r) => r.status === "pending_admin").length;
     if (n) out.push({ key: "req_admin", module: "requisitions", Icon: Receipt, tone: "accent", title: "Requisitions — final approval", count: n, detail: "awaiting HR & Admin sign-off" });
+  }
+  if (hrAdmin) {
+    const n = (store.purchaseOrders || []).filter((p) => p.status === "pending_approval").length;
+    if (n) out.push({ key: "po_admin", module: "suppliers", Icon: ShoppingCart, tone: "accent", title: "Purchase orders — approval", count: n, detail: "awaiting HR & Admin approval before issue" });
   }
   if (canDo(ctx, "approveLeave") && can(ctx, "leave")) {
     const n = (store.leave || []).filter((l) => l.status === "Pending").length;
@@ -4919,7 +4925,7 @@ function ScheduleLineForm({ ctx, id }) {
 /* ============================== Suppliers register ============================== */
 function Suppliers({ ctx }) {
   const { store, setModal } = ctx;
-  const [tab, setTab] = useState("register");
+  const [tab, setTab] = useState(() => (isHrOrAdmin(ctx) && (ctx.store.purchaseOrders || []).some((p) => p.status === "pending_approval")) ? "po" : "register");
   const all = store.suppliers || [];
   const scheduleCount = (sid) => (store.supplierSchedule || []).filter((l) => l.supplierId === sid).length;
   const [q, setQ] = useState("");
@@ -5021,6 +5027,23 @@ function nextSupplierId(suppliers) {
   return "SUP-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0");
 }
 
+// HR & Admin approve (issue) or reject a purchase order awaiting approval.
+async function poDecide(ctx, po, ok) {
+  const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "HR & Admin");
+  const now = new Date().toISOString();
+  const by = (ctx.currentEmp && ctx.currentEmp.id) || "";
+  if (ok) {
+    if (!window.confirm(`Approve and issue purchase order ${po.poNo || po.id} to ${po.supplierName || "the supplier"}?`)) return;
+    await purchaseOrdersApi.update(po.id, { status: "issued", approval: { by, name: me, at: now }, rejection: null });
+  } else {
+    const reason = window.prompt(`Reject purchase order ${po.poNo || po.id}? Give a reason (shown to whoever prepared it):`, "");
+    if (reason === null) return;
+    await purchaseOrdersApi.update(po.id, { status: "rejected", rejection: { by, name: me, at: now, reason: reason.trim() } });
+  }
+  await ctx.reload();
+  ctx.setModal(null);
+}
+
 // Generate & download the branded Purchase Order PDF.
 function printPo(ctx, po) {
   try {
@@ -5069,8 +5092,12 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
   const preparer = (po.issuedBy || "").trim();
   const approver = SIGNATORIES.find((s) => s && s.name && !samePerson(s.name, preparer)) || SIGNATORIES[0] || {};
   const selfApproved = !!(preparer && approver.name && samePerson(preparer, approver.name));
-  const approverSig = isSigImage(approver.signature) ? approver.signature : signatureFor(approver.name);
-  const signBlocks = selfApproved
+  // Until HR & Admin approve it, the PO is a draft: no approving signature.
+  const approved = po.status === "issued";
+  const approverSig = !approved ? null : isSigImage(approver.signature) ? approver.signature : signatureFor(approver.name);
+  const signBlocks = !approved
+    ? [{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date), sig: signatureFor(po.issuedBy) }, { title: "Approved signatory", name: approver.name, meta: po.status === "rejected" ? "Rejected by HR & Admin" : "Pending HR & Admin approval", sig: null }]
+    : selfApproved
     ? [{ title: "Prepared & approved by", name: approver.name, meta: [approver.title, approver.contact, reqDate(po.date)].filter(Boolean).join(" · "), sig: approverSig }]
     : [{ title: "Prepared by", name: po.issuedBy, meta: reqDate(po.date), sig: signatureFor(po.issuedBy) }, { title: "Approved signatory", name: approver.name, meta: [approver.title, approver.contact].filter(Boolean).join(" · "), sig: approverSig }];
 
@@ -5091,16 +5118,29 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
     </tr>
   );
 
+  const canDecide = isHrOrAdmin(ctx) && po.status === "pending_approval";
   const footer = (
     <>
       <Btn onClick={() => setModal(null)}>Close</Btn>
       <Btn onClick={() => { setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={po.id} />); }}><Pencil size={14} />Edit</Btn>
-      <Btn variant="primary" onClick={() => printPo(ctx, raw)}><Printer size={14} />Download PDF</Btn>
+      {canDecide && <Btn variant="danger" onClick={() => poDecide(ctx, raw, false)}><X size={14} />Reject</Btn>}
+      {canDecide && <Btn variant="success" onClick={() => poDecide(ctx, raw, true)}><Check size={14} />Approve &amp; issue</Btn>}
+      <Btn variant="primary" onClick={() => printPo(ctx, raw)}><Printer size={14} />{approved ? "Download PDF" : "Download draft PDF"}</Btn>
     </>
+  );
+  const statusBanner = !approved && (
+    <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, fontSize: 12.5, background: po.status === "rejected" ? "var(--danger-dim)" : "var(--info-dim)", color: "var(--text)" }}>
+      {po.status === "rejected"
+        ? <><b>Rejected by HR &amp; Admin</b>{po.rejection && po.rejection.name ? ` (${po.rejection.name})` : ""}{po.rejection && po.rejection.reason ? ` — ${po.rejection.reason}` : ""}. Edit and resubmit it for approval.</>
+        : po.status === "pending_approval"
+          ? <><b>Awaiting HR &amp; Admin approval.</b> This is a draft — it isn't valid for supply until approved and issued.</>
+          : <><b>{poStatusLabel(po.status)}.</b> Not valid for supply.</>}
+    </div>
   );
 
   return (
     <Modal wide title="Purchase order preview" sub={`${poNo}${po.supplierName ? " · " + po.supplierName : ""}`} onClose={() => setModal(null)} footer={footer}>
+      {statusBanner}
       <div style={{ background: "#fff", color: "#1a1a1a", border: line, borderRadius: 12, padding: "26px 28px" }}>
         {/* Letterhead */}
         <div style={{ borderBottom: "2px solid var(--brand)", paddingBottom: 12, marginBottom: 16 }}>
@@ -5223,13 +5263,15 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
 function PurchaseOrders({ ctx }) {
   const { store, setModal } = ctx;
   const pos = (store.purchaseOrders || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-  const totalValue = pos.filter((p) => p.status !== "cancelled" && (p.currency || "UGX") === "UGX").reduce((s, p) => s + poTotals(p).grand, 0);
+  const totalValue = pos.filter((p) => p.status === "issued" && (p.currency || "UGX") === "UGX").reduce((s, p) => s + poTotals(p).grand, 0);
+  const approver = isHrOrAdmin(ctx);
+  const decide = (p, ok) => poDecide(ctx, p, ok);
   return (
     <>
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
-        <StatCard Icon={ShoppingCart} label="Purchase orders" value={pos.length} meta={`${pos.filter((p) => p.status === "issued").length} issued`} tone="brand" />
+        <StatCard Icon={ShoppingCart} label="Purchase orders" value={pos.length} meta={`${pos.filter((p) => p.status === "issued").length} issued · ${pos.filter((p) => p.status === "pending_approval").length} awaiting HR & Admin`} tone="brand" />
         <StatCard Icon={Building2} label="Suppliers ordered from" value={new Set(pos.map((p) => p.supplierId)).size} meta="distinct suppliers" tone="accent" />
-        <StatCard Icon={Coins} label="UGX order value" value={ugxShort(totalValue)} meta="local POs, excl. cancelled" tone="success" />
+        <StatCard Icon={Coins} label="UGX order value" value={ugxShort(totalValue)} meta="issued local POs" tone="success" />
       </div>
       <Toolbar>
         <div style={{ flex: 1 }} />
@@ -5243,9 +5285,13 @@ function PurchaseOrders({ ctx }) {
             { label: "Date", render: (p) => reqDate(p.date) },
             { label: "Items", render: (p) => (p.lineItems || []).length },
             { label: "Total", render: (p) => <span className="mono">{(p.currency || "UGX")} {fmtN(poTotals(p).grand)}</span> },
-            { label: "Status", render: (p) => <Pill tone={poStatusTone(p.status)}>{poStatusLabel(p.status)}</Pill> },
+            { label: "Status", render: (p) => <div><Pill tone={poStatusTone(p.status)}>{poStatusLabel(p.status)}</Pill>{p.approval && p.status === "issued" && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>by {p.approval.name}</div>}{p.status === "rejected" && p.rejection && p.rejection.reason && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 3 }} title={p.rejection.reason}>{String(p.rejection.reason).slice(0, 40)}</div>}</div> },
             { label: "", render: (p) => (
-              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {approver && p.status === "pending_approval" && <>
+                  <Btn size="sm" variant="success" onClick={() => decide(p, true)} title="Approve and issue"><Check size={13} />Approve</Btn>
+                  <Btn size="sm" variant="danger" onClick={() => decide(p, false)} title="Reject"><X size={13} /></Btn>
+                </>}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderPreview ctx={cc} po={p} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printPo(ctx, p)} title="Print / download PDF"><Printer size={13} />PO</Btn>
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <PurchaseOrderForm ctx={cc} id={p.id} />)} title="Edit"><Pencil size={13} /></Btn>
@@ -5254,7 +5300,7 @@ function PurchaseOrders({ ctx }) {
             ) },
           ]}
           rows={pos}
-          empty="No purchase orders yet. Click “New purchase order” to issue one from a supplier's quotation."
+          empty={approver ? "No purchase orders yet. Click “New purchase order” to issue one from a supplier's quotation." : "No purchase orders yet. Click “New purchase order” to prepare one — HR & Admin approve it before it's issued."}
         />
       </Card>
     </>
@@ -5273,6 +5319,8 @@ function PurchaseOrderForm({ ctx, id }) {
   }));
   const [busy, setBusy] = useState(false);
   const [printAfter, setPrintAfter] = useState(true);
+  // Roles other than HR/Admin (e.g. Finance) prepare POs for HR & Admin approval.
+  const needsApproval = !isHrOrAdmin(ctx);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const pickSupplier = (sid) => setF((s) => {
     const sup = suppliers.find((x) => x.id === sid) || {};
@@ -5290,7 +5338,15 @@ function PurchaseOrderForm({ ctx, id }) {
     if (!valid.length) return alert("Add at least one line item with a description and quantity.");
     setBusy(true);
     try {
-      const payload = { ...f, lineItems: valid.map((it) => ({ code: (it.code || "").trim(), description: it.description.trim(), qty: Number(it.qty) || 0, unit: (it.unit || "").trim(), unitPrice: Number(it.unitPrice) || 0 })), status: "issued" };
+      const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "");
+      const now = new Date().toISOString();
+      const payload = {
+        ...f, lineItems: valid.map((it) => ({ code: (it.code || "").trim(), description: it.description.trim(), qty: Number(it.qty) || 0, unit: (it.unit || "").trim(), unitPrice: Number(it.unitPrice) || 0 })),
+        // Any change by a non-approver (re)submits it for HR & Admin approval.
+        ...(needsApproval
+          ? { status: "pending_approval", approval: null, rejection: null, submittedAt: now }
+          : { status: "issued", rejection: null, approval: (existing && existing.status === "issued" && existing.approval) || { by: (ctx.currentEmp && ctx.currentEmp.id) || "", name: me, at: now } }),
+      };
       const saved = existing ? await purchaseOrdersApi.update(id, payload) : await purchaseOrdersApi.create(payload);
       await reload();
       if (printAfter) printPo(ctx, saved || payload);
@@ -5302,9 +5358,9 @@ function PurchaseOrderForm({ ctx, id }) {
   return (
     <Modal wide title={existing ? "Edit purchase order" : "New purchase order"} sub={f.poNo} onClose={() => setModal(null)}
       footer={<>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after issuing</label>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />{needsApproval ? "Download draft PDF after submitting" : "Download PDF after issuing"}</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
-        <Btn variant="primary" disabled={busy} onClick={save}><Send size={15} />{busy ? "Saving…" : existing ? "Save changes" : "Issue purchase order"}</Btn>
+        <Btn variant="primary" disabled={busy} onClick={save}><Send size={15} />{busy ? "Saving…" : needsApproval ? (existing ? "Save & resubmit for approval" : "Submit for HR & Admin approval") : existing ? "Save changes" : "Issue purchase order"}</Btn>
       </>}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Card style={{ padding: 0 }}>

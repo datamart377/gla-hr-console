@@ -341,9 +341,11 @@ export const PO_VAT_MODES = [
   { value: "exclusive", label: "Add VAT on top" },
   { value: "none", label: "No VAT (exempt / zero-rated)" },
 ];
-export const PO_STATUSES = ["draft", "issued", "cancelled"];
-export const poStatusLabel = (s) => ({ draft: "Draft", issued: "Issued", cancelled: "Cancelled" }[s] || s);
-export const poStatusTone = (s) => ({ draft: "muted", issued: "success", cancelled: "danger" }[s] || "muted");
+// pending_approval: raised by a role other than HR/Admin (e.g. Finance) and
+// waiting for HR & Admin; only "issued" POs are valid for supply.
+export const PO_STATUSES = ["draft", "pending_approval", "issued", "rejected", "cancelled"];
+export const poStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting HR & Admin", issued: "Issued", rejected: "Rejected", cancelled: "Cancelled" }[s] || s);
+export const poStatusTone = (s) => ({ draft: "muted", pending_approval: "accent", issued: "success", rejected: "danger", cancelled: "danger" }[s] || "muted");
 
 // Totals for a PO. Prices can include VAT, add VAT on top, or be exempt.
 export function poTotals(po = {}) {
@@ -392,6 +394,8 @@ export function normalizePurchaseOrder(po = {}) {
     notes: po.notes || "",
     status: PO_STATUSES.includes(po.status) ? po.status : "issued",
     issuedBy: po.issuedBy || "",
+    approval: po.approval || null,     // { by, name, at } — HR & Admin approval
+    rejection: po.rejection || null,   // { by, name, at, reason }
     createdAt: po.createdAt || new Date().toISOString(),
     updatedAt: po.updatedAt || new Date().toISOString(),
   };

@@ -115,7 +115,7 @@ function drawTitleBlock(doc, y, { eyebrow, title, subtitle, meta, reference }) {
 // The signer's signature/stamp image, when they have one on file. Explicit
 // s.signature wins; otherwise it is looked up by name (never for a pending slot).
 function sigImageOf(s) {
-  if (!s || s.pending) return null;
+  if (!s || s.pending || s.noSig) return null;
   if (isSigImage(s.signature)) return s.signature;
   return signatureFor(s.name) || signatureFor(s.signedText);
 }
@@ -550,9 +550,23 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   ].filter(Boolean).join("\n");
 
   const reference = poNo;
+  // Only an HR & Admin-approved ("issued") PO is final; anything else prints as
+  // a clearly-marked draft without the approving signature.
+  const approved = !po.status || po.status === "issued";
   let y = drawLetterhead(doc);
   drawTopRightQR(doc, qrText);
-  y = drawTitleBlock(doc, y, { eyebrow: "Procurement", title: "PURCHASE ORDER", subtitle: null, meta: [], reference });
+  const approvedLine = approved && po.approval && po.approval.name ? [`Approved by ${po.approval.name} (HR & Admin) · ${voDate(po.approval.at)}`] : [];
+  y = drawTitleBlock(doc, y, { eyebrow: "Procurement", title: approved ? "PURCHASE ORDER" : "PURCHASE ORDER — DRAFT", subtitle: null, meta: approvedLine, reference });
+  if (!approved) {
+    const msg = po.status === "rejected"
+      ? `REJECTED by HR & Admin${po.rejection && po.rejection.reason ? " — " + po.rejection.reason : ""}. Not valid for supply.`
+      : "DRAFT — awaiting HR & Admin approval. Not valid for supply until approved and issued.";
+    doc.setFillColor(253, 236, 234); doc.setDrawColor(200, 60, 50); doc.setLineWidth(0.8);
+    doc.rect(MARGIN, y + 2, pageW - MARGIN * 2, 22, "FD");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(170, 40, 30);
+    doc.text(doc.splitTextToSize(msg, pageW - MARGIN * 2 - 16)[0], MARGIN + 8, y + 16);
+    y += 28;
+  }
 
   // Supplier & order details — two key/value pairs per row.
   const kcell = { fontStyle: "bold", textColor: INK, fillColor: KVFILL };
@@ -628,7 +642,12 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   const preparer = (po.issuedBy || "").trim();
   const approver = SIGNATORIES.find((s) => s && s.name && !samePerson(s.name, preparer)) || SIGNATORIES[0] || {};
   const selfApproved = !!(preparer && approver.name && samePerson(preparer, approver.name));
-  drawVoucherSignRow(doc, sy, selfApproved ? [
+  if (!approved) {
+    drawVoucherSignRow(doc, sy, [
+      { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
+      { title: "Approved signatory", name: approver.name || "", noSig: true, meta: po.status === "rejected" ? "Rejected by HR & Admin" : "Pending HR & Admin approval" },
+    ]);
+  } else drawVoucherSignRow(doc, sy, selfApproved ? [
     { title: "Prepared & approved by", name: approver.name, signature: approver.signature || null, meta: [approver.title, approver.contact, voDate(po.date)].filter(Boolean).join(" · ") },
   ] : [
     { title: "Prepared by", name: po.issuedBy || "", meta: voDate(po.date) },
@@ -636,5 +655,15 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   ]);
 
   drawFooters(doc);
-  doc.save(`Purchase-Order-${String(poNo).replace(/[/\\]/g, "-")}.pdf`);
+  if (!approved) {
+    // Diagonal "DRAFT" watermark on every page.
+    for (let pg = 1; pg <= doc.getNumberOfPages(); pg++) {
+      doc.setPage(pg);
+      try { doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.1 })); } catch (e) { /* older jsPDF: draw without opacity */ }
+      doc.setFont("helvetica", "bold"); doc.setFontSize(110); doc.setTextColor(200, 60, 50);
+      doc.text(po.status === "rejected" ? "REJECTED" : "DRAFT", pageW / 2, pageH / 2 + 40, { align: "center", angle: 35 });
+      try { doc.restoreGraphicsState(); } catch (e) { /* noop */ }
+    }
+  }
+  doc.save(`Purchase-Order-${String(poNo).replace(/[/\\]/g, "-")}${approved ? "" : "-DRAFT"}.pdf`);
 }

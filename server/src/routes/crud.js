@@ -93,6 +93,32 @@ function stripPay(rec, empId) {
   return rest;
 }
 
+// Purchase orders: anyone other than HR/Admin (e.g. Finance) prepares POs for
+// HR & Admin approval — their create/edit always lands as "pending_approval".
+// Only HR/Admin issue (approve) or reject; the approval is stamped here.
+async function shapePurchaseOrder(req, patch, existing) {
+  const now = new Date().toISOString();
+  const approver = isHrAdmin(req);
+  const out = { ...patch };
+  if (!approver) {
+    delete out.approval;
+    out.status = "pending_approval";
+    out.rejection = null;
+    out.approval = null;
+    out.submittedAt = now;
+    return out;
+  }
+  if (out.status === "issued" && !(existing && existing.status === "issued")) {
+    out.approval = { by: req.user.empId || "", name: req.user.name || (out.approval && out.approval.name) || "HR & Admin", at: now };
+    out.rejection = null;
+  }
+  if (out.status === "rejected") {
+    const r = out.rejection || {};
+    out.rejection = { by: req.user.empId || "", name: req.user.name || r.name || "HR & Admin", at: now, reason: String(r.reason || "").slice(0, 500) };
+  }
+  return out;
+}
+
 // Final (second-level) requisition approvers: HR & Admin only.
 const isHrAdmin = (req) => ["admin", "hr"].includes(req.user && req.user.role);
 // First-level requisition approver: any employee flagged isSupervisor (looked up live).
@@ -343,7 +369,8 @@ export function crudRouter(table) {
         body[OWN_FIELD[table]] = req.user.empId; // force the new row to belong to the caller
       }
       const id = body.id || genId(table);
-      const { id: _omit, ...doc } = body;
+      const shaped = table === "purchase_orders" ? await shapePurchaseOrder(req, body, null) : body;
+      const { id: _omit, ...doc } = shaped;
       const { rows } = await query(
         `INSERT INTO ${table} (id, doc) VALUES ($1, $2) RETURNING id, doc`,
         [id, JSON.stringify(doc)],
@@ -383,6 +410,10 @@ export function crudRouter(table) {
           if (!Object.keys(patch).length) return res.status(403).json({ error: "None of those fields can be changed." });
         }
         if (OWN_FIELD[table] && OWN_FIELD[table] !== "__self__") delete patch[OWN_FIELD[table]]; // can't reassign ownership
+      }
+      if (table === "purchase_orders") {
+        const cur = await query(`SELECT doc FROM purchase_orders WHERE id = $1`, [req.params.id]);
+        patch = await shapePurchaseOrder(req, patch, cur.rows[0] ? cur.rows[0].doc : null);
       }
       const { rows } = await query(
         `UPDATE ${table}
