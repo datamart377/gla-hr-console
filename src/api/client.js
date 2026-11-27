@@ -29,6 +29,7 @@ export const supplierRunsApi = impl.supplierRunsApi;
 export const bankApprovalsApi = impl.bankApprovalsApi;
 export const requisitionsApi = impl.requisitionsApi;
 export const purchaseOrdersApi = impl.purchaseOrdersApi;
+export const quotationsApi = impl.quotationsApi;
 export const advancesApi = impl.advancesApi;
 export const settingsApi = impl.settingsApi;
 export const notifyApi = impl.notifyApi;

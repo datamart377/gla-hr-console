@@ -266,10 +266,13 @@ export async function downloadScheduleXlsx({ title, eyebrow = "REPORT", subtitle
   rows.forEach((r, i) => {
     const rr = ws.addRow(r);
     const zebra = i % 2 === 1;
+    // Give wrapped text room: roughly one line per column-width of characters.
+    const wrapLines = Math.max(1, ...columns.map((c, ci) => (c.wrap ? Math.ceil(String(r[ci] ?? "").length / Math.max(8, (c.width || 18) * 1.05)) : 1)));
+    if (wrapLines > 1) rr.height = 15 * wrapLines;
     rr.eachCell((cell, col) => {
       const c = columns[col - 1];
       cell.font = fnt({ color: { argb: INK } });
-      cell.alignment = { horizontal: c.align || (c.money ? "right" : col === 1 ? "center" : "left") };
+      cell.alignment = { horizontal: c.align || (c.money ? "right" : col === 1 ? "center" : "left"), ...(c.wrap ? { wrapText: true, vertical: "top" } : {}) };
       cell.border = boxBorder();
       if (zebra) cell.fill = solid(ZEBRA);
       if (c.money) cell.numFmt = "#,##0";

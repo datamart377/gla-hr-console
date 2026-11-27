@@ -28,3 +28,4 @@ export const downloadReportPdf = wrap("downloadReportPdf");
 export const downloadDocumentPdf = wrap("downloadDocumentPdf");
 export const downloadRequisitionVoucherPdf = wrap("downloadRequisitionVoucherPdf");
 export const downloadPurchaseOrderPdf = wrap("downloadPurchaseOrderPdf");
+export const downloadQuotationPdf = wrap("downloadQuotationPdf");

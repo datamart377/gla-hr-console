@@ -8,16 +8,16 @@ import {
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff,
-  Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart,
+  Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart, FileSignature, Copy, ChevronUp,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
 } from "lucide-react";
-import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf } from "./reportLazy.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf } from "./reportLazy.js";
 import { COMPANY, SIGNATORIES, PAYROLL_SIGNATORIES, ALL_SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
-  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi,
+  stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi, quotationsApi,
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
@@ -35,6 +35,7 @@ import {
   GEOFENCES, matchGeofence, geoVerdictOf, formatDistance, setGeofences, getGeofences,
   timeToMinutes, minutesToTime, LATE_THRESHOLD_MIN,
   normalizePurchaseOrder, poTotals, nextPoNumber, PO_CURRENCIES, PO_VAT_MODES, poStatusLabel, poStatusTone,
+  normalizeQuotation, quoteTotals, nextQuoteNumber, QUOTE_STATUSES, QUOTE_UNITS, quoteStatusLabel, quoteStatusTone, quoteValidUntil, quoteDisplayStatus,
 } from "./data.js";
 
 /* ============================ formatting helpers =========================== */
@@ -310,6 +311,7 @@ const NAV = [
   { id: "advances", label: "Salary Advances", Icon: Banknote, section: "Finance" },
   { id: "suppliers", label: "Suppliers", Icon: Building2, section: "Finance" },
   { id: "requisitions", label: "Requisitions", Icon: Receipt, section: "Finance" },
+  { id: "quotations", label: "Quotations", Icon: FileSignature, section: "Finance" },
   { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
   { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
@@ -344,6 +346,7 @@ const actorName = (ctx) => {
   return n ? (role ? `${n} (${role})` : n) : (role || "HR");
 };
 const VIEW_META = {
+  quotations: ["Quotations", "Client quotations — scope, priced items, 18% VAT and approved signatory"],
   dashboard: ["Workforce Overview", "Front-end demo — HR snapshot for Global Link Associates Ltd"],
   employees: ["Employee Register", "Staff records, contracts and statutory details"],
   approvals: ["Profile Approvals", "Review and validate staff-submitted profile changes"],
@@ -362,7 +365,7 @@ const VIEW_META = {
 };
 
 export default function App() {
-  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], purchaseOrders: [], settings: null });
+  const [store, setStore] = useState({ employees: [], leave: [], attendance: [], appraisals: [], stockItems: [], stockMovements: [], stockClosings: [], ledgerColumns: [], payrollRuns: [], suppliers: [], supplierSchedule: [], supplierRuns: [], advances: [], bankApprovals: [], requisitions: [], purchaseOrders: [], quotations: [], settings: null });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [auth, setAuth] = useState(null); // { empId, role }
@@ -371,14 +374,14 @@ export default function App() {
   const lastPwRef = useRef(""); // the password just typed at sign-in (memory only) — spares re-typing it on the change screen
 
   const reload = async () => {
-    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings] = await Promise.all([
+    const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings, quotations] = await Promise.all([
       employeesApi.list(), leaveApi.list(), attendanceApi.list(), appraisalsApi.list(),
-      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(),
+      stockItemsApi.list(), stockMovementsApi.list(), stockClosingsApi.list(), ledgerColumnsApi.list(), payrollRunsApi.list(), suppliersApi.list(), supplierScheduleApi.list(), supplierRunsApi.list(), advancesApi.list(), bankApprovalsApi.list(), requisitionsApi.list().catch(() => []), purchaseOrdersApi.list().catch(() => []), settingsApi.get(), quotationsApi.list().catch(() => []),
     ]);
     if (settings && settings.company) setReportCompany(settings.company); // keep report letterhead in sync
     if (settings && settings.signatories) setReportSignatories(settings.signatories); // dynamic approved signatories
     setGeofences(settings && settings.geofences); // use the sites saved in Settings (falls back to defaults)
-    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings });
+    setStore({ employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, quotations, settings });
   };
   useEffect(() => {
     (async () => {
@@ -527,7 +530,7 @@ function AdminConsole({ ctx }) {
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: Quotations, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
     myportal: ConsoleMyPortal, myprofile: MyProfileEdit, clockin: MyClockIn, myleave: MyLeave, mypayslip: MyPayslip, myadvance: MyAdvance, myfile: ConsoleMyFile }[view];
   // Defence in depth: even if a view is reached directly (not via the sidebar),
   // enforce the same role gate the navigation uses.
@@ -5453,6 +5456,311 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
               <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>{s.title}{s.meta ? ` · ${s.meta}` : ""}</div>
             </div>
           ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ============================== Quotations ===============================
+   Client quotations in the Global Link template: Quote to / Scope of works /
+   Sites / Attn / Our Ref / Date / Quote validity / Currency, priced items with
+   18% VAT added per line, totals, amount in words and the approved signatory.
+   ========================================================================== */
+const QUOTE_CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
+function printQuote(ctx, q) {
+  try {
+    setReportCompany(ctx.store.settings && ctx.store.settings.company);
+    setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
+    downloadQuotationPdf(normalizeQuotation(q));
+  } catch (e) { alert("Couldn't generate the quotation PDF.\n\n" + (e && e.message ? e.message : "")); }
+}
+function excelQuote(ctx, raw) {
+  setReportCompany(ctx.store.settings && ctx.store.settings.company);
+  setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
+  const q = normalizeQuotation(raw);
+  const t = quoteTotals(q);
+  const cur = q.currency || "UGX";
+  downloadScheduleXlsx({
+    title: "QUOTATION", eyebrow: "QUOTATION",
+    subtitle: `${q.quoteNo || ""} · ${q.client || ""}`,
+    meta: [
+      `Quote to: ${q.client || "—"}${q.attn ? "    Attn: " + q.attn : ""}`,
+      `Scope of works: ${q.scope || "—"}`,
+      `Sites: ${q.sites || "—"}`,
+      `Our Ref: ${q.quoteNo || "—"}    Date: ${fmtDate(q.date)}    Quote validity: ${q.validityDays} calendar days (to ${fmtDate(quoteValidUntil(q))})    Currency: ${QUOTE_CURRENCY_WORDS[cur] || cur}`,
+      `Amount in words: ${poAmountWords(t.grand)} ${QUOTE_CURRENCY_WORDS[cur] || cur} only`,
+    ],
+    columns: [
+      { header: "No", width: 5 }, { header: "Description & Specification", width: 48, wrap: true }, { header: "Item", width: 8 }, { header: "Qty", width: 7 },
+      { header: `Rate (${cur})`, money: true }, { header: `Sub total (${cur})`, money: true }, { header: `${t.rate}% VAT`, money: true }, { header: `Total (${cur})`, money: true },
+    ],
+    rows: t.lines.filter((l) => l.description || l.sub).map((l, i) => [i + 1, l.description, l.unit, l.qty, l.rate, l.sub, l.vat, l.total]),
+    totalsRow: ["", "TOTALS", "", "", "", t.sub, t.vat, t.grand],
+    filename: `GLA-Quotation-${String(q.quoteNo || q.id || "").replace(/[/\\]/g, "-")}.xlsx`,
+  });
+}
+
+function Quotations({ ctx }) {
+  const { store, setModal } = ctx;
+  const all = (store.quotations || []).map(normalizeQuotation).sort((a, b) => String(b.date + b.createdAt).localeCompare(String(a.date + a.createdAt)));
+  const [q, setQ] = useState("");
+  const [st, setSt] = useState("");
+  const withStatus = all.map((x) => ({ ...x, _st: quoteDisplayStatus(x, TODAY), _t: quoteTotals(x) }));
+  let rows = withStatus;
+  if (st) rows = rows.filter((x) => x._st === st);
+  if (q.trim()) { const k = q.trim().toLowerCase(); rows = rows.filter((x) => [x.quoteNo, x.client, x.attn, x.scope, x.sites].join(" ").toLowerCase().includes(k)); }
+  const ugx = (list) => list.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
+  const open = withStatus.filter((x) => x._st === "sent");
+  const won = withStatus.filter((x) => x._st === "accepted");
+  const lost = withStatus.filter((x) => x._st === "declined");
+  const winRate = won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : null;
+  const canDel = canDo(ctx, "deleteRecords");
+  return (
+    <>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={FileSignature} label="Quotations" value={all.length} meta={`${withStatus.filter((x) => x._st === "draft").length} draft`} tone="brand" />
+        <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`UGX ${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
+        <StatCard Icon={Check} label="Accepted" value={won.length} meta={`UGX ${ugxShort(ugx(won))} won`} tone="success" />
+        <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
+      </div>
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
+        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} />)}><Plus size={16} />New quotation</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Our Ref", render: (x) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span> },
+            { label: "Quote to", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{x.client || "—"}</div>{x.attn && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Attn: {x.attn}</div>}</div> },
+            { label: "Scope / Sites", render: (x) => <div style={{ maxWidth: 320 }}><div style={{ color: "var(--text)" }}>{x.scope || "—"}</div>{x.sites && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.sites}</div>}</div> },
+            { label: "Date", render: (x) => fmtDate(x.date) },
+            { label: "Valid until", render: (x) => <span style={{ color: x._st === "expired" ? "var(--warning)" : "var(--text-2)" }}>{fmtDate(quoteValidUntil(x))}</span> },
+            { label: "Total", num: true, render: (x) => <span className="mono">{x.currency} {fmtN(x._t.grand)}</span> },
+            { label: "Status", render: (x) => <Pill tone={quoteStatusTone(x._st)}>{quoteStatusLabel(x._st)}</Pill> },
+            { label: "", render: (x) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview"><Eye size={13} /></Btn>
+                <Btn size="sm" variant="primary" onClick={() => printQuote(ctx, x)} title="Download PDF"><Printer size={13} />PDF</Btn>
+                <Btn size="sm" onClick={() => excelQuote(ctx, x)} title="Download Excel"><Download size={13} /></Btn>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} copyOf={x.id} />)} title="Duplicate as a new quotation"><Copy size={13} /></Btn>
+                {canDel && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={quotationsApi} id={x.id} label={x.quoteNo || x.id} />)} title="Delete"><Trash2 size={13} /></Btn>}
+              </div>
+            ) },
+          ]}
+          rows={rows}
+          empty={all.length ? "No quotations match your filters." : "No quotations yet. Click “New quotation” to prepare one."}
+        />
+      </Card>
+    </>
+  );
+}
+
+function QuotationForm({ ctx, id, copyOf }) {
+  const { store, setModal, reload } = ctx;
+  const list = store.quotations || [];
+  const existing = id ? list.find((x) => x.id === id) : null;
+  const source = copyOf ? list.find((x) => x.id === copyOf) : null;
+  const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "");
+  const [f, setF] = useState(() => existing ? normalizeQuotation(existing) : normalizeQuotation({
+    ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined } : {}),
+    quoteNo: nextQuoteNumber(list), date: TODAY, preparedBy: me,
+  }));
+  const [busy, setBusy] = useState(false);
+  const [printAfter, setPrintAfter] = useState(true);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const setItem = (i, k, v) => setF((s) => ({ ...s, lineItems: s.lineItems.map((it, j) => (j === i ? { ...it, [k]: v } : it)) }));
+  const addItem = () => setF((s) => ({ ...s, lineItems: [...s.lineItems, { description: "", unit: "item", qty: 1, rate: 0 }] }));
+  const rmItem = (i) => setF((s) => ({ ...s, lineItems: s.lineItems.length > 1 ? s.lineItems.filter((_, j) => j !== i) : s.lineItems }));
+  const moveItem = (i, d) => setF((s) => { const a = [...s.lineItems]; const j = i + d; if (j < 0 || j >= a.length) return s; [a[i], a[j]] = [a[j], a[i]]; return { ...s, lineItems: a }; });
+  const t = quoteTotals(f);
+  const cur = f.currency || "UGX";
+  const clients = [...new Set(list.map((x) => x.client).filter(Boolean))].sort();
+  const save = async (status) => {
+    if (!String(f.client).trim()) return alert("Enter who the quotation is for (Quote to).");
+    if (!String(f.quoteNo).trim()) return alert("Enter the quotation reference (Our Ref).");
+    const valid = f.lineItems.filter((it) => String(it.description || "").trim());
+    if (!valid.length) return alert("Add at least one item with a description.");
+    const dup = list.find((x) => x.id !== (existing && existing.id) && String(x.quoteNo).trim().toLowerCase() === String(f.quoteNo).trim().toLowerCase());
+    if (dup && !window.confirm(`Reference ${f.quoteNo} is already used by another quotation (${dup.client || dup.id}). Save anyway?`)) return;
+    setBusy(true);
+    try {
+      const now = new Date().toISOString();
+      const nextStatus = status || f.status;
+      const payload = {
+        ...f, client: f.client.trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
+        lineItems: valid.map((it) => ({ description: String(it.description).trim(), unit: String(it.unit || "").trim() || "item", qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
+        status: nextStatus, sentAt: nextStatus === "sent" ? (f.sentAt || now) : f.sentAt, preparedBy: f.preparedBy || me, updatedAt: now,
+      };
+      const saved = existing ? await quotationsApi.update(existing.id, payload) : await quotationsApi.create({ ...payload, createdAt: now });
+      await reload();
+      if (printAfter) printQuote(ctx, saved || payload);
+      setModal(null);
+    } catch (e) { alert("Couldn't save the quotation.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
+  };
+  const th = { fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--text-2)", fontWeight: 600, padding: "8px 6px", textAlign: "left", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const td = { padding: "5px 6px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
+  const num = { ...td, textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap", paddingTop: 12 };
+  return (
+    <Modal wide title={existing ? "Edit quotation" : source ? "Duplicate quotation" : "New quotation"} sub={f.quoteNo} onClose={() => setModal(null)}
+      footer={<>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
+        <Btn onClick={() => setModal(null)}>Cancel</Btn>
+        {(!existing || f.status === "draft") && <Btn disabled={busy} onClick={() => save("draft")}>Save draft</Btn>}
+        <Btn variant="primary" disabled={busy} onClick={() => save(existing && f.status !== "draft" ? f.status : "sent")}><Send size={15} />{busy ? "Saving…" : existing && f.status !== "draft" ? "Save changes" : "Save as sent"}</Btn>
+      </>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
+          <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Quote to" required><Input list="gla-quote-clients" value={f.client} onChange={set("client")} placeholder="e.g. VIVO ENERGY" /><datalist id="gla-quote-clients">{clients.map((c) => <option key={c} value={c} />)}</datalist></Field>
+            <Field label="Attn"><Input value={f.attn} onChange={set("attn")} placeholder="Contact person" /></Field>
+            <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
+            <Field label="Sites" full><Input value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /></Field>
+            <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
+            <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
+            <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
+            <Field label="Currency"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
+            <Field label="VAT"><Select value={String(f.vatRate)} onChange={set("vatRate")} options={[{ value: "18", label: "18% VAT added per item" }, { value: "0", label: "No VAT" }]} /></Field>
+            {existing && <Field label="Status"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
+          </div>
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Items" sub="Description & specification, unit, quantity and rate — totals and VAT are worked out for you" right={<Btn size="sm" variant="primary" onClick={addItem}><Plus size={14} />Add item</Btn>} />
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
+              <thead><tr>
+                <th style={{ ...th, width: 34 }}>No</th><th style={th}>Description &amp; specification</th><th style={{ ...th, width: 92 }}>Item</th><th style={{ ...th, width: 78 }}>Qty</th><th style={{ ...th, width: 118 }}>Rate</th>
+                <th style={{ ...th, textAlign: "right" }}>Sub total</th><th style={{ ...th, textAlign: "right" }}>{t.rate}% VAT</th><th style={{ ...th, textAlign: "right" }}>Total</th><th style={{ ...th, width: 64 }} />
+              </tr></thead>
+              <tbody>
+                {f.lineItems.map((it, i) => {
+                  const l = t.lines[i] || { sub: 0, vat: 0, total: 0 };
+                  return (
+                    <tr key={i}>
+                      <td style={{ ...td, paddingTop: 12, color: "var(--muted)" }}>{i + 1}</td>
+                      <td style={td}><textarea value={it.description} onChange={(e) => setItem(i, "description", e.target.value)} rows={2} placeholder="e.g. Supply of 2.5 mm sq XLPE/PVC SWA cable" style={{ ...controlStyle, resize: "vertical", minHeight: 40, fontSize: 13 }} /></td>
+                      <td style={td}><Input list="gla-quote-units" value={it.unit} onChange={(e) => setItem(i, "unit", e.target.value)} /></td>
+                      <td style={td}><Input type="number" min={0} value={it.qty} onChange={(e) => setItem(i, "qty", e.target.value)} /></td>
+                      <td style={td}><Input type="number" min={0} value={it.rate} onChange={(e) => setItem(i, "rate", e.target.value)} /></td>
+                      <td style={num}>{fmtN(l.sub)}</td><td style={num}>{fmtN(l.vat)}</td><td style={{ ...num, fontWeight: 700 }}>{fmtN(l.total)}</td>
+                      <td style={{ ...td, whiteSpace: "nowrap", paddingTop: 9 }}>
+                        <button type="button" onClick={() => moveItem(i, -1)} disabled={i === 0} title="Move up" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 2 }}><ChevronUp size={14} /></button>
+                        <button type="button" onClick={() => moveItem(i, 1)} disabled={i === f.lineItems.length - 1} title="Move down" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 2 }}><ChevronDown size={14} /></button>
+                        <button type="button" onClick={() => rmItem(i)} title="Remove item" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--danger)", padding: 2 }}><X size={14} /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr>
+                  <td style={td} /><td style={{ ...td, fontWeight: 700, paddingTop: 10 }}>TOTALS</td><td style={td} /><td style={td} /><td style={td} />
+                  <td style={{ ...num, fontWeight: 700 }}>{fmtN(t.sub)}</td><td style={{ ...num, fontWeight: 700 }}>{fmtN(t.vat)}</td><td style={{ ...num, fontWeight: 800, color: "var(--brand)" }}>{cur} {fmtN(t.grand)}</td><td style={td} />
+                </tr>
+              </tbody>
+            </table>
+            <datalist id="gla-quote-units">{QUOTE_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+          </div>
+          <div style={{ padding: "10px 16px", fontSize: 12.5, background: "var(--surface-2)", borderTop: "1px solid var(--border)" }}>
+            <b>Amount in words: </b><span style={{ color: "var(--brand)", fontStyle: "italic", fontWeight: 600 }}>{poAmountWords(t.grand)} {QUOTE_CURRENCY_WORDS[cur] || cur} only</span>
+          </div>
+        </Card>
+        <Field label="Notes / terms (optional)" full hint="Printed under the items — e.g. payment terms, exclusions, delivery period">
+          <Textarea value={f.notes} onChange={set("notes")} placeholder="e.g. Payment: 50% advance, balance on completion. Excludes civil works not listed." />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+function QuotationPreview({ ctx, q: raw }) {
+  const { setModal } = ctx;
+  setReportSignatories(ctx.store.settings && ctx.store.settings.signatories);
+  const q = normalizeQuotation(raw);
+  const t = quoteTotals(q);
+  const cur = q.currency || "UGX";
+  const disp = quoteDisplayStatus(q, TODAY);
+  const sig = SIGNATORIES[0] || {};
+  const sigImg = isSigImage(sig.signature) ? sig.signature : signatureFor(sig.name);
+  const setStatus = async (status) => {
+    const now = new Date().toISOString();
+    await quotationsApi.update(q.id, { status, ...(status === "sent" ? { sentAt: q.sentAt || now } : {}), ...(status === "accepted" || status === "declined" ? { decidedAt: now } : {}), updatedAt: now });
+    await ctx.reload(); setModal(null);
+  };
+  const ink = "var(--text)", body = "var(--text-2)", line = "1px solid var(--border)";
+  const kv = (k, v, strong) => (
+    <div style={{ display: "flex", borderBottom: line }}>
+      <div style={{ width: 150, minWidth: 130, textAlign: "right", padding: "6px 10px", fontWeight: 700, fontSize: 12.5, color: ink, background: "var(--surface-2)" }}>{k}</div>
+      <div style={{ flex: 1, padding: "6px 10px", fontSize: 12.5, fontStyle: "italic", fontWeight: strong ? 700 : 400, color: body }}>{v || "—"}</div>
+    </div>
+  );
+  const th = { padding: "8px 6px", fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: body, borderBottom: "1.5px solid var(--border-strong)", textAlign: "left", whiteSpace: "nowrap", background: "var(--surface-2)" };
+  const td = { padding: "8px 6px", fontSize: 12, color: ink, borderBottom: line, verticalAlign: "top" };
+  const rt = { textAlign: "right", fontFamily: "var(--font-mono)" };
+  const footer = (
+    <>
+      <Btn onClick={() => setModal(null)}>Close</Btn>
+      {q.status === "draft" && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
+      {(q.status === "sent") && <Btn variant="danger" onClick={() => setStatus("declined")}><X size={14} />Declined</Btn>}
+      {(q.status === "sent") && <Btn variant="success" onClick={() => setStatus("accepted")}><Check size={14} />Accepted</Btn>}
+      <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>
+      <Btn onClick={() => excelQuote(ctx, raw)}><Download size={14} />Excel</Btn>
+      <Btn variant="primary" onClick={() => printQuote(ctx, raw)}><Printer size={14} />Download PDF</Btn>
+    </>
+  );
+  return (
+    <Modal wide title="Quotation preview" sub={`${q.quoteNo}${q.client ? " · " + q.client : ""}`} onClose={() => setModal(null)} footer={footer}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>Prepared by {q.preparedBy || "—"}{q.sentAt ? ` · sent ${fmtDate(q.sentAt)}` : ""}{q.decidedAt ? ` · ${quoteStatusLabel(q.status).toLowerCase()} ${fmtDate(q.decidedAt)}` : ""}</div>
+        <Pill tone={quoteStatusTone(disp)}>{quoteStatusLabel(disp)}</Pill>
+      </div>
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "20px 22px", background: "var(--bg-elevated)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "2px solid var(--brand)", paddingBottom: 10, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: "var(--brand)" }}>{COMPANY.name}</div>
+            <div style={{ fontSize: 11, color: body, lineHeight: 1.5 }}>{(COMPANY.lines || []).map((l, i) => <div key={i}>{l}</div>)}</div>
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: ".04em", color: ink }}>QUOTATION</div>
+        </div>
+        <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+          {kv("Quote to:", q.client, true)}{kv("Scope of works", q.scope)}{kv("Sites:", q.sites)}{kv("Attn:", q.attn)}
+          {kv("Our Ref", q.quoteNo, true)}{kv("Date", fmtDateLong(q.date))}{kv("Quote validity", `${q.validityDays} calendar days (valid until ${fmtDate(quoteValidUntil(q))})`, true)}{kv("Currency", QUOTE_CURRENCY_WORDS[cur] || cur)}
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+            <thead><tr>
+              <th style={th}>No</th><th style={th}>Description &amp; Specification</th><th style={th}>Item</th><th style={{ ...th, textAlign: "right" }}>Qty</th><th style={{ ...th, textAlign: "right" }}>Rate</th>
+              <th style={{ ...th, textAlign: "right" }}>Sub total</th><th style={{ ...th, textAlign: "right" }}>{t.rate}% VAT</th><th style={{ ...th, textAlign: "right" }}>Sub total</th>
+            </tr></thead>
+            <tbody>
+              {t.lines.map((l, i) => (
+                <tr key={i}>
+                  <td style={td}>{i + 1}</td><td style={{ ...td, whiteSpace: "pre-wrap" }}>{l.description}</td><td style={td}>{l.unit}</td>
+                  <td style={{ ...td, ...rt }}>{fmtN(l.qty)}</td><td style={{ ...td, ...rt }}>{fmtN(l.rate)}</td><td style={{ ...td, ...rt }}>{fmtN(l.sub)}</td><td style={{ ...td, ...rt }}>{fmtN(l.vat)}</td><td style={{ ...td, ...rt, fontWeight: 600 }}>{fmtN(l.total)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td style={td} /><td style={{ ...td, fontWeight: 800, fontStyle: "italic" }}>TOTALS</td><td style={td} /><td style={td} /><td style={td} />
+                <td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.sub)}</td><td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.vat)}</td><td style={{ ...td, ...rt, fontWeight: 800, color: "var(--brand)" }}>{fmtN(t.grand)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 8, background: "var(--surface-2)", fontSize: 12.5, textAlign: "center" }}>
+          <span style={{ color: "var(--danger)", fontWeight: 700, fontStyle: "italic" }}>{poAmountWords(t.grand)}</span> <span style={{ color: "var(--brand)", fontWeight: 700, fontStyle: "italic" }}>{QUOTE_CURRENCY_WORDS[cur] || cur}</span>
+        </div>
+        {q.notes && String(q.notes).trim() && <div style={{ marginTop: 14, fontSize: 12, color: body, whiteSpace: "pre-wrap" }}><b style={{ color: ink }}>Notes / terms: </b>{String(q.notes).trim()}</div>}
+        <div style={{ marginTop: 24, display: "flex", alignItems: "flex-end", gap: 18 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontStyle: "italic", fontSize: 12.5, color: ink, marginBottom: 6 }}>Approved Signatory</div>
+            <div style={{ fontSize: 12.5, color: ink, fontWeight: 600 }}>{sig.name || "—"}</div>
+            {sig.title && <div style={{ fontSize: 11.5, color: "var(--brand)", fontWeight: 600 }}>{sig.title}</div>}
+            {sig.contact && <div style={{ fontSize: 11.5, color: body }}>{sig.contact}</div>}
+          </div>
+          {sigImg && q.status !== "draft" && <img src={sigImg} alt={`Signature of ${sig.name}`} style={{ height: 70 }} />}
+          {q.status === "draft" && <span style={{ fontSize: 11.5, color: "var(--muted)", fontStyle: "italic" }}>Draft — signature added when saved as sent</span>}
         </div>
       </div>
     </Modal>

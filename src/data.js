@@ -401,6 +401,79 @@ export function normalizePurchaseOrder(po = {}) {
   };
 }
 
+/* =========================================================================
+   Client quotations — priced quotes Global Link sends to clients (e.g. Vivo
+   Energy): Quote to / Scope of works / Sites / Attn / Our Ref / Date /
+   validity / currency, priced line items with 18% VAT added per line, amount
+   in words and the approved signatory.
+   ========================================================================= */
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined"];
+export const quoteStatusLabel = (s) => ({ draft: "Draft", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired" }[s] || s);
+export const quoteStatusTone = (s) => ({ draft: "muted", sent: "accent", accepted: "success", declined: "danger", expired: "warning" }[s] || "muted");
+export const QUOTE_UNITS = ["item", "lot", "lsum", "mtrs", "pcs", "nos", "sets", "rolls", "ltrs", "kgs", "days", "hrs", "trips"];
+export function normalizeQuotation(q = {}) {
+  const lineItems = (Array.isArray(q.lineItems) ? q.lineItems : [])
+    .map((li) => ({ description: li.description || "", unit: li.unit || "item", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 }));
+  return {
+    id: q.id,
+    quoteNo: q.quoteNo || "",
+    client: q.client || "",
+    attn: q.attn || "",
+    scope: q.scope || "",
+    sites: q.sites || "",
+    date: q.date || new Date().toISOString().slice(0, 10),
+    validityDays: Number(q.validityDays) > 0 ? Number(q.validityDays) : 30,
+    currency: q.currency || "UGX",
+    vatRate: q.vatRate === 0 || q.vatRate === "0" ? 0 : Number(q.vatRate ?? 18) || 18,
+    lineItems: lineItems.length ? lineItems : [{ description: "", unit: "item", qty: 1, rate: 0 }],
+    notes: q.notes || "",
+    status: QUOTE_STATUSES.includes(q.status) ? q.status : "draft",
+    preparedBy: q.preparedBy || "",
+    sentAt: q.sentAt || null,
+    decidedAt: q.decidedAt || null,
+    createdAt: q.createdAt || new Date().toISOString(),
+    updatedAt: q.updatedAt || new Date().toISOString(),
+  };
+}
+// Per-line and overall totals. VAT is added on top of each line (as in the
+// Global Link quotation template: Sub total, 18% VAT, Sub total incl. VAT).
+export function quoteTotals(q) {
+  const rate = Number(q && q.vatRate) || 0;
+  const lines = ((q && q.lineItems) || []).map((li) => {
+    const sub = Math.round((Number(li.qty) || 0) * (Number(li.rate) || 0));
+    const vat = Math.round(sub * rate / 100);
+    return { ...li, sub, vat, total: sub + vat };
+  });
+  const sub = lines.reduce((a, l) => a + l.sub, 0);
+  const vat = lines.reduce((a, l) => a + l.vat, 0);
+  return { lines, sub, vat, grand: sub + vat, rate };
+}
+// Valid-until date and whether an unanswered quote has lapsed.
+export const quoteValidUntil = (q) => { const d = new Date((q.date || "") + "T00:00:00"); if (isNaN(d)) return ""; d.setDate(d.getDate() + (Number(q.validityDays) || 30)); return d.toISOString().slice(0, 10); };
+export const quoteDisplayStatus = (q, today = new Date().toISOString().slice(0, 10)) => (q.status === "sent" && quoteValidUntil(q) && quoteValidUntil(q) < today ? "expired" : q.status);
+// Next reference, continuing the Gla/NNN/YY series from the highest one used.
+export function nextQuoteNumber(existing = []) {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const nums = (existing || []).map((q) => { const m = /^Gla\/(\d+)\/(\d{2})$/i.exec(String(q.quoteNo || "").trim()); return m && m[2] === yy ? Number(m[1]) : 0; });
+  const n = (nums.length ? Math.max(0, ...nums) : 0) + 1;
+  return `Gla/${String(n).padStart(3, "0")}/${yy}`;
+}
+
+// Demo quotation (mock build only — the live table starts empty): the Global
+// Link "Mayuge pole lights" quote for Vivo Energy.
+data.quotations = [
+  normalizeQuotation({
+    id: "QUO-0063", quoteNo: "Gla/063/26", client: "VIVO ENERGY", attn: "Irene",
+    scope: "Repairs to Peripheral area Lighting", sites: "SUL Mayuge", date: "2026-04-01", validityDays: 30, currency: "UGX", vatRate: 18,
+    lineItems: [
+      { description: "Mobilisation, HSSE and transportation of Human resource and materials to site", unit: "item", qty: 1, rate: 200000 },
+      { description: "Supply of 2.5 mm sq XLPE/PVS SWA Cable", unit: "mtrs", qty: 250, rate: 16750 },
+      { description: "Supply and lay 50mm upvc cable ducts rates to include but not limited to trenching, limited civil works etc", unit: "mtrs", qty: 215, rate: 15560 },
+    ],
+    status: "sent", preparedBy: "Robert Okello", createdAt: "2026-04-01T08:00:00Z",
+  }),
+];
+
 // Seed a demo purchase order (mock build only — the live table starts empty).
 data.purchaseOrders = [
   normalizePurchaseOrder({
@@ -448,7 +521,7 @@ export const PERMISSION_MODULES = [
   ["dashboard", "Dashboard"], ["employees", "Employees"], ["leave", "Leave"],
   ["attendance", "Attendance"], ["payroll", "Payroll"], ["advances", "Salary Advances"],
   ["suppliers", "Suppliers"], ["stock", "Stock"], ["appraisals", "Appraisals"], ["reports", "Reports"], ["settings", "Settings"],
-  ["selfservice", "My self-service (own portal)"],
+  ["selfservice", "My self-service (own portal)"], ["quotations", "Quotations"],
 ];
 export const PERMISSION_ACTIONS = [
   ["editEmployees", "Add / edit employee records"],
@@ -488,7 +561,7 @@ data.settings = {
   roles: [
     { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
     { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll, stock and settings, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
-    { id: "finance", name: "Finance Officer", description: "Staff self-service plus salary advances, suppliers & purchase orders, requisition payments and stock.", modules: { dashboard: true, employees: false, leave: true, attendance: true, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: false, settings: false, selfservice: true }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
+    { id: "finance", name: "Finance Officer", description: "Staff self-service plus salary advances, suppliers & purchase orders, requisition payments and stock.", modules: { dashboard: true, employees: false, leave: true, attendance: true, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: false, settings: false, selfservice: true, quotations: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [

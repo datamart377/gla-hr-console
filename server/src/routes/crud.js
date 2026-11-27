@@ -23,7 +23,7 @@ const PREFIXES = {
   ledger_columns: "col", payroll_runs: "PR", suppliers: "SUP",
   supplier_schedule: "SL", supplier_runs: "SPR", advances: "ADV",
   stock_items: "STK", stock_movements: "MOV", stock_closings: "CLS",
-  bank_approvals: "BAPP", requisitions: "REQ",
+  bank_approvals: "BAPP", requisitions: "REQ", quotations: "QUO",
 };
 
 const genId = (table) => {
@@ -56,7 +56,7 @@ export async function liveRole(roleId) {
 }
 export const permits = (role, gate) => !role || !gate || ((role[gate[0]] || {})[gate[1]] !== false);
 // Without these, a management user reads the collection like staff would.
-const READ_GATE = { payroll_runs: ["modules", "payroll"] };
+const READ_GATE = { payroll_runs: ["modules", "payroll"], quotations: ["modules", "quotations"] };
 // Without these, a management user writes the collection like staff would.
 const WRITE_GATE = {
   employees: ["actions", "editEmployees"],
@@ -70,6 +70,7 @@ const WRITE_GATE = {
   stock_items: ["actions", "manageStock"],
   stock_movements: ["actions", "manageStock"],
   stock_closings: ["actions", "manageStock"],
+  quotations: ["modules", "quotations"],
 };
 // Does this user act with management powers on `table` for `mode`?
 async function mgmtFor(req, table, mode) {
@@ -311,6 +312,8 @@ export function crudRouter(table) {
         // Management without Payroll: keep each run (month/status drive advance
         // recovery) but only their own row inside it.
         recs = recs.map((r) => shapeForStaff(table, r, req.user.empId));
+      } else if (isMgmt(req) && !asMgmt) {
+        recs = []; // a module this role doesn't have (e.g. Quotations)
       } else if (!isMgmt(req)) {
         const empId = req.user.empId;
         if (table === "payroll_runs") {
@@ -341,7 +344,10 @@ export function crudRouter(table) {
       const { rows } = await query(`SELECT id, doc FROM ${table} WHERE id = $1`, [req.params.id]);
       if (!rows.length) return res.status(404).json({ error: "Record not found." });
       let rec = rowToRecord(rows[0]);
-      if (isMgmt(req) && table === "payroll_runs" && !(await mgmtFor(req, table, "read"))) rec = shapeForStaff(table, rec, req.user.empId);
+      if (isMgmt(req) && !(await mgmtFor(req, table, "read"))) {
+        if (table === "payroll_runs") rec = shapeForStaff(table, rec, req.user.empId);
+        else return res.status(403).json({ error: "You do not have permission to view this record." });
+      }
       if (table === "employees" && isMgmt(req) && !(await seesPay(req))) rec = stripPay(rec, req.user.empId);
       if (!isMgmt(req)) {
         const empId = req.user.empId;

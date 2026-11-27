@@ -518,6 +518,110 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   doc.save(`Payment-Voucher-${voucherNo.replace(/\//g, "-")}.pdf`);
 }
 
+/* ------------------------------- quotation -------------------------------- */
+/**
+ * downloadQuotationPdf(q) — a client quotation in the Global Link template:
+ * letterhead, a details block (Quote to / Scope of works / Sites / Attn / Our
+ * Ref / Date / Quote validity / Currency), the priced items with 18% VAT per
+ * line, TOTALS, amount in words and the approved signatory (with signature &
+ * stamp). A draft is watermarked and unsigned.
+ */
+export function downloadQuotationPdf(q) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const guard = letterheadGuard();
+  const cur = q.currency || "UGX";
+  const rate = Number(q.vatRate) || 0;
+  const CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
+  const lines = (q.lineItems || []).map((li) => {
+    const sub = Math.round((Number(li.qty) || 0) * (Number(li.rate) || 0));
+    const v = Math.round(sub * rate / 100);
+    return { ...li, sub, vat: v, total: sub + v };
+  });
+  const sub = lines.reduce((a, l) => a + l.sub, 0), vat = lines.reduce((a, l) => a + l.vat, 0), grand = sub + vat;
+  const ref = q.quoteNo || q.id || "";
+  const draft = q.status === "draft";
+  const validUntil = (() => { const d = new Date((q.date || "") + "T00:00:00"); if (isNaN(d)) return ""; d.setDate(d.getDate() + (Number(q.validityDays) || 30)); return d.toISOString().slice(0, 10); })();
+  const longDate = (s) => { try { return new Date(s + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); } catch { return voDate(s); } };
+
+  const qrText = [`${COMPANY.name} — QUOTATION`, `Ref: ${ref}`, `To: ${q.client || "-"}`, `Total: ${cur} ${voMoney(grand)}`, `Date: ${voDate(q.date)}`, `Valid until: ${voDate(validUntil)}`].join("\n");
+  let y = drawLetterhead(doc);
+  drawTopRightQR(doc, qrText);
+  y = drawTitleBlock(doc, y, { eyebrow: "Quotation", title: draft ? "QUOTATION — DRAFT" : "QUOTATION", subtitle: null, meta: [], reference: ref });
+
+  // Details block — label column right-aligned and shaded, values in italics.
+  const kcell = { fontStyle: "bold", textColor: INK, fillColor: KVFILL, halign: "right" };
+  const vcell = (v, bold) => ({ content: v || "—", styles: { fontStyle: bold ? "bolditalic" : "italic" } });
+  const details = [
+    [{ content: "Quote to:", styles: kcell }, vcell(q.client, true)],
+    [{ content: "Scope of works", styles: kcell }, vcell(q.scope)],
+    [{ content: "Sites:", styles: kcell }, vcell(q.sites)],
+    [{ content: "Attn:", styles: kcell }, vcell(q.attn)],
+    [{ content: "Our Ref", styles: kcell }, vcell(ref, true)],
+    [{ content: "Date", styles: kcell }, vcell(longDate(q.date))],
+    [{ content: "Quote validity", styles: kcell }, vcell(`${Number(q.validityDays) || 30} calendar days (valid until ${voDate(validUntil)})`, true)],
+    [{ content: "Currency", styles: kcell }, vcell(CURRENCY_WORDS[cur] || cur)],
+  ];
+  y = runTable(doc, { body: details, startY: y + 2, guard, columnStyles: { 0: { cellWidth: 130 } } });
+
+  // Items.
+  const head = ["No", "Description & Specification", "Item", "Qty", "Rate", "Sub total", `${rate}% VAT`, "Sub total"];
+  const body = lines.map((l, i) => [String(i + 1), l.description || "", l.unit || "", voMoney(l.qty), voMoney(l.rate), voMoney(l.sub), voMoney(l.vat), voMoney(l.total)]);
+  body.push([
+    "", { content: "TOTALS", styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } }, "", "", "",
+    { content: voMoney(sub), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
+    { content: voMoney(vat), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
+    { content: voMoney(grand), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
+  ]);
+  y = runTable(doc, { head, body, startY: y + 12, guard, columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 170 }, 2: { cellWidth: 36 }, 3: { halign: "right", cellWidth: 36 }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } } });
+
+  // Amount in words (as in the template: red words, currency in brand colour).
+  const words = numberToWords(grand);
+  const wl = doc.splitTextToSize(words, pageW - MARGIN * 2 - 140);
+  const awY = y + 12, awH = Math.max(26, 12 + wl.length * 12);
+  doc.setFillColor(...KVFILL); doc.rect(MARGIN, awY, pageW - MARGIN * 2, awH, "F");
+  doc.setFont("helvetica", "bolditalic"); doc.setFontSize(9.5); doc.setTextColor(200, 40, 30);
+  doc.text(wl, MARGIN + 10, awY + 16);
+  doc.setTextColor(...BRAND); doc.text(CURRENCY_WORDS[cur] || cur, pageW - MARGIN - 10, awY + 16, { align: "right" });
+  y = awY + awH;
+
+  if (q.notes && String(q.notes).trim()) {
+    y = drawSectionHeading(doc, y + 16, "Notes / terms");
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(...BODY);
+    const nl = doc.splitTextToSize(String(q.notes).trim(), pageW - MARGIN * 2);
+    if (y + 12 + nl.length * 11 > pageH - 60) { doc.addPage(); guard(doc, doc.getNumberOfPages()); y = drawLetterhead(doc) + 10; }
+    doc.text(nl, MARGIN, y + 12); y += 12 + nl.length * 11;
+  }
+
+  // Approved signatory — name, title, contact, with signature & stamp once sent.
+  const sig = SIGNATORIES[0] || {};
+  let sy = y + 30;
+  if (sy + 110 > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
+  doc.setFont("helvetica", "bolditalic"); doc.setFontSize(10); doc.setTextColor(...INK);
+  doc.text("Approved Signatory", MARGIN, sy);
+  const img = draft ? null : sigImageOf(sig);
+  if (img) drawSigImage(doc, img, MARGIN + 230, sy + 62, 150, 66);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...INK);
+  doc.text(String(sig.name || ""), MARGIN, sy + 22);
+  let ly = sy + 22;
+  if (sig.title) { ly += 13; doc.setFont("helvetica", "bold"); doc.setFontSize(8.8); doc.setTextColor(...BRAND); doc.text(String(sig.title), MARGIN, ly); }
+  if (sig.contact) { ly += 13; doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY); doc.text(String(sig.contact), MARGIN, ly); }
+  if (draft) { ly += 14; doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text("Draft — not yet issued", MARGIN, ly); }
+
+  drawFooters(doc);
+  if (draft) {
+    for (let pg = 1; pg <= doc.getNumberOfPages(); pg++) {
+      doc.setPage(pg);
+      try { doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.1 })); } catch (e) { /* older jsPDF */ }
+      doc.setFont("helvetica", "bold"); doc.setFontSize(110); doc.setTextColor(200, 60, 50);
+      doc.text("DRAFT", pageW / 2, pageH / 2 + 40, { align: "center", angle: 35 });
+      try { doc.restoreGraphicsState(); } catch (e) { /* noop */ }
+    }
+  }
+  doc.save(`Quotation-${String(ref).replace(/[/\\]/g, "-")}${draft ? "-DRAFT" : ""}.pdf`);
+}
+
 /* ---------------------------- purchase order ----------------------------- */
 /**
  * downloadPurchaseOrderPdf(po) — a branded Purchase Order issued to a supplier
