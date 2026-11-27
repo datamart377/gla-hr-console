@@ -344,7 +344,7 @@ export const PERMISSION_MODULES = [
   ["dashboard", "Dashboard"], ["employees", "Employees"], ["leave", "Leave"],
   ["attendance", "Attendance"], ["payroll", "Payroll"], ["advances", "Salary Advances"],
   ["suppliers", "Suppliers"], ["stock", "Stock"], ["appraisals", "Appraisals"], ["reports", "Reports"], ["settings", "Settings"],
-  ["selfservice", "My self-service (own portal)"], ["quotations", "Quotations"],
+  ["selfservice", "My self-service (own portal)"], ["quotations", "Clients & quotations"],
 ];
 export const PERMISSION_ACTIONS = [
   ["editEmployees", "Add / edit employee records"],

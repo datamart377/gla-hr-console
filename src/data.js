@@ -457,17 +457,27 @@ export const QUOTE_UNITS = ["item", "lot", "lsum", "mtrs", "pcs", "nos", "sets",
 /* --------------------------------- clients --------------------------------- */
 // The firms Global Link quotes to. Every quotation is raised against one.
 export const CLIENT_STATUSES = ["Active", "Inactive"];
+export const CLIENT_CATEGORIES = [
+  "Oil & Gas / Fuel Stations", "Banking & Finance", "Manufacturing", "Government & Public Sector", "Telecommunications",
+  "Construction & Real Estate", "Hospitality & Retail", "Healthcare", "Education", "NGO & Development", "Other",
+];
 const splitSites = (v) => (Array.isArray(v) ? v : String(v || "").split(/\r?\n|;/)).map((x) => String(x).trim()).filter(Boolean);
 export function normalizeClient(c = {}) {
   return {
     id: c.id,
     name: String(c.name || "").trim(),
+    category: c.category || "",
     contactPerson: c.contactPerson || "",
     phone: c.phone || "",
+    phone2: c.phone2 || "",
     email: c.email || "",
     address: c.address || "",
     tin: c.tin || "",
     sites: splitSites(c.sites),
+    // Quotation defaults applied when a new quotation is started for this client.
+    currency: c.currency || "UGX",
+    vatDefault: c.vatDefault !== false,
+    validityDays: Number(c.validityDays) > 0 ? Number(c.validityDays) : 30,
     notes: c.notes || "",
     status: CLIENT_STATUSES.includes(c.status) ? c.status : "Active",
     createdAt: c.createdAt || new Date().toISOString(),
@@ -530,13 +540,13 @@ export function nextQuoteNumber(existing = []) {
 // Demo quotation (mock build only — the live table starts empty): the Global
 // Link "Mayuge pole lights" quote for Vivo Energy.
 data.clients = [
-  normalizeClient({ id: "CLI-0001", name: "VIVO ENERGY", contactPerson: "Irene", phone: "", email: "", address: "Kampala, Uganda", sites: ["SUL Mayuge"], status: "Active", notes: "Shell-branded service stations (Vivo Energy Uganda)." }),
-  normalizeClient({ id: "CLI-0002", name: "TotalEnergies Marketing Uganda", contactPerson: "Procurement", address: "Kampala, Uganda", sites: ["TotalEnergies Ntinda"], status: "Active" }),
+  normalizeClient({ id: "CLI-001", name: "VIVO ENERGY", category: "Oil & Gas / Fuel Stations", contactPerson: "Irene", phone: "+256 312 260 000", email: "", address: "Kampala, Uganda", sites: ["SUL Mayuge", "Shell Ndeeba"], status: "Active", notes: "Shell-branded service stations (Vivo Energy Uganda)." }),
+  normalizeClient({ id: "CLI-002", name: "TotalEnergies Marketing Uganda", category: "Oil & Gas / Fuel Stations", contactPerson: "Procurement", phone: "+256 414 000 000", address: "Kampala, Uganda", sites: ["TotalEnergies Ntinda"], status: "Active" }),
 ];
 
 data.quotations = [
   normalizeQuotation({
-    id: "QUO-0063", quoteNo: "Gla/063/26", clientId: "CLI-0001", client: "VIVO ENERGY", attn: "Irene",
+    id: "QUO-0063", quoteNo: "Gla/063/26", clientId: "CLI-001", client: "VIVO ENERGY", attn: "Irene",
     scope: "Repairs to Peripheral area Lighting", sites: "SUL Mayuge", date: "2026-04-01", validityDays: 30, currency: "UGX", vatRate: 18,
     lineItems: [
       { description: "Mobilisation, HSSE and transportation of Human resource and materials to site", unit: "item", qty: 1, rate: 200000 },
@@ -594,7 +604,7 @@ export const PERMISSION_MODULES = [
   ["dashboard", "Dashboard"], ["employees", "Employees"], ["leave", "Leave"],
   ["attendance", "Attendance"], ["payroll", "Payroll"], ["advances", "Salary Advances"],
   ["suppliers", "Suppliers"], ["stock", "Stock"], ["appraisals", "Appraisals"], ["reports", "Reports"], ["settings", "Settings"],
-  ["selfservice", "My self-service (own portal)"], ["quotations", "Quotations"],
+  ["selfservice", "My self-service (own portal)"], ["quotations", "Clients & quotations"],
 ];
 export const PERMISSION_ACTIONS = [
   ["editEmployees", "Add / edit employee records"],

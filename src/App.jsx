@@ -4,7 +4,7 @@ import {
   Search, Pencil, Trash2, Printer, FileText, FileBarChart, Building2, Phone, Mail, MapPin,
   AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, UserPlus, ShieldCheck, TrendingUp,
   Circle, Download, Landmark, History, GraduationCap, Award, Briefcase,
-  HeartHandshake, Baby, IdCard, FileCheck, Contact,
+  HeartHandshake, Handshake, Baby, IdCard, FileCheck, Contact,
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
   Navigation, LocateFixed, Smartphone, BarChart3, PieChart, Timer,
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff, UserX,
@@ -21,7 +21,7 @@ import {
   authApi, notifyApi, accountsApi, isLive,
 } from "./api/client.js";
 import {
-  data, TODAY, normalizeClient, CLIENT_STATUSES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
+  data, TODAY, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
@@ -311,7 +311,7 @@ const NAV = [
   { id: "advances", label: "Salary Advances", Icon: Banknote, section: "Finance" },
   { id: "suppliers", label: "Suppliers", Icon: Building2, section: "Finance" },
   { id: "requisitions", label: "Requisitions", Icon: Receipt, section: "Finance" },
-  { id: "quotations", label: "Quotations", Icon: FileSignature, section: "Finance" },
+  { id: "quotations", label: "Clients", Icon: Handshake, section: "Finance" },
   { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
   { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
@@ -346,7 +346,7 @@ const actorName = (ctx) => {
   return n ? (role ? `${n} (${role})` : n) : (role || "HR");
 };
 const VIEW_META = {
-  quotations: ["Quotations", "Client quotations and the client register — scope, priced items, 18% VAT and approved signatory"],
+  quotations: ["Clients", "Client register and the quotations raised against each client"],
   dashboard: ["Workforce Overview", "Front-end demo — HR snapshot for Global Link Associates Ltd"],
   employees: ["Employee Register", "Staff records, contracts and statutory details"],
   approvals: ["Profile Approvals", "Review and validate staff-submitted profile changes"],
@@ -530,7 +530,7 @@ function AdminConsole({ ctx }) {
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: Quotations, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: ClientsPage, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
     myportal: ConsoleMyPortal, myprofile: MyProfileEdit, clockin: MyClockIn, myleave: MyLeave, mypayslip: MyPayslip, myadvance: MyAdvance, myfile: ConsoleMyFile }[view];
   // Defence in depth: even if a view is reached directly (not via the sidebar),
   // enforce the same role gate the navigation uses.
@@ -5662,9 +5662,11 @@ function excelQuote(ctx, raw) {
   });
 }
 
-function Quotations({ ctx }) {
+function Quotations({ ctx, clientFilter, setClientFilter }) {
   const { store, setModal } = ctx;
-  const [tab, setTab] = useState("quotes"); // quotes | clients
+  const [cidLocal, setCidLocal] = useState("");
+  const cid = clientFilter !== undefined ? clientFilter : cidLocal;
+  const setCid = setClientFilter || setCidLocal;
   const clients = (store.clients || []).map(normalizeClient);
   const all = (store.quotations || []).map(normalizeQuotation).sort((a, b) => String(b.date + b.createdAt).localeCompare(String(a.date + a.createdAt)));
   const [q, setQ] = useState("");
@@ -5672,6 +5674,7 @@ function Quotations({ ctx }) {
   const withStatus = all.map((x) => ({ ...x, _st: quoteDisplayStatus(x, TODAY), _t: quoteTotals(x) }));
   let rows = withStatus;
   if (st) rows = rows.filter((x) => x._st === st);
+  if (cid) rows = rows.filter((x) => x.clientId === cid);
   if (q.trim()) { const k = q.trim().toLowerCase(); rows = rows.filter((x) => [x.quoteNo, x.client, x.attn, x.scope, x.sites].join(" ").toLowerCase().includes(k)); }
   const ugx = (list) => list.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
   const open = withStatus.filter((x) => x._st === "sent");
@@ -5688,19 +5691,17 @@ function Quotations({ ctx }) {
         <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
       </div>
       <Toolbar>
-        <SegTabs value={tab} onChange={setTab} options={[["quotes", "Quotations", all.length], ["clients", "Clients", clients.length]]} />
-        {tab === "quotes" && <>
-          <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
-          <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
-          <div style={{ flex: 1 }} />
-          <Btn variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} />)}><Plus size={16} />New quotation</Btn>
-        </>}
+        <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
+        <Select value={cid} onChange={(e) => setCid(e.target.value)} style={{ width: "auto", maxWidth: 240 }} options={[{ value: "", label: "All clients" }, ...clients.slice().sort((x, y) => x.name.localeCompare(y.name)).map((c) => ({ value: c.id, label: c.name }))]} />
+        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" disabled={!clients.some((c) => c.status !== "Inactive")} title={clients.length ? "Start a quotation for a client" : "Add a client on the Client register first"} onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={cid || undefined} />)}><Plus size={16} />New quotation</Btn>
       </Toolbar>
-      {tab === "clients" ? <ClientsPanel ctx={ctx} quotes={withStatus} onShowQuotes={(c) => { setQ(c.name); setSt(""); setTab("quotes"); }} /> : <Card>
+      <Card>
         <DataTable
           columns={[
             { label: "Our Ref", render: (x) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span> },
-            { label: "Quote to", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{x.client || "—"}</div>{x.attn && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Attn: {x.attn}</div>}</div> },
+            { label: "Client", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)", cursor: x.clientId ? "pointer" : "default" }} onClick={() => x.clientId && setModal(() => (cc) => <ClientView ctx={cc} id={x.clientId} />)} title={x.clientId ? "View client" : undefined}>{x.client || "—"}</div>{x.attn && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Attn: {x.attn}</div>}</div> },
             { label: "Scope / Sites", render: (x) => <div style={{ maxWidth: 320 }}><div style={{ color: "var(--text)" }}>{x.scope || "—"}</div>{x.sites && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.sites}</div>}</div> },
             { label: "Date", render: (x) => fmtDate(x.date) },
             { label: "Valid until", render: (x) => <span style={{ color: x._st === "expired" ? "var(--warning)" : "var(--text-2)" }}>{fmtDate(quoteValidUntil(x))}</span> },
@@ -5718,117 +5719,237 @@ function Quotations({ ctx }) {
             ) },
           ]}
           rows={rows}
-          empty={all.length ? "No quotations match your filters." : clients.length ? "No quotations yet. Click “New quotation” to prepare one for a client." : "No quotations yet. Add your clients on the Clients tab, then click “New quotation”."}
-        />
-      </Card>}
-    </>
-  );
-}
-
-// Segmented tab switch: options = [[value, label, count?], …]
-function SegTabs({ value, onChange, options }) {
-  return (
-    <div style={{ display: "inline-flex", gap: 4, padding: 3, borderRadius: 10, background: "var(--surface-2)", border: "1px solid var(--border)" }}>
-      {options.map(([k, label, n]) => (
-        <button key={k} type="button" onClick={() => onChange(k)}
-          style={{ border: 0, cursor: "pointer", padding: "6px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: "var(--font-sans)",
-            background: value === k ? "var(--surface)" : "transparent", color: value === k ? "var(--text)" : "var(--muted)", boxShadow: value === k ? "var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08))" : "none" }}>
-          {label}{n != null && <> <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.8 }}>{n}</span></>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// Client register (Quotations → Clients). A client with quotations can't be
-// deleted — mark it Inactive instead so it stops being offered for new quotes.
-function ClientsPanel({ ctx, quotes, onShowQuotes }) {
-  const { store, setModal } = ctx;
-  const [q, setQ] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
-  const clients = (store.clients || []).map(normalizeClient).sort((a, b) => a.name.localeCompare(b.name));
-  const stats = (c) => {
-    const mine = quotes.filter((x) => x.clientId === c.id);
-    const ugxOf = (l) => l.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
-    return { n: mine.length, quoted: ugxOf(mine), won: ugxOf(mine.filter((x) => x._st === "accepted")), last: mine.map((x) => x.date).sort().pop() || "" };
-  };
-  let rows = clients.filter((c) => showInactive || c.status !== "Inactive");
-  if (q.trim()) { const k = q.trim().toLowerCase(); rows = rows.filter((c) => [c.name, c.contactPerson, c.phone, c.email, c.sites.join(" "), c.tin].join(" ").toLowerCase().includes(k)); }
-  const inactiveCount = clients.filter((c) => c.status === "Inactive").length;
-  const canDel = canDo(ctx, "deleteRecords");
-  return (
-    <>
-      <Toolbar>
-        <SearchBox value={q} onChange={setQ} placeholder="Search client, contact, site or TIN…" />
-        {inactiveCount > 0 && <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show inactive ({inactiveCount})</label>}
-        <div style={{ flex: 1 }} />
-        <Btn variant="primary" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={null} />)}><Plus size={16} />New client</Btn>
-      </Toolbar>
-      <Card>
-        <DataTable
-          columns={[
-            { label: "Client", render: (c) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{c.name}</div>{c.address && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{c.address}</div>}</div> },
-            { label: "Contact", render: (c) => <div style={{ fontSize: 12.5 }}><div style={{ color: "var(--text)" }}>{c.contactPerson || "—"}</div><div style={{ color: "var(--muted)" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}</div></div> },
-            { label: "Sites", render: (c) => <div style={{ maxWidth: 260, fontSize: 12.5, color: "var(--text-2)" }}>{c.sites.length ? c.sites.join(", ") : "—"}</div> },
-            { label: "Quotations", render: (c) => { const st = stats(c); return st.n ? <span style={{ color: "var(--brand)", fontWeight: 600, cursor: "pointer" }} onClick={() => onShowQuotes(c)} title="Show this client's quotations">{st.n} · last {fmtDate(st.last)}</span> : <span style={{ color: "var(--muted)" }}>None yet</span>; } },
-            { label: "Quoted (UGX)", num: true, render: (c) => { const st = stats(c); return <div><div className="mono">{fmtN(st.quoted)}</div>{st.won > 0 && <div style={{ fontSize: 11, color: "var(--success)" }}>{fmtN(st.won)} won</div>}</div>; } },
-            { label: "Status", render: (c) => <Pill tone={c.status === "Active" ? "success" : "muted"}>{c.status}</Pill> },
-            { label: "", render: (c) => (
-              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                {c.status === "Active" && <Btn size="sm" variant="primary" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={c.id} />)} title="New quotation for this client"><Plus size={13} />Quote</Btn>}
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={c.id} />)} title="Edit"><Pencil size={13} /></Btn>
-                {canDel && (stats(c).n
-                  ? <Btn size="sm" disabled title="Has quotations — mark Inactive instead"><Trash2 size={13} /></Btn>
-                  : <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={clientsApi} id={c.id} label={c.name} />)} title="Delete"><Trash2 size={13} /></Btn>)}
-              </div>
-            ) },
-          ]}
-          rows={rows}
-          empty={clients.length ? "No clients match your search." : "No clients yet. Click “New client” to add the first one."}
+          empty={all.length ? "No quotations match your filters." : clients.length ? "No quotations yet. Use “Quote” on a client, or “New quotation” here." : "No quotations yet. Add your clients on the Client register first — every quotation is raised against a client."}
         />
       </Card>
     </>
   );
 }
 
-// Fields shared by the full client form and the quick-add inside a quotation.
-async function saveClient(ctx, existing, f) {
-  const name = String(f.name || "").trim();
-  if (!name) throw new Error("Enter the client's name.");
-  const clash = (ctx.store.clients || []).find((c) => c.id !== (existing && existing.id) && sameClientName(c.name, name));
-  if (clash) throw new Error(`A client named "${clash.name}" already exists.`);
-  const now = new Date().toISOString();
-  const payload = { ...normalizeClient({ ...f, name }), id: undefined, updatedAt: now };
-  delete payload.id;
-  return existing ? clientsApi.update(existing.id, payload) : clientsApi.create({ ...payload, createdAt: now });
+// Clients page — set up like Suppliers: a Client register and, under it, the
+// Quotations raised against those clients.
+function ClientsPage({ ctx }) {
+  const { store } = ctx;
+  const [tab, setTab] = useState("register");
+  const [clientFilter, setClientFilter] = useState("");
+  const clientCount = (store.clients || []).length;
+  const quoteCount = (store.quotations || []).length;
+  const showQuotes = (cid) => { setClientFilter(cid || ""); setTab("quotes"); };
+  return (
+    <>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        {[["register", "Client register", clientCount], ["quotes", "Quotations", quoteCount]].map(([id, label, count]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 999, border: "1px solid " + (tab === id ? "var(--brand)" : "var(--border)"), background: tab === id ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+            {label}{count > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: "var(--surface-2)", color: "var(--text-2)", borderRadius: 999, padding: "1px 7px" }}>{count}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "quotes"
+        ? <Quotations ctx={{ ...ctx, showClientQuotes: showQuotes }} clientFilter={clientFilter} setClientFilter={setClientFilter} />
+        : <ClientRegister ctx={{ ...ctx, showClientQuotes: showQuotes }} />}
+    </>
+  );
+}
+
+function nextClientId(clients) {
+  const nums = (clients || []).map((c) => /^CLI-\d+$/.test(String(c.id)) ? parseInt(String(c.id).slice(4), 10) : NaN).filter((n) => !isNaN(n));
+  return "CLI-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0");
+}
+
+// Per-client quotation figures (UGX values only, like the stat cards).
+function clientQuoteStats(c, quotations) {
+  const mine = (quotations || []).filter((x) => x.clientId === c.id).map((x) => { const n = normalizeQuotation(x); return { ...n, _st: quoteDisplayStatus(n, TODAY), _t: quoteTotals(n) }; });
+  const ugxOf = (l) => l.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
+  return { list: mine, n: mine.length, open: mine.filter((x) => x._st === "sent").length, quoted: ugxOf(mine), won: ugxOf(mine.filter((x) => x._st === "accepted")), last: mine.map((x) => x.date).sort().pop() || "" };
+}
+
+function ClientRegister({ ctx }) {
+  const { store, setModal } = ctx;
+  const all = (store.clients || []).map(normalizeClient).sort((a, b) => a.name.localeCompare(b.name));
+  const quotes = store.quotations || [];
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState("");
+  const list = all.filter((c) => {
+    if (cat && c.category !== cat) return false;
+    if (!q) return true;
+    return [c.name, c.tin, c.category, c.contactPerson, c.phone, c.email, c.sites.join(" ")].join(" ").toLowerCase().includes(q.toLowerCase());
+  });
+  const stats = Object.fromEntries(all.map((c) => [c.id, clientQuoteStats(c, quotes)]));
+  const active = all.filter((c) => c.status !== "Inactive").length;
+  const withOpen = all.filter((c) => stats[c.id].open > 0).length;
+  const quoted = all.reduce((a, c) => a + stats[c.id].quoted, 0);
+  const won = all.reduce((a, c) => a + stats[c.id].won, 0);
+  const statusTone = (s) => (s === "Inactive" ? "muted" : "success");
+  const manage = isHrOrAdmin(ctx) || can(ctx, "quotations");
+  const setStatus = async (c, status) => {
+    const prev = c.status;
+    ctx.setStore((st) => ({ ...st, clients: (st.clients || []).map((x) => (x.id === c.id ? { ...x, status } : x)) }));
+    try { await clientsApi.update(c.id, { status }); await ctx.reload(); }
+    catch (e) {
+      ctx.setStore((st) => ({ ...st, clients: (st.clients || []).map((x) => (x.id === c.id ? { ...x, status: prev } : x)) }));
+      alert(`Couldn't update “${c.name}”.\n\n${e && e.message ? e.message : "The server didn't respond. Sign out and back in, then try again."}`);
+    }
+  };
+  const toggleActive = (c) => {
+    if (c.status === "Inactive") return setStatus(c, "Active");
+    if (window.confirm(`Deactivate “${c.name}”?\n\nThey stay in the register with all their quotations, but can't be selected for new quotations. You can reactivate them any time.`)) setStatus(c, "Inactive");
+  };
+  return (
+    <>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
+        <StatCard Icon={Handshake} label="Clients" value={all.length} meta={`${active} active`} tone="brand" />
+        <StatCard Icon={Send} label="With open quotes" value={withOpen} meta="awaiting the client's reply" tone="accent" />
+        <StatCard Icon={FileSignature} label="Quoted value" value={ugxShort(quoted)} meta={`${quotes.length} quotation${quotes.length === 1 ? "" : "s"}`} tone="warning" />
+        <StatCard Icon={Check} label="Won value" value={ugxShort(won)} meta="accepted quotations" tone="success" />
+      </div>
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search name, TIN, contact, site…" />
+        <Select value={cat} onChange={(e) => setCat(e.target.value)} options={[{ value: "", label: "All categories" }, ...CLIENT_CATEGORIES.map((c) => ({ value: c, label: c }))]} style={{ width: "auto" }} />
+        <div style={{ flex: 1 }} />
+        {manage && <Btn variant="primary" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={null} />)}><Plus size={16} />Add client</Btn>}
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Client", render: (c) => (
+              <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{c.name}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{c.category || "—"}{c.tin ? ` · TIN ${c.tin}` : ""}</div></div>
+            ) },
+            { label: "Contact", render: (c) => (
+              <div><div>{c.contactPerson || "—"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{c.phone || c.email || ""}</div></div>
+            ) },
+            { label: "Sites", render: (c) => c.sites.length ? <div style={{ maxWidth: 240, fontSize: 12.5 }}>{c.sites.slice(0, 2).join(", ")}{c.sites.length > 2 && <span style={{ color: "var(--muted)" }}> +{c.sites.length - 2} more</span>}</div> : <span style={{ color: "var(--muted)" }}>—</span> },
+            { label: "Quotations", render: (c) => { const st = stats[c.id]; return st.n
+              ? <div style={{ cursor: "pointer" }} onClick={() => ctx.showClientQuotes(c.id)} title="Show this client's quotations"><div style={{ color: "var(--brand)", fontWeight: 600 }}>{st.n} · UGX {fmtN(st.quoted)}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{st.open ? `${st.open} open · ` : ""}last {fmtDate(st.last)}</div></div>
+              : <span style={{ color: "var(--muted)" }}>None yet</span>; } },
+            { label: "Status", render: (c) => <Pill tone={statusTone(c.status)}>{c.status}</Pill> },
+            { label: "", render: (c) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <ClientView ctx={cc} id={c.id} />)} title="View client"><FileText size={13} /></Btn>
+                {c.status !== "Inactive" && <Btn size="sm" variant="success" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={c.id} />)} title="New quotation for this client"><Plus size={13} />Quote</Btn>}
+                {manage && (c.status === "Inactive"
+                  ? <Btn size="sm" variant="success" onClick={() => toggleActive(c)} title="Reactivate — allow new quotations"><Check size={13} />Activate</Btn>
+                  : <Btn size="sm" variant="warning" onClick={() => toggleActive(c)} title="Deactivate — no new quotations"><Ban size={13} />Deactivate</Btn>)}
+                {manage && <Btn size="sm" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={c.id} />)} title="Edit"><Pencil size={13} /></Btn>}
+                {canDo(ctx, "deleteRecords") && (stats[c.id].n
+                  ? <Btn size="sm" disabled title="Has quotations — deactivate instead"><Trash2 size={13} /></Btn>
+                  : <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={clientsApi} id={c.id} label={c.name} />)} title="Delete"><Trash2 size={13} /></Btn>)}
+              </div>
+            ) },
+          ]}
+          rows={list}
+          empty={all.length ? "No clients match your filters." : "No clients yet. Use “Add client” to create the first one — quotations are raised against clients on this register."}
+        />
+      </Card>
+    </>
+  );
 }
 
 function ClientForm({ ctx, id }) {
+  const adding = !id;
   const existing = id ? (ctx.store.clients || []).find((c) => c.id === id) : null;
-  const [f, setF] = useState(() => { const c = normalizeClient(existing || {}); return { ...c, sites: c.sites.join("\n") }; });
+  const [f, setF] = useState(() => {
+    const c = normalizeClient(existing || { id: nextClientId(ctx.store.clients), category: CLIENT_CATEGORIES[0] });
+    return { ...c, id: existing ? existing.id : nextClientId(ctx.store.clients), sites: c.sites.join("\n") };
+  });
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const toggle = (k) => () => setF({ ...f, [k]: !f[k] });
   const submit = async () => {
-    setBusy(true); setErr("");
-    try { await saveClient(ctx, existing, f); await ctx.reload(); ctx.setModal(null); }
-    catch (e) { setErr(e.message || "Couldn't save the client."); setBusy(false); }
+    const name = String(f.name || "").trim();
+    if (!name) return alert("Client name is required.");
+    if (!String(f.phone || "").trim()) return alert("A primary contact phone number is required.");
+    const clash = (ctx.store.clients || []).find((c) => c.id !== (existing && existing.id) && sameClientName(c.name, name));
+    if (clash) return alert(`A client named “${clash.name}” is already on the register (${clash.id}).`);
+    setBusy(true);
+    try {
+      const now = new Date().toISOString();
+      const payload = { ...normalizeClient({ ...f, name }), id: f.id, updatedAt: now };
+      if (adding) await clientsApi.create({ ...payload, createdAt: now }); else { delete payload.id; await clientsApi.update(id, payload); }
+      await ctx.reload(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save the client.\n\n" + (e && e.message ? e.message : "")); setBusy(false); }
   };
+  const Toggle = ({ on, onClick, label, hint }) => (
+    <button type="button" onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: on ? "var(--surface)" : "var(--bg-elevated)", cursor: "pointer" }}>
+      <span style={{ width: 34, height: 20, borderRadius: 20, background: on ? "var(--success)" : "var(--border-strong)", position: "relative", flex: "none", transition: "background .15s" }}>
+        <span style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.25)" }} />
+      </span>
+      <span style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{label}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</div></span>
+    </button>
+  );
   return (
-    <Modal title={existing ? "Edit client" : "New client"} sub={existing ? existing.name : "Quotations are raised against clients on this register"} onClose={() => ctx.setModal(null)}
-      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={submit}><Check size={15} />{busy ? "Saving…" : existing ? "Save changes" : "Add client"}</Btn></>}>
+    <Modal title={adding ? "Add client" : "Edit client"} sub={adding ? "New client record" : f.id} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={submit}><Check size={15} />{busy ? "Saving…" : adding ? "Add client" : "Save changes"}</Btn></>}>
       <div style={formGrid}>
-        <Field label="Client name" required full hint="As it should appear after “Quote to:” on the quotation"><Input value={f.name} onChange={set("name")} placeholder="e.g. VIVO ENERGY" autoFocus /></Field>
-        <Field label="Contact person (Attn)"><Input value={f.contactPerson} onChange={set("contactPerson")} placeholder="e.g. Irene" /></Field>
-        <Field label="Phone"><Input value={f.phone} onChange={set("phone")} placeholder="+256 …" /></Field>
-        <Field label="Email"><Input type="email" value={f.email} onChange={set("email")} placeholder="procurement@client.co.ug" /></Field>
-        <Field label="TIN"><Input value={f.tin} onChange={set("tin")} /></Field>
-        <Field label="Address" full><Input value={f.address} onChange={set("address")} placeholder="Plot, street, town" /></Field>
-        <Field label="Sites / stations" full hint="One per line — offered when you fill in “Sites” on a quotation"><Textarea value={f.sites} onChange={set("sites")} placeholder={"SUL Mayuge\nShell Ndeeba"} /></Field>
-        <Field label="Status" hint="Inactive clients aren't offered for new quotations"><Select value={f.status} onChange={set("status")} options={CLIENT_STATUSES} /></Field>
+        <FieldsetTitle first>Client</FieldsetTitle>
+        <Field label="Name" required full hint="As printed after “Quote to:” on quotations"><Input value={f.name} onChange={set("name")} placeholder="e.g. VIVO ENERGY" /></Field>
+        <Field label="Category"><Select value={f.category} onChange={set("category")} options={CLIENT_CATEGORIES} /></Field>
+        <Field label="TIN"><Input value={f.tin} onChange={set("tin")} placeholder="Tax Identification No." /></Field>
+        <Field label="Status" hint="Inactive clients can't be quoted"><Select value={f.status} onChange={set("status")} options={CLIENT_STATUSES} /></Field>
+        <Field label="Address"><Input value={f.address} onChange={set("address")} placeholder="Physical / postal address" /></Field>
+        <FieldsetTitle>Contact</FieldsetTitle>
+        <Field label="Contact person (Attn)"><Input value={f.contactPerson} onChange={set("contactPerson")} placeholder="Printed after “Attn:”" /></Field>
+        <Field label="Primary phone" required><Input value={f.phone} onChange={set("phone")} placeholder="e.g. +256 7XX XXX XXX" /></Field>
+        <Field label="Secondary phone"><Input value={f.phone2 || ""} onChange={set("phone2")} placeholder="Optional alternate number" /></Field>
+        <Field label="Email"><Input value={f.email} onChange={set("email")} /></Field>
+        <FieldsetTitle>Sites / stations</FieldsetTitle>
+        <Field label="Sites" full hint="One per line — offered when filling in “Sites” on this client's quotations"><Textarea value={f.sites} onChange={set("sites")} placeholder={"SUL Mayuge\nShell Ndeeba"} /></Field>
+        <FieldsetTitle>Quotation defaults</FieldsetTitle>
+        <Field label="Currency" hint="Default for new quotations"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
+        <Field label="Quote validity (days)" hint="Default for new quotations"><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
+        <Field label="18% VAT" hint="Default for new quotations"><Toggle on={f.vatDefault} onClick={toggle("vatDefault")} label={f.vatDefault ? "Charged (+18%)" : "Not charged"} hint="Added to each quoted item" /></Field>
         <Field label="Notes" full><Textarea value={f.notes} onChange={set("notes")} /></Field>
       </div>
-      {err && <div style={{ marginTop: 12, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+function ClientView({ ctx, id }) {
+  const raw = (ctx.store.clients || []).find((x) => x.id === id);
+  if (!raw) return null;
+  const c = normalizeClient(raw);
+  const st = clientQuoteStats(c, ctx.store.quotations);
+  const manage = isHrOrAdmin(ctx) || can(ctx, "quotations");
+  const row = (label, value) => (
+    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: "6px 14px", fontSize: 13, padding: "5px 0", borderBottom: "1px solid var(--border)" }} className="stack-dl">
+      <span style={{ color: "var(--muted)" }}>{label}</span><span style={{ color: "var(--text)", fontWeight: 500 }}>{value || <span style={{ color: "var(--muted)" }}>—</span>}</span>
+    </div>
+  );
+  const history = st.list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return (
+    <Modal title={c.name} sub={`${c.id}${c.category ? " · " + c.category : ""}`} wide onClose={() => ctx.setModal(null)}
+      footer={<>
+        <Btn onClick={() => ctx.setModal(null)}>Close</Btn>
+        {manage && <Btn onClick={() => ctx.setModal(() => (cc) => <ClientForm ctx={cc} id={c.id} />)}><Pencil size={15} />Edit</Btn>}
+        {c.status !== "Inactive" && <Btn variant="primary" onClick={() => ctx.setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={c.id} />)}><Plus size={15} />New quotation</Btn>}
+      </>}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <Pill tone={c.status === "Inactive" ? "muted" : "success"}>{c.status}</Pill>
+        <Tag>{c.currency}</Tag>
+        {c.vatDefault && <Tag>18% VAT</Tag>}
+        <Tag>{c.validityDays}-day validity</Tag>
+      </div>
+      {row("TIN", c.tin)}
+      {row("Category", c.category)}
+      {row("Address", c.address)}
+      {row("Contact person", c.contactPerson)}
+      {row("Primary phone", c.phone)}
+      {c.phone2 && row("Secondary phone", c.phone2)}
+      {row("Email", c.email)}
+      {row("Sites", c.sites.join(", "))}
+      {row("Notes", c.notes)}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>Quotations · {st.n}{st.n ? ` · UGX ${fmtN(st.quoted)} quoted · UGX ${fmtN(st.won)} won` : ""}</div>
+        {history.length === 0 && <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No quotations for this client yet.</div>}
+        {history.map((x) => (
+          <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12.5, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+            <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer", minWidth: 92 }} onClick={() => ctx.setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)}>{x.quoteNo || x.id}</span>
+            <span style={{ color: "var(--text-2)", minWidth: 84 }}>{fmtDate(x.date)}</span>
+            <span style={{ flex: 1, color: "var(--text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.scope || "—"}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>{x.currency} {fmtN(x._t.grand)}</span>
+            <Pill tone={quoteStatusTone(x._st)}>{quoteStatusLabel(x._st)}</Pill>
+          </div>
+        ))}
+      </div>
     </Modal>
   );
 }
@@ -5848,12 +5969,11 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
     // Link to the client record (older quotations are matched by name).
     const c = presetClientId ? allClients.find((x) => x.id === presetClientId) : clientOfQuote(base, allClients);
     if (!c) return { ...base, clientId: "" };
-    return { ...base, clientId: c.id, client: c.name, attn: base.attn || c.contactPerson, sites: base.sites || (c.sites.length === 1 ? c.sites[0] : "") };
+    const fresh = !existing && !source; // a brand-new quote takes the client's quotation defaults
+    return { ...base, clientId: c.id, client: c.name, attn: base.attn || c.contactPerson, sites: base.sites || (c.sites.length === 1 ? c.sites[0] : ""),
+      ...(fresh ? { currency: c.currency, vatRate: c.vatDefault ? 18 : 0, validityDays: c.validityDays } : {}) };
   });
-  const [adding, setAdding] = useState(() => !(store.clients || []).length);
-  const [nc, setNc] = useState({ name: "", contactPerson: "", phone: "", email: "", sites: "" });
-  const [ncErr, setNcErr] = useState("");
-  const [ncBusy, setNcBusy] = useState(false);
+  const lockedClient = !!presetClientId && !existing;
   const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
   const selClient = allClients.find((c) => c.id === f.clientId) || null;
   // Switch client: Attn and Sites follow the client unless they were typed in.
@@ -5863,20 +5983,10 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
     const sitesWasDefault = !s.sites || (prev && prev.sites.includes(s.sites));
     return { ...s, clientId: c ? c.id : "", client: c ? c.name : "",
       attn: attnWasDefault ? (c ? c.contactPerson : "") : s.attn,
-      sites: sitesWasDefault ? (c && c.sites.length === 1 ? c.sites[0] : "") : s.sites };
+      sites: sitesWasDefault ? (c && c.sites.length === 1 ? c.sites[0] : "") : s.sites,
+      ...(c && !existing && !source ? { currency: c.currency, vatRate: c.vatDefault ? 18 : 0, validityDays: c.validityDays } : {}) };
   };
   const pickClient = (cid) => setF((s) => applyClient(s, allClients.find((x) => x.id === cid)));
-  const addClient = async () => {
-    setNcBusy(true); setNcErr("");
-    try {
-      const saved = await saveClient(ctx, null, nc);
-      await reload();
-      const c = normalizeClient(saved);
-      setF((s) => { const r = applyClient(s, c); return { ...r, attn: r.attn || c.contactPerson, sites: r.sites || (c.sites.length === 1 ? c.sites[0] : "") }; });
-      setNc({ name: "", contactPerson: "", phone: "", email: "", sites: "" }); setAdding(false);
-    } catch (e) { setNcErr(e.message || "Couldn't add the client."); }
-    setNcBusy(false);
-  };
   const [busy, setBusy] = useState(false);
   const [printAfter, setPrintAfter] = useState(true);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -5887,7 +5997,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const t = quoteTotals(f);
   const cur = f.currency || "UGX";
   const save = async (status) => {
-    if (!f.clientId || !allClients.some((c) => c.id === f.clientId)) return alert("Choose the client this quotation is for. If they're new, add them first with “New client”.");
+    if (!f.clientId || !allClients.some((c) => c.id === f.clientId)) return alert("Select the client this quotation is for. New clients are added on the Client register first.");
     if (!String(f.quoteNo).trim()) return alert("Enter the quotation reference (Our Ref).");
     const valid = f.lineItems.filter((it) => String(it.description || "").trim());
     if (!valid.length) return alert("Add at least one item with a description.");
@@ -5912,7 +6022,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const td = { padding: "5px 6px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
   const num = { ...td, textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap", paddingTop: 12 };
   return (
-    <Modal wide title={existing ? "Edit quotation" : source ? "Duplicate quotation" : "New quotation"} sub={f.quoteNo} onClose={() => setModal(null)}
+    <Modal wide title={existing ? "Edit quotation" : source ? "Duplicate quotation" : "New quotation"} sub={`${f.quoteNo}${selClient ? " · " + selClient.name : ""}`} onClose={() => setModal(null)}
       footer={<>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
@@ -5923,31 +6033,11 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
         <Card style={{ padding: 0 }}>
           <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Quote to (client)" required hint={clientOpts.length ? "Only clients on the register can be quoted" : "No clients yet — add one below"}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Select value={f.clientId} onChange={(e) => pickClient(e.target.value)} style={{ flex: 1, minWidth: 0 }}
-                  options={[{ value: "", label: clientOpts.length ? "Select a client…" : "No clients on the register" }, ...clientOpts.map((c) => ({ value: c.id, label: c.status === "Inactive" ? `${c.name} (inactive)` : c.name }))]} />
-                <Btn onClick={() => setAdding((v) => !v)} title="Add a new client to the register"><Plus size={14} />New client</Btn>
-              </div>
+            <Field label="Client (Quote to)" required hint={lockedClient ? "Quotation raised under this client" : clientOpts.length ? "Clients come from the Client register" : "No clients yet — add one on the Client register"}>
+              <Select value={f.clientId} disabled={lockedClient} onChange={(e) => pickClient(e.target.value)}
+                options={[{ value: "", label: "— select client —" }, ...clientOpts.map((c) => ({ value: c.id, label: c.status === "Inactive" ? `${c.name} (inactive)` : c.name }))]} />
             </Field>
             <Field label="Attn"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
-            {adding && (
-              <div style={{ gridColumn: "1 / -1", border: "1px dashed var(--border-strong)", borderRadius: 10, padding: 14, background: "var(--surface-2)" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", marginBottom: 10 }}>Add a new client</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-                  <Field label="Client name" required><Input value={nc.name} onChange={(e) => setNc((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. VIVO ENERGY" /></Field>
-                  <Field label="Contact person"><Input value={nc.contactPerson} onChange={(e) => setNc((x) => ({ ...x, contactPerson: e.target.value }))} /></Field>
-                  <Field label="Phone"><Input value={nc.phone} onChange={(e) => setNc((x) => ({ ...x, phone: e.target.value }))} /></Field>
-                  <Field label="Email"><Input value={nc.email} onChange={(e) => setNc((x) => ({ ...x, email: e.target.value }))} /></Field>
-                  <Field label="Sites (separate with ;)" full><Input value={nc.sites} onChange={(e) => setNc((x) => ({ ...x, sites: e.target.value }))} placeholder="e.g. SUL Mayuge; Shell Ndeeba" /></Field>
-                </div>
-                {ncErr && <div style={{ marginTop: 8, color: "var(--danger)", fontSize: 12.5 }}>{ncErr}</div>}
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-                  {(store.clients || []).length > 0 && <Btn size="sm" onClick={() => { setAdding(false); setNcErr(""); }}>Cancel</Btn>}
-                  <Btn size="sm" variant="primary" disabled={ncBusy || !nc.name.trim()} onClick={addClient}><Check size={13} />{ncBusy ? "Adding…" : "Add client & use"}</Btn>
-                </div>
-              </div>
-            )}
             <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
             <Field label="Sites" full hint={selClient && selClient.sites.length ? `${selClient.name} sites: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
             <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
