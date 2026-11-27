@@ -52,6 +52,10 @@ async function request(method, path, body) {
   if (!res.ok) {
     // A 401 on a normal (non-auth) request means the session is gone (expired,
     // revoked, or the signing key rotated). Clear it and let the app sign out.
+    // The account is on a default/temporary password: ask for a new one.
+    if (res.status === 403 && payload && payload.code === "PASSWORD_CHANGE_REQUIRED") {
+      try { window.dispatchEvent(new CustomEvent("ihrsm:password-change-required")); } catch { /* ignore */ }
+    }
     if (res.status === 401 && !path.startsWith("/api/auth/")) {
       setToken(null);
       try { window.dispatchEvent(new CustomEvent("ihrsm:session-expired", { detail: { message: payload.error } })); } catch { /* ignore */ }
@@ -85,6 +89,14 @@ export const authApi = {
   expiresAt: tokenExpiry,
   forgotPassword: (email) => request("POST", "/api/auth/forgot-password", { email }),
   resetPassword: (token, password) => request("POST", "/api/auth/reset-password", { token, password }),
+  // Change your own password; the server returns a fresh token (other sessions end).
+  changePassword: async (currentPassword, newPassword) => {
+    let remembered = false;
+    try { remembered = !!localStorage.getItem(TOKEN_KEY); } catch { /* ignore */ }
+    const out = await request("POST", "/api/auth/change-password", { currentPassword, newPassword });
+    if (out && out.token) setToken(out.token, remembered);
+    return out;
+  },
 };
 
 // ---- Domain collections (paths match server/src/index.js) ----

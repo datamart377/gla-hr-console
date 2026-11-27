@@ -368,6 +368,7 @@ export default function App() {
   const [auth, setAuth] = useState(null); // { empId, role }
   const [sessionNotice, setSessionNotice] = useState(""); // shown on the sign-in screen after an auto sign-out
   const [idleWarn, setIdleWarn] = useState(false); // inactivity warning banner
+  const lastPwRef = useRef(""); // the password just typed at sign-in (memory only) — spares re-typing it on the change screen
 
   const reload = async () => {
     const [employees, leave, attendance, appraisals, stockItems, stockMovements, stockClosings, ledgerColumns, payrollRuns, suppliers, supplierSchedule, supplierRuns, advances, bankApprovals, requisitions, purchaseOrders, settings] = await Promise.all([
@@ -387,8 +388,8 @@ export default function App() {
         try {
           if (authApi.token && authApi.token()) {
             const u = await authApi.me();
-            setAuth({ empId: u.empId, role: u.role });
-            await reload();
+            setAuth({ empId: u.empId, role: u.role, mustChangePassword: !!u.mustChangePassword });
+            if (!u.mustChangePassword) await reload();
           }
         } catch { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } }
         setLoading(false);
@@ -407,7 +408,9 @@ export default function App() {
   useEffect(() => {
     const onExpired = (e) => { if (isLive) { try { authApi.logout && authApi.logout(); } catch { /* ignore */ } } setAuth(null); setIdleWarn(false); setSessionNotice((e && e.detail && e.detail.message) || "Your session has ended. Please sign in again."); };
     window.addEventListener("ihrsm:session-expired", onExpired);
-    return () => window.removeEventListener("ihrsm:session-expired", onExpired);
+    const onMustChange = () => setAuth((a) => (a ? { ...a, mustChangePassword: true } : a));
+    window.addEventListener("ihrsm:password-change-required", onMustChange);
+    return () => { window.removeEventListener("ihrsm:session-expired", onExpired); window.removeEventListener("ihrsm:password-change-required", onMustChange); };
   }, []);
 
   // Inactivity auto-logout: warn one minute before, sign out after IDLE_MS of no activity.
@@ -433,8 +436,14 @@ export default function App() {
   const authenticate = async (email, password, remember) => {
     try {
       const { user } = await authApi.login(email, password, remember);
-      await reload();
       setSessionNotice("");
+      if (user.mustChangePassword) {
+        // Default / temporary password: choose a new one before anything loads.
+        lastPwRef.current = password;
+        setAuth({ empId: user.empId, role: user.role, email: user.email, mustChangePassword: true });
+        return { ok: true };
+      }
+      await reload();
       setAuth({ empId: user.empId, role: user.role });
       return { ok: true };
     } catch (e) {
@@ -452,6 +461,8 @@ export default function App() {
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
   else if (!auth) content = <Login employees={store.employees} live={isLive} authenticate={authenticate} notice={sessionNotice} />;
+  else if (auth.mustChangePassword) content = <ForcePasswordChange email={auth.email} knownPassword={lastPwRef.current} onSignOut={() => { lastPwRef.current = ""; signOut(""); }}
+    onDone={async () => { lastPwRef.current = ""; await reload(); setAuth((a) => ({ ...a, mustChangePassword: false })); }} />;
   else if (auth.role === "staff") content = <StaffPortal ctx={ctx} />;
   else content = <AdminConsole ctx={ctx} />;
 
@@ -643,6 +654,76 @@ const DEMO_ACCOUNTS = [
   { id: "GLA-003", firstName: "Grace", lastName: "Auma", role: "finance", jobTitle: "Accountant", email: "g.auma@glassociates.co.ug" },
   { id: "GLA-006", firstName: "Peter", lastName: "Wanyama", role: "staff", jobTitle: "Field Service Technician", email: "p.wanyama@glassociates.co.ug" },
 ];
+// Mirrors server/src/passwordPolicy.js so people see problems as they type.
+const COMMON_PASSWORDS = ["password", "password1", "password12", "password123", "passw0rd", "p@ssword", "p@ssw0rd", "pass1234", "12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "abcd1234", "abc12345", "qwerty123", "qwertyui", "iloveyou", "welcome1", "welcome123", "letmein1", "changeme", "admin123", "glassociates", "globallink", "ihrsm123", "uganda123", "kampala123"];
+function passwordChecks(pw, email = "") {
+  const p = String(pw || ""), low = p.toLowerCase();
+  const local = String(email || "").toLowerCase().split("@")[0];
+  const parts = local.split(/[^a-z]+/).filter((x) => x.length >= 3);
+  return [
+    { ok: p.length >= 8, label: "At least 8 characters" },
+    { ok: /[a-z]/i.test(p) && /\d/.test(p), label: "Letters and numbers" },
+    { ok: !!p && !COMMON_PASSWORDS.includes(low) && !/^(.)\1+$/.test(p), label: "Not a common password (like “password”)" },
+    { ok: !!p && !(local && (low.includes(local) || parts.some((x) => low.includes(x)))), label: "Doesn't contain your name or email" },
+  ];
+}
+
+// Shown straight after sign-in when the account is on a default / temporary
+// password: nothing else is available until a new one is set.
+function ForcePasswordChange({ email, knownPassword, onDone, onSignOut }) {
+  const [cur, setCur] = useState("");
+  const [np, setNp] = useState("");
+  const [np2, setNp2] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const needCurrent = !knownPassword;
+  const checks = passwordChecks(np, email);
+  const allOk = checks.every((c) => c.ok);
+  const save = async () => {
+    if (busy) return;
+    setErr("");
+    if (needCurrent && !cur) return setErr("Enter your current (temporary) password.");
+    if (!allOk) return setErr("Your new password doesn't meet all the requirements yet.");
+    if (np !== np2) return setErr("The two new passwords don't match.");
+    setBusy(true);
+    try { await authApi.changePassword(needCurrent ? cur : knownPassword, np); await onDone(); }
+    catch (e) { setErr(e.message || "Couldn't change your password. Please try again."); setBusy(false); }
+  };
+  const field = (label, value, set, auto) => (
+    <Field label={label}><Input type={show ? "text" : "password"} value={value} autoComplete={auto} onChange={(e) => { set(e.target.value); setErr(""); }} onKeyDown={(e) => { if (e.key === "Enter") save(); }} /></Field>
+  );
+  return (
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "var(--bg)" }}>
+      <Card style={{ width: "100%", maxWidth: 440, padding: "26px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <img src={GLA_MARK} alt="Global Link Associates" style={{ width: 40, height: 40, borderRadius: 10, objectFit: "cover", background: "#fff", border: "1px solid var(--border)" }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 17, color: "var(--text)" }}>Set a new password</div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>{email || "Your account"}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 16, lineHeight: 1.5 }}>
+          Your account is using a temporary password. For your security, choose your own password to continue.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {needCurrent && field("Current (temporary) password", cur, setCur, "current-password")}
+          {field("New password", np, setNp, "new-password")}
+          {field("Confirm new password", np2, setNp2, "new-password")}
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />Show passwords</label>
+          <div style={{ display: "grid", gap: 4, fontSize: 12.5 }}>
+            {checks.map((c) => <div key={c.label} style={{ color: c.ok ? "var(--success)" : "var(--muted)" }}>{c.ok ? "✓" : "○"} {c.label}</div>)}
+            <div style={{ color: np2 && np === np2 ? "var(--success)" : "var(--muted)" }}>{np2 && np === np2 ? "✓" : "○"} Both new passwords match</div>
+          </div>
+          {err && <div style={{ fontSize: 12.5, color: "var(--danger)", background: "var(--danger-dim)", padding: "8px 11px", borderRadius: 8 }}>{err}</div>}
+          <Btn variant="primary" disabled={busy} onClick={save} style={{ justifyContent: "center", marginTop: 4 }}><Check size={15} />{busy ? "Saving…" : "Save & continue"}</Btn>
+          <Btn variant="ghost" onClick={onSignOut} style={{ justifyContent: "center" }}><LogOut size={15} />Sign out</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function Login({ employees, live, authenticate, notice }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -675,7 +756,7 @@ function Login({ employees, live, authenticate, notice }) {
   const doReset = async () => {
     if (busy) return;
     clearMsgs();
-    if (np.length < 8) { setErr("Password must be at least 8 characters."); return; }
+    { const bad = passwordChecks(np, email).find((c) => !c.ok); if (bad) { setErr(`Choose a stronger password: ${bad.label.toLowerCase()}.`); return; } }
     if (np !== np2) { setErr("The two passwords do not match."); return; }
     setBusy(true);
     try {

@@ -19,6 +19,7 @@ import { body } from "express-validator";
 import { query } from "../db.js";
 import { config } from "../config.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
+import { passwordProblem } from "../passwordPolicy.js";
 import { validate } from "../middleware/validate.js";
 import { sendWelcomeMail } from "../email.js";
 
@@ -152,11 +153,17 @@ router.post(
       const { empId, password } = req.body;
       const emp = await getEmployee(empId);
       if (!emp) return res.status(404).json({ error: "Employee not found." });
+      // Even a temporary password mustn't be guessable before it's changed.
+      const problem = passwordProblem(password, empEmail(emp));
+      if (problem) return res.status(400).json({ error: problem });
       const synced = await syncLogin(empId, emp, { password });
       if (synced.error === "no_email") return res.status(400).json({ error: "This employee has no email address. Add one before creating a login." });
       if (synced.error === "email_taken") return res.status(409).json({ error: takenMsg(empEmail(emp)) });
       // Any outstanding reset/invite links become void once a password is set.
       await query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [synced.id]);
+      // The admin knows this password, so it's temporary: the person must choose
+      // their own at next sign-in.
+      await query(`UPDATE users SET must_change_password = true WHERE id = $1`, [synced.id]);
       res.json({ ok: true, loginEmail: synced.email, created: synced.created });
     } catch (e) { next(e); }
   },

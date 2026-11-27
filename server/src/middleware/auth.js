@@ -26,10 +26,16 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: "Invalid or expired session. Please sign in again." });
   }
   try {
-    const { rows } = await query(`SELECT token_epoch FROM users WHERE id = $1`, [payload.sub]);
+    const { rows } = await query(`SELECT token_epoch, must_change_password FROM users WHERE id = $1`, [payload.sub]);
     if (!rows.length) return res.status(401).json({ error: "This account no longer exists. Please sign in again." });
     if ((rows[0].token_epoch || 0) !== (payload.te || 0)) {
       return res.status(401).json({ error: "This session was ended. Please sign in again." });
+    }
+    // An account on a default/temporary password can only identify itself and
+    // change its password until it chooses its own.
+    const path = String(req.originalUrl || "").split("?")[0];
+    if (rows[0].must_change_password && !["/api/auth/me", "/api/auth/change-password"].includes(path)) {
+      return res.status(403).json({ error: "You must set a new password before continuing.", code: "PASSWORD_CHANGE_REQUIRED" });
     }
   } catch (e) {
     return next(e); // DB trouble — fail closed via the error handler
