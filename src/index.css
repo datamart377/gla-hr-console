@@ -130,3 +130,8 @@ input, select, textarea { font-family: inherit; }
   .sf-print h2, .sf-print h3 { break-after: avoid; }
   .sf-print table { width: 100% !important; }
 }
+
+/* Sidebar menu scrolls when it's taller than the screen (thin, unobtrusive bar). */
+.gla-side-nav { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+.gla-side-nav::-webkit-scrollbar { width: 6px; }
+.gla-side-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 6px; }

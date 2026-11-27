@@ -1738,7 +1738,7 @@ function StaffSidebar({ emp, sv, setSv, onSignOut }) {
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 400, fontSize: 10, letterSpacing: ".12em", color: "var(--sidebar-muted)", textTransform: "uppercase", marginTop: 4 }}>Staff Portal</div>
         </div>
       </div>
-      <nav style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+      <nav className="gla-side-nav" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2, flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: "14px 12px 6px" }}>Self-service</div>
         {STAFF_NAV.map(([id, label, Icon]) => {
           const active = sv === id;
@@ -2362,7 +2362,14 @@ function AdvanceReview({ ctx, id }) {
 }
 
 /* ================================ Sidebar ================================= */
+// The "My self-service" group folds away (remembered per browser) so the main
+// console menu stays short; it opens automatically while you're on one of its pages.
+const SELF_SECTION = "My self-service";
 function Sidebar({ view, setView, store, nav = NAV }) {
+  const [selfOpen, setSelfOpen] = useState(() => { try { return localStorage.getItem("gla-self-open") === "1"; } catch { return false; } });
+  const toggleSelf = () => setSelfOpen((v) => { try { localStorage.setItem("gla-self-open", v ? "0" : "1"); } catch { /* ignore */ } return !v; });
+  const onSelfView = nav.some((n) => n.section === SELF_SECTION && n.id === view);
+  const selfShown = selfOpen || onSelfView;
   const counts = {
     employees: store.employees.length,
     leave: store.leave.filter((l) => l.status === "Pending").length || "",
@@ -2377,16 +2384,24 @@ function Sidebar({ view, setView, store, nav = NAV }) {
           <div title="Integrated HR and Supplier Management System" style={{ fontFamily: "var(--font-mono)", fontWeight: 400, fontSize: 10, letterSpacing: ".12em", color: "var(--sidebar-muted)", textTransform: "uppercase", marginTop: 4 }}>IHRSM</div>
         </div>
       </div>
-      <nav style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+      <nav className="gla-side-nav" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 2, flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
         {nav.map((item, i) => {
           const { id, label, Icon, section } = item;
           const active = view === id;
           const count = counts[id];
           const showHeader = section && (i === 0 || nav[i - 1].section !== section);
+          const isSelf = section === SELF_SECTION;
+          const headerPad = i === 0 ? "6px 12px 6px" : "16px 12px 6px";
           return (
             <React.Fragment key={id}>
-              {showHeader && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: i === 0 ? "6px 12px 6px" : "16px 12px 6px" }}>{section}</div>}
-            <button onClick={() => setView(id)}
+              {showHeader && (isSelf
+                ? <button onClick={toggleSelf} aria-expanded={selfShown} title={selfShown ? "Hide my self-service" : "Show my self-service"}
+                    style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", border: "none", background: "transparent", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: headerPad }}>
+                    <span style={{ flex: 1 }}>{section}</span>
+                    {selfShown ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                : <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--sidebar-muted)", padding: headerPad }}>{section}</div>)}
+            {(!isSelf || selfShown) && <button onClick={() => setView(id)}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 12px", borderRadius: 9, border: "none", width: "100%", textAlign: "left", fontWeight: 500, fontSize: 13.5, color: active ? "var(--sidebar-active-fg)" : "var(--sidebar-fg)", background: active ? "var(--sidebar-active-bg)" : "transparent", transition: "background .12s, color .12s" }}
               onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,.05)"; }}
               onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}>
@@ -2395,7 +2410,7 @@ function Sidebar({ view, setView, store, nav = NAV }) {
               {count !== "" && count != null && (
                 <span className="mono" style={{ marginLeft: "auto", fontSize: 11, background: "rgba(255,255,255,.09)", color: "var(--sidebar-fg)", padding: "1px 7px", borderRadius: 20 }}>{count}</span>
               )}
-            </button>
+            </button>}
             </React.Fragment>
           );
         })}
