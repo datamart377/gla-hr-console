@@ -1622,25 +1622,59 @@ function Requisitions({ ctx }) {
     ...(canSeeApproved ? [["approved", "Approved / Paid", approved.length]] : []),
     ...(mgmt ? [["all", "All requisitions", all.length]] : []),
   ];
-  const tabData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
+  const baseData = tab === "mine" ? mine : tab === "approvals" ? queue : tab === "approved" ? approved : tab === "all" ? all.slice().sort(byCreatedDesc) : [];
   const approvedValue = mine.filter((r) => r.status === "approved").reduce((a, r) => a + reqPayable(r), 0);
 
-  // Reports: export the requisitions currently in view (respecting the active tab).
-  const scopeLabel = { mine: "My requisitions", approvals: "Awaiting my approval", approved: "Approved requisitions", all: "All requisitions" }[tab] || "Requisitions";
+  // Finance, HR & Admin can filter the full list by staff member, status and
+  // date — and export that selection as a per-staff requisitions report.
+  const canFilter = mgmt && (tab === "all" || tab === "approved");
+  const [fStaff, setFStaff] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [fFrom, setFFrom] = useState("");
+  const [fTo, setFTo] = useState("");
+  const staffOptions = useMemo(() => {
+    const seen = new Map();
+    all.forEach((r) => { if (r.requesterId && !seen.has(r.requesterId)) seen.set(r.requesterId, r.requesterName || r.requesterId); });
+    return [...seen.entries()].map(([id, name]) => { const e = employees.find((x) => x.id === id); return { value: id, label: e ? `${e.firstName} ${e.lastName}` : name, n: all.filter((r) => r.requesterId === id).length }; })
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [all, employees]);
+  const reqDay = (r) => String(r.createdAt || "").slice(0, 10);
+  const tabData = !canFilter ? baseData : baseData.filter((r) =>
+    (!fStaff || r.requesterId === fStaff) && (!fStatus || r.status === fStatus) &&
+    (!fFrom || reqDay(r) >= fFrom) && (!fTo || reqDay(r) <= fTo));
+  const filtersOn = canFilter && !!(fStaff || fStatus || fFrom || fTo);
+  const clearFilters = () => { setFStaff(""); setFStatus(""); setFFrom(""); setFTo(""); };
+  const staffEmp = fStaff ? employees.find((e) => e.id === fStaff) : null;
+  const staffName = fStaff ? (staffEmp ? `${staffEmp.firstName} ${staffEmp.lastName}` : ((all.find((r) => r.requesterId === fStaff) || {}).requesterName || fStaff)) : "";
+  const otherDesc = [fStatus && `Status: ${reqStatusLabel(fStatus)}`, (fFrom || fTo) && `Dates: ${fFrom ? reqDate(fFrom) : "start"} – ${fTo ? reqDate(fTo) : "today"}`].filter(Boolean).join("   ");
+  const filterDesc = [staffName && `Staff: ${staffName}`, otherDesc].filter(Boolean).join("   ");
+
+  // Reports: export the requisitions currently in view (respecting the active tab and filters).
+  const scopeLabel = staffName ? `Requisitions — ${staffName}` : ({ mine: "My requisitions", approvals: "Awaiting my approval", approved: "Approved requisitions", all: "All requisitions" }[tab] || "Requisitions");
   const reportRows = tabData;
+  const fileTag = staffName ? staffName.replace(/[^\w]+/g, "-") : tab;
   const reportTotal = reportRows.reduce((a, r) => a + reqTotal(r), 0);
-  const reportApproved = reportRows.reduce((a, r) => a + reqPayable(r), 0);
+  // "Approved" only counts requests HR & Admin have actually approved (or paid).
+  const isApprovedReq = (r) => r.status === "approved" || r.status === "paid";
+  const reportApproved = reportRows.filter(isApprovedReq).reduce((a, r) => a + reqPayable(r), 0);
   const adjustedCount = reportRows.filter((r) => reqAdjusted(r)).length;
+  const reportPaid = reportRows.filter((r) => r.status === "paid").reduce((a, r) => a + reqPayable(r), 0);
   const statusCounts = () => REQ_STATUSES.map((s) => ({ s, n: reportRows.filter((r) => r.status === s).length })).filter((x) => x.n > 0).map((x) => `${reqStatusLabel(x.s)}: ${x.n}`);
   const locName = (r) => (r.location && r.location.name) || "—";
   // Approved column: the adjusted/payable figure, flagged with * when HR & Admin changed it.
-  const apprCell = (r) => reqAdjusted(r) ? { content: fmtN(reqPayable(r)) + " *", styles: { textColor: [160, 70, 40], fontStyle: "bold" } } : fmtN(reqPayable(r));
+  const apprCell = (r) => !isApprovedReq(r) ? "—" : reqAdjusted(r) ? { content: fmtN(reqPayable(r)) + " *", styles: { textColor: [160, 70, 40], fontStyle: "bold" } } : fmtN(reqPayable(r));
   const exportReqPdf = () => downloadReportPdf({
-    filename: `GLA-Requisitions-${tab}.pdf`,
+    filename: `GLA-Requisitions-${fileTag}.pdf`,
     eyebrow: "Requisitions",
-    title: "Requisitions Report",
+    title: staffName ? "Staff Requisitions Report" : "Requisitions Report",
     subtitle: `${scopeLabel} · ${reportRows.length} request${reportRows.length === 1 ? "" : "s"} · generated ${reqDate(new Date().toISOString())}`,
-    meta: [`Requested: UGX ${fmtN(reportTotal)}    Approved: UGX ${fmtN(reportApproved)}`, statusCounts().join("    "), adjustedCount ? `* ${adjustedCount} amount${adjustedCount === 1 ? "" : "s"} adjusted by HR & Admin (marked in the Approved column)` : ""].filter(Boolean),
+    meta: [
+      staffEmp ? `Staff: ${staffName}   ID: ${staffEmp.id}   ${staffEmp.jobTitle || ""}${staffEmp.department ? "   " + staffEmp.department : ""}` : "",
+      otherDesc,
+      `Requested: UGX ${fmtN(reportTotal)}    Approved: UGX ${fmtN(reportApproved)}    Paid: UGX ${fmtN(reportPaid)}`,
+      statusCounts().join("    "),
+      adjustedCount ? `* ${adjustedCount} amount${adjustedCount === 1 ? "" : "s"} adjusted by HR & Admin (marked in the Approved column)` : "",
+    ].filter(Boolean),
     head: ["Ref", "Date", "Requester", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Supervisor", "Final approver", "Status"],
     body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), apprCell(r), r.supervisor ? r.supervisor.name : reqIsFinanceDirect(r) ? "Not required" : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
       .concat([[{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold" } }, { content: fmtN(reportTotal), styles: { fontStyle: "bold" } }, { content: fmtN(reportApproved), styles: { fontStyle: "bold" } }, "", "", ""]]),
@@ -1650,9 +1684,10 @@ function Requisitions({ ctx }) {
   const exportReqCsv = () => {
     const header = ["Ref", "Date", "Requester", "Designation", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Adjusted", "Supervisor", "Final approver", "Status"];
     const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
-    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), reqPayable(r), reqAdjusted(r) ? "YES" : "", r.supervisor ? r.supervisor.name : reqIsFinanceDirect(r) ? "Not required (Finance request)" : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
+    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), isApprovedReq(r) ? reqPayable(r) : "", reqAdjusted(r) ? "YES" : "", r.supervisor ? r.supervisor.name : reqIsFinanceDirect(r) ? "Not required (Finance request)" : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
     lines.push(["", "", "", "", "", "", "TOTAL", reportTotal, reportApproved, "", "", "", ""].map(esc).join(","));
-    downloadFile(`gla-requisitions-${tab}.csv`, lines.join("\n"));
+    if (filtersOn) lines.unshift(esc(`${scopeLabel} — ${filterDesc}`), "");
+    downloadFile(`gla-requisitions-${fileTag}.csv`, lines.join("\n"));
   };
   return (
     <>
@@ -1671,14 +1706,37 @@ function Requisitions({ ctx }) {
         {tab !== "new" && reportRows.length > 0 && (
           <>
             <div style={{ flex: 1 }} />
-            <Btn size="sm" onClick={exportReqPdf} title="Download this list as a branded PDF report"><FileText size={14} />PDF report</Btn>
+            <Btn size="sm" onClick={exportReqPdf} title={staffName ? `Download ${staffName}'s requisitions report (PDF)` : "Download this list as a branded PDF report"}><FileText size={14} />{staffName ? "Staff report (PDF)" : "PDF report"}</Btn>
             <Btn size="sm" onClick={exportReqCsv} title="Export this list to CSV"><Download size={14} />CSV</Btn>
           </>
         )}
       </div>
+      {canFilter && (
+        <Card style={{ padding: "12px 14px", marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <Field label="Staff member"><Select value={fStaff} onChange={(e) => setFStaff(e.target.value)} style={{ minWidth: 220 }} options={[{ value: "", label: `All staff (${staffOptions.length})` }, ...staffOptions.map((o) => ({ value: o.value, label: `${o.label} (${o.n})` }))]} /></Field>
+            <Field label="Status"><Select value={fStatus} onChange={(e) => setFStatus(e.target.value)} options={[{ value: "", label: "All statuses" }, ...REQ_STATUSES.map((st) => ({ value: st, label: reqStatusLabel(st) }))]} /></Field>
+            <Field label="From"><Input type="date" value={fFrom} max={fTo || undefined} onChange={(e) => setFFrom(e.target.value)} /></Field>
+            <Field label="To"><Input type="date" value={fTo} min={fFrom || undefined} onChange={(e) => setFTo(e.target.value)} /></Field>
+            {filtersOn && <Btn size="sm" onClick={clearFilters} style={{ marginBottom: 2 }}><X size={13} />Clear</Btn>}
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>{tabData.length} of {baseData.length} shown</div>
+          </div>
+          {staffName && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)", fontSize: 12.5, color: "var(--text-2)" }}>
+              <span><b style={{ color: "var(--text)" }}>{staffName}</b>{staffEmp && staffEmp.jobTitle ? ` · ${staffEmp.jobTitle}` : ""}</span>
+              <span>Requests <b style={{ color: "var(--text)" }}>{tabData.length}</b></span>
+              <span>Requested <b style={{ color: "var(--text)" }} className="mono">UGX {fmtN(reportTotal)}</b></span>
+              <span>Approved <b style={{ color: "var(--success)" }} className="mono">UGX {fmtN(reportApproved)}</b></span>
+              <span>Paid <b style={{ color: "var(--text)" }} className="mono">UGX {fmtN(reportPaid)}</b></span>
+              <span>Pending <b style={{ color: "var(--warning)" }}>{tabData.filter((r) => r.status === "pending_supervisor" || r.status === "pending_admin").length}</b></span>
+            </div>
+          )}
+        </Card>
+      )}
       {tab === "new"
         ? <ReqForm ctx={ctx} onDone={() => setTab("mine")} />
-        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} onDelete={hrAdmin ? (r) => ctx.setModal(() => (cc) => <ConfirmDelete ctx={cc} api={requisitionsApi} id={r.id} label={`${r.id} — ${r.subject || "requisition"}`} />) : undefined} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "approved" ? "No approved requisitions yet — a payment voucher appears here once HR & Admin give final approval." : tab === "all" ? "No requisitions have been raised yet." : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
+        : <ReqTable rows={tabData} showRequester={tab !== "mine"} onOpen={(id) => setOpenId(id)} onDelete={hrAdmin ? (r) => ctx.setModal(() => (cc) => <ConfirmDelete ctx={cc} api={requisitionsApi} id={r.id} label={`${r.id} — ${r.subject || "requisition"}`} />) : undefined} emptyLabel={tab === "approvals" ? "Nothing is waiting for your approval right now." : tab === "approved" ? "No approved requisitions yet — a payment voucher appears here once HR & Admin give final approval." : tab === "all" ? (filtersOn ? "No requisitions match these filters." : "No requisitions have been raised yet.") : "You haven't raised any requisitions yet. Use “New request” to create one."} />}
       {open && <ReqDetail ctx={ctx} r={open} onClose={() => setOpenId(null)} />}
     </>
   );
