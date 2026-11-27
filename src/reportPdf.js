@@ -501,10 +501,13 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
   if (sy + SIG_H > pageH - 44) { doc.addPage(); guard(doc, doc.getNumberOfPages()); sy = drawLetterhead(doc) + 26; }
   doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...BODY);
   doc.text("Certified that the particulars above are correct and the payment is approved for disbursement.", MARGIN, sy - 12, { maxWidth: pageW - MARGIN * 2 });
+  // Finance Officers' requests have a single approval level (HR & Admin), so
+  // their voucher has no supervisor box.
+  const financeDirect = req.route === "finance_direct";
   sy = drawVoucherSignRow(doc, sy, [
     { title: "Requested by", name: req.requesterName || "—", meta: "Submitted " + voDate(req.createdAt) },
-    { title: "Supervisor (1st level)", name: req.supervisor ? req.supervisor.name : "—", signedText: req.supervisor ? req.supervisor.name : null, meta: req.supervisor ? "Approved " + voDate(req.supervisor.at) : "Pending" },
-    { title: "HR & Admin (final)", name: req.admin ? req.admin.name : "—", signedText: req.admin ? req.admin.name : null, meta: req.admin ? "Approved " + voDate(req.admin.at) : "Pending" },
+    ...(financeDirect ? [] : [{ title: "Supervisor (1st level)", name: req.supervisor ? req.supervisor.name : "—", signedText: req.supervisor ? req.supervisor.name : null, meta: req.supervisor ? "Approved " + voDate(req.supervisor.at) : "Pending" }]),
+    { title: financeDirect ? "HR & Admin (sole approval)" : "HR & Admin (final)", name: req.admin ? req.admin.name : "—", signedText: req.admin ? req.admin.name : null, meta: req.admin ? "Approved " + voDate(req.admin.at) : "Pending" },
   ]);
   drawVoucherSignRow(doc, sy + 14, [
     { title: "Paid by (Finance / Accounts)", name: "", meta: "Signature & date" },

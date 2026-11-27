@@ -171,7 +171,9 @@ async function createRequisition(req, res, next) {
     const emp = await query(`SELECT doc FROM employees WHERE id = $1`, [empId]);
     const e = (emp.rows[0] && emp.rows[0].doc) || {};
     const now = new Date().toISOString();
-    const status = body.status === "draft" ? "draft" : "pending_supervisor";
+    // Finance Officers' requisitions have ONE approval level: straight to HR & Admin.
+    const financeDirect = req.user.role === "finance";
+    const status = body.status === "draft" ? "draft" : (financeDirect ? "pending_admin" : "pending_supervisor");
     const requesterName = body.requesterName || `${e.firstName || ""} ${e.lastName || ""}`.trim();
     const doc = {
       requesterId: empId,                 // forced to the authenticated user
@@ -184,10 +186,11 @@ async function createRequisition(req, res, next) {
       currency: body.currency || "UGX",
       lineItems: Array.isArray(body.lineItems) ? body.lineItems.map((li) => ({ description: li.description || "", qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })) : [],
       documents: Array.isArray(body.documents) ? body.documents.slice(0, 12).map((d) => ({ name: String(d.name || "file"), size: Number(d.size) || 0, type: String(d.type || ""), dataUrl: typeof d.dataUrl === "string" ? d.dataUrl : "" })) : [],
-      supervisorIds: Array.isArray(e.supervisorIds) ? e.supervisorIds : [],   // approver pool from the requester's profile (authoritative)
-      status,                             // only draft or pending_supervisor on create
+      supervisorIds: financeDirect ? [] : (Array.isArray(e.supervisorIds) ? e.supervisorIds : []),   // approver pool from the requester's profile (authoritative)
+      route: financeDirect ? "finance_direct" : "standard",
+      status,                             // draft, pending_supervisor, or pending_admin (Finance)
       supervisor: null, admin: null, rejection: null,
-      history: status === "pending_supervisor" ? [{ at: now, by: empId, byName: requesterName, action: "submitted", note: "" }] : [],
+      history: status !== "draft" ? [{ at: now, by: empId, byName: requesterName, action: "submitted", note: financeDirect ? "Finance request — sent straight to HR & Admin for final approval." : "" }] : [],
       createdAt: now, updatedAt: now,
     };
     const id = body.id || genId("requisitions");
@@ -222,8 +225,10 @@ async function updateRequisition(req, res, next) {
     let patch = null;
     if (owner && rec.status === "draft" && (!target || target === "draft")) {
       patch = { ...editable(body), updatedAt: now };                                   // owner edits own draft
-    } else if (owner && rec.status === "draft" && target === "pending_supervisor") {
-      patch = { ...editable(body), status: "pending_supervisor", updatedAt: now, history: hist("submitted") }; // owner submits
+    } else if (owner && rec.status === "draft" && (target === "pending_supervisor" || target === "pending_admin")) {
+      // Owner submits a draft; Finance requests skip the supervisor stage.
+      const direct = rec.route === "finance_direct" || req.user.role === "finance";
+      patch = { ...editable(body), status: direct ? "pending_admin" : "pending_supervisor", ...(direct ? { route: "finance_direct", supervisorIds: [] } : {}), updatedAt: now, history: hist("submitted") };
     } else if (canSup && rec.status === "pending_supervisor" && target === "pending_admin") {
       patch = { status: "pending_admin", supervisor: { id: empId, name, at: now }, updatedAt: now, history: hist("supervisor_approved") };
     } else if (canSup && rec.status === "pending_supervisor" && target === "rejected") {

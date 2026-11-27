@@ -26,7 +26,7 @@ import {
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
-  normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, reqPayable, reqAdjusted, REQ_STAGES, reqStageIndex,
+  normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, reqPayable, reqAdjusted, REQ_STAGES, reqStageIndex, reqStagesFor, reqStageIndexFor, reqIsFinanceDirect,
   supervisorChoices, supervisorsForEmployee, supervisorPoolIds, canSuperviseReq,
   PERMISSION_MODULES, PERMISSION_ACTIONS, roleById,
   STOCK_CATEGORIES, STOCK_UNITS, MOVEMENT_LABELS, itemBalance, totalStockValue, stockStatus,
@@ -1013,7 +1013,7 @@ const byDateDesc = (a, b) => (b.date + (b.clockIn || "")).localeCompare(a.date +
 const reqDate = (s) => (s ? new Date(s).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const reqDateTime = (s) => (s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const byCreatedDesc = (a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-const reqActionLabel = (a) => ({ submitted: "Submitted", supervisor_approved: "Supervisor approved", supervisor_rejected: "Supervisor rejected", admin_approved: "HR & Admin approved", admin_rejected: "HR & Admin rejected", amount_adjusted: "Amount adjusted" }[a] || a);
+const reqActionLabel = (a) => ({ submitted: "Submitted", supervisor_approved: "Supervisor approved", supervisor_rejected: "Supervisor rejected", admin_approved: "HR & Admin approved", admin_rejected: "HR & Admin rejected", amount_adjusted: "Amount adjusted", rerouted: "Sent to HR & Admin", marked_paid: "Marked paid" }[a] || a);
 
 function ReqInfo({ label, value }) {
   return (
@@ -1025,15 +1025,17 @@ function ReqInfo({ label, value }) {
 }
 
 function ReqWorkflowMap({ r }) {
-  const idx = reqStageIndex(r.status);
+  const idx = reqStageIndexFor(r);
+  const STAGES = reqStagesFor(r);
   const rejected = r.status === "rejected";
   return (
     <Card style={{ padding: "16px 18px" }}>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 14 }}>Approval workflow</div>
-      {REQ_STAGES.map((st, i) => {
+      {reqIsFinanceDirect(r) && <div style={{ fontSize: 11.5, color: "var(--text-2)", background: "var(--info-dim)", borderRadius: 8, padding: "7px 10px", marginBottom: 12 }}>Finance request — one approval level: HR &amp; Admin.</div>}
+      {STAGES.map((st, i) => {
         const done = !rejected && i < idx;
         const current = !rejected && i === idx;
-        const last = i === REQ_STAGES.length - 1;
+        const last = i === STAGES.length - 1;
         return (
           <div key={st.key} style={{ display: "flex", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -1103,7 +1105,10 @@ function ReqForm({ ctx, onDone }) {
   const reqDesig = linked ? (me.jobTitle || "") : rqDesig;
   const reqDept = linked ? (me.department || "") : rqDept;
   // The supervisors this request will route to (any one of them can approve).
-  const supPool = supervisorsForEmployee(me, ctx.store.employees || []);
+  // Finance Officers' requests skip the supervisor: HR & Admin give the single,
+  // final approval.
+  const financeDirect = !!(ctx.auth && ctx.auth.role === "finance");
+  const supPool = financeDirect ? [] : supervisorsForEmployee(me, ctx.store.employees || []);
   const [location, setLocation] = useState(null);
   const [subject, setSubject] = useState("");
   const [narrative, setNarrative] = useState("");
@@ -1142,7 +1147,10 @@ function ReqForm({ ctx, onDone }) {
         designation: reqDesig, department: reqDept,
         location, subject: subject.trim(), narrative: narrative.trim(),
         lineItems: valid.map((it) => ({ description: it.description.trim(), qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
-        documents: docs, supervisorIds: Array.isArray(me.supervisorIds) ? me.supervisorIds : [], status: "pending_supervisor",
+        documents: docs,
+        supervisorIds: financeDirect ? [] : (Array.isArray(me.supervisorIds) ? me.supervisorIds : []),
+        route: financeDirect ? "finance_direct" : "standard",
+        status: financeDirect ? "pending_admin" : "pending_supervisor",
       });
       await ctx.reload();
       if (onDone) onDone();
@@ -1162,8 +1170,13 @@ function ReqForm({ ctx, onDone }) {
             <Field label="Department"><Input value={reqDept} disabled={linked} onChange={linked ? undefined : (e) => setRqDept(e.target.value)} placeholder="Your department" /></Field>
             <Field label="Currency"><Input value="UGX — Uganda Shilling" disabled /></Field>
             <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>First-level approver{supPool.length === 1 ? "" : "s"}</div>
-              {supPool.length ? (
+              <div style={{ fontSize: 10.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>{financeDirect ? "Approval" : `First-level approver${supPool.length === 1 ? "" : "s"}`}</div>
+              {financeDirect ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+                  <Pill tone="accent">HR &amp; Admin</Pill>
+                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>— Finance requests have one approval level: they go straight to HR &amp; Admin for final approval.</span>
+                </div>
+              ) : supPool.length ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
                   {supPool.map((s) => <Pill key={s.id} tone="accent">{s.firstName} {s.lastName}</Pill>)}
                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>— any one of them can approve, so it won't wait on a single person.</span>
@@ -1240,7 +1253,7 @@ function ReqForm({ ctx, onDone }) {
           <Btn variant="primary" disabled={busy} onClick={submit}><Send size={15} />{busy ? "Submitting…" : "Submit for approval"}</Btn>
         </div>
       </div>
-      <div style={isMobile ? undefined : { position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "draft" }} /></div>
+      <div style={isMobile ? undefined : { position: "sticky", top: 16 }}><ReqWorkflowMap r={{ status: "draft", route: financeDirect ? "finance_direct" : "standard" }} /></div>
     </div>
   );
 }
@@ -1407,7 +1420,7 @@ function ReqDetail({ ctx, r, onClose }) {
             <ReqInfo label="Requester" value={<span>{r.requesterName || "—"}{r.designation ? ` · ${r.designation}` : ""}</span>} />
             <ReqInfo label="Department" value={r.department || "—"} />
             <ReqInfo label="Location" value={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{loc.name || "—"}{loc.area ? ` · ${loc.area}` : ""}{loc.draft ? <Pill tone="warning">Draft</Pill> : loc.stationId ? <Pill tone="info">Station</Pill> : null}</span>} />
-            <ReqInfo label="First-level approver(s)" value={r.supervisor ? <span>{r.supervisor.name} <Pill tone="success">Approved</Pill></span> : poolNames.length ? poolNames.map((n, i) => <Pill key={i} tone="accent">{n}</Pill>) : <span style={{ color: "var(--muted)" }}>Any field supervisor</span>} />
+            <ReqInfo label="First-level approver(s)" value={reqIsFinanceDirect(r) ? <span style={{ color: "var(--muted)" }}>Not required — Finance request (HR &amp; Admin only)</span> : r.supervisor ? <span>{r.supervisor.name} <Pill tone="success">Approved</Pill></span> : poolNames.length ? poolNames.map((n, i) => <Pill key={i} tone="accent">{n}</Pill>) : <span style={{ color: "var(--muted)" }}>Any field supervisor</span>} />
             <ReqInfo label="Status" value={<Pill tone={reqStatusTone(r.status)}>{reqStatusLabel(r.status)}</Pill>} />
           </div>
           {r.narrative && <div style={{ fontSize: 12.5, color: "var(--text-2)", background: "var(--surface)", borderRadius: 10, padding: "10px 12px" }}>{r.narrative}</div>}
@@ -1546,7 +1559,7 @@ function Requisitions({ ctx }) {
     subtitle: `${scopeLabel} · ${reportRows.length} request${reportRows.length === 1 ? "" : "s"} · generated ${reqDate(new Date().toISOString())}`,
     meta: [`Requested: UGX ${fmtN(reportTotal)}    Approved: UGX ${fmtN(reportApproved)}`, statusCounts().join("    "), adjustedCount ? `* ${adjustedCount} amount${adjustedCount === 1 ? "" : "s"} adjusted by HR & Admin (marked in the Approved column)` : ""].filter(Boolean),
     head: ["Ref", "Date", "Requester", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Supervisor", "Final approver", "Status"],
-    body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), apprCell(r), r.supervisor ? r.supervisor.name : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
+    body: reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName || "", r.department || "", locName(r), r.subject || "", fmtN(reqTotal(r)), apprCell(r), r.supervisor ? r.supervisor.name : reqIsFinanceDirect(r) ? "Not required" : (r.status === "pending_supervisor" ? "— pending —" : "—"), r.admin ? r.admin.name : (r.status === "pending_admin" ? "— pending —" : "—"), reqStatusLabel(r.status)])
       .concat([[{ content: "TOTAL", colSpan: 6, styles: { halign: "right", fontStyle: "bold" } }, { content: fmtN(reportTotal), styles: { fontStyle: "bold" } }, { content: fmtN(reportApproved), styles: { fontStyle: "bold" } }, "", "", ""]]),
     orientation: "landscape",
     signatories: SIGNATORIES,
@@ -1554,7 +1567,7 @@ function Requisitions({ ctx }) {
   const exportReqCsv = () => {
     const header = ["Ref", "Date", "Requester", "Designation", "Department", "Location", "Subject", "Requested (UGX)", "Approved (UGX)", "Adjusted", "Supervisor", "Final approver", "Status"];
     const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
-    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), reqPayable(r), reqAdjusted(r) ? "YES" : "", r.supervisor ? r.supervisor.name : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
+    const lines = [header.map(esc).join(",")].concat(reportRows.map((r) => [r.id, reqDate(r.createdAt), r.requesterName, r.designation, r.department, locName(r), r.subject, reqTotal(r), reqPayable(r), reqAdjusted(r) ? "YES" : "", r.supervisor ? r.supervisor.name : reqIsFinanceDirect(r) ? "Not required (Finance request)" : "", r.admin ? r.admin.name : "", reqStatusLabel(r.status)].map(esc).join(",")));
     lines.push(["", "", "", "", "", "", "TOTAL", reportTotal, reportApproved, "", "", "", ""].map(esc).join(","));
     downloadFile(`gla-requisitions-${tab}.csv`, lines.join("\n"));
   };

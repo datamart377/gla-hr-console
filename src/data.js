@@ -525,6 +525,14 @@ export const REQ_STAGES = [
 ];
 // Index into REQ_STAGES for a status (how far it has progressed). -1 => rejected.
 export const reqStageIndex = (status) => ({ draft: 0, pending_supervisor: 1, pending_admin: 2, approved: 3, paid: 4, rejected: -1 }[status] ?? 0);
+// Requisitions raised by a Finance Officer have ONE approval level: they skip the
+// supervisor and go straight to HR & Admin for final approval.
+export const reqIsFinanceDirect = (r) => !!(r && r.route === "finance_direct");
+export const reqStagesFor = (r) => (reqIsFinanceDirect(r) ? REQ_STAGES.filter((s) => s.key !== "supervisor") : REQ_STAGES);
+export const reqStageIndexFor = (r) => {
+  const i = reqStageIndex(r && r.status);
+  return reqIsFinanceDirect(r) && i >= 2 ? i - 1 : i;
+};
 
 // ---- Supervisor pool (multi-supervisor first-level approval) ----------------
 // An employee flagged isSupervisor may act as a requisition approver.
@@ -572,6 +580,7 @@ export function normalizeRequisition(r = {}) {
     lineItems,
     documents: Array.isArray(r.documents) ? r.documents : [],   // [{ name, size }]
     supervisorIds: Array.isArray(r.supervisorIds) ? r.supervisorIds : [],   // approver pool snapshot
+    route: r.route === "finance_direct" ? "finance_direct" : "standard",    // finance_direct => HR & Admin only
     status: REQ_STATUSES.includes(r.status) ? r.status : "pending_supervisor",
     history: Array.isArray(r.history) ? r.history : [],          // [{ at, by, byName, action, note }]
     createdAt: r.createdAt || new Date().toISOString(),
