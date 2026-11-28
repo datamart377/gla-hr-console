@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, Users, CalendarDays, Clock, Wallet, Star, Plus, Check, X, Menu,
   Search, Pencil, Trash2, Printer, FileText, FileBarChart, Building2, Phone, Mail, MapPin,
-  AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, UserPlus, ShieldCheck, TrendingUp,
+  AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, UserPlus, ShieldCheck, ShieldAlert, TrendingUp,
   Circle, Download, Landmark, History, GraduationCap, Award, Briefcase,
   HeartHandshake, Handshake, Baby, IdCard, FileCheck, Contact,
   Boxes, PackagePlus, PackageMinus, Warehouse, ClipboardCheck, RefreshCw,
@@ -10,6 +10,7 @@ import {
   LogOut, LogIn, ShieldQuestion, CalendarCheck, Banknote, Coins, Camera, RotateCcw, Ban, Eye, EyeOff, UserX,
   Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart, FileSignature, Copy, ChevronUp,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
+  Lock, Unlock,
 } from "lucide-react";
 import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf, downloadServiceCertificatePdf } from "./reportLazy.js";
 import { COMPANY, SIGNATORIES, PAYROLL_SIGNATORIES, ALL_SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
@@ -18,7 +19,7 @@ import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
 import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi, quotationsApi, clientsApi,
-  authApi, notifyApi, accountsApi, isLive,
+  authApi, notifyApi, accountsApi, securityApi, isLive,
 } from "./api/client.js";
 import {
   data, TODAY, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
@@ -315,6 +316,7 @@ const NAV = [
   { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
   { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
+  { id: "security", label: "Security", Icon: ShieldAlert, section: "Admin" },
   { id: "settings", label: "Settings", Icon: SettingsIcon, section: "Admin" },
 ];
 // Current user's role definition. Resolved from the LIVE, admin-configured roles
@@ -360,6 +362,7 @@ const VIEW_META = {
   appraisals: ["Performance Appraisals", "Competency reviews and ratings"],
   reports: ["HR Reports", "Staff analytics — attendance, workforce, leave and payroll"],
   sessions: ["Accounts & Sessions", "Who can sign in, their last activity, and revoking access"],
+  security: ["Security Monitoring", "Intrusion detection — threats, blocked addresses, locked accounts and alerts"],
   settings: ["Settings Management", "Roles, permissions, announcements and system configuration"],
   staffFile: ["Electronic Staff File", "Complete staff record"],
 };
@@ -459,7 +462,17 @@ export default function App() {
   const currentEmp = auth
     ? (empById(auth.empId) || (auth.email ? (store.employees || []).find((e) => (e.email || "").toLowerCase() === String(auth.email).toLowerCase()) : null) || null)
     : null;
-  const ctx = { store, setStore, empById, reload, setModal, auth, currentEmp, signOut };
+  // Admin/HR: keep a light summary of unreviewed security threats for the dashboard.
+  const [secSummary, setSecSummary] = useState(null);
+  useEffect(() => {
+    if (!auth || !["admin", "hr"].includes(auth.role) || auth.mustChangePassword) { setSecSummary(null); return undefined; }
+    let stop = false;
+    const pull = async () => { try { const o = await securityApi.overview(); if (!stop) setSecSummary({ unacknowledged: o.unacknowledged || 0, blocks: (o.blocks || []).length, locked: (o.locked || []).length }); } catch { /* not critical */ } };
+    pull();
+    const t = setInterval(pull, 2 * 60 * 1000);
+    return () => { stop = true; clearInterval(t); };
+  }, [auth && auth.role, auth && auth.mustChangePassword]);
+  const ctx = { store, setStore, empById, reload, setModal, auth, currentEmp, signOut, secSummary, setSecSummary };
 
   let content;
   if (loading) content = <div style={{ padding: 40, color: "var(--muted)" }}>Loading…</div>;
@@ -525,17 +538,17 @@ function AdminConsole({ ctx }) {
   const navView = view === "staffFile" ? "employees" : view;
   const _isAdmin = ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role)) === "admin";
   const _isAdminOrHr = ["admin", "hr"].includes((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role));
-  const nav = NAV.filter((n) => canView(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (n.id !== "sessions" || _isAdminOrHr));
+  const nav = NAV.filter((n) => canView(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (!["sessions", "security"].includes(n.id) || _isAdminOrHr));
   const [title, sub] = VIEW_META[view] || STAFF_META[view] || ["", ""];
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: ClientsPage, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, settings: SettingsView,
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: ClientsPage, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, security: SecurityView, settings: SettingsView,
     myportal: ConsoleMyPortal, myprofile: MyProfileEdit, clockin: MyClockIn, myleave: MyLeave, mypayslip: MyPayslip, myadvance: MyAdvance, myfile: ConsoleMyFile }[view];
   // Defence in depth: even if a view is reached directly (not via the sidebar),
   // enforce the same role gate the navigation uses.
   const viewAllowed = view === "staffFile" || view === "dashboard" ||
-    (canView(ctx, view) && (view !== "approvals" || _isAdmin) && (view !== "sessions" || _isAdminOrHr));
+    (canView(ctx, view) && (view !== "approvals" || _isAdmin) && (!["sessions", "security"].includes(view) || _isAdminOrHr));
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -594,6 +607,259 @@ function fmtSessionExpiry(ms) {
   if (h >= 1) return `in ${h} hour${h === 1 ? "" : "s"}`;
   return `in ${Math.max(1, Math.floor(diff / 60000))} min`;
 }
+/* ======================= Security monitoring (IDS) ======================= */
+const SEC_TYPES = {
+  login_failed: "Failed sign-in", login_success: "Sign-in", account_locked: "Account locked", login_while_locked: "Sign-in on locked account",
+  account_unlocked: "Account unlocked", ip_blocked: "Address blocked", ip_unblocked: "Address unblocked", scanner_probe: "Vulnerability scan",
+  attack_pattern: "Attack payload", token_tampering: "Forged / tampered token", access_denied: "Action refused", privilege_probing: "Privilege probing",
+  rate_limited: "Rate limit hit", new_network_login: "Sign-in from new network", former_staff_login: "Former staff sign-in attempt",
+  bank_details_changed: "Bank details changed", permissions_changed: "Permissions changed", signatories_changed: "Signatories changed",
+  settings_changed: "Settings changed", security_settings_changed: "Security settings changed", password_set_by_admin: "Password set by admin",
+  password_changed: "Password changed", password_reset_requested: "Password reset requested", sessions_revoked: "Sessions ended",
+  employee_terminated: "Employee terminated", record_deleted: "Record deleted", mass_deletion: "Mass deletion",
+};
+const SEV_TONE = { critical: "danger", high: "danger", medium: "warning", low: "info", info: "muted" };
+const secWhen = (t) => { try { const d = new Date(t); return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return String(t || ""); } };
+const secLeft = (t) => { if (!t) return "until removed"; const m = Math.round((new Date(t) - Date.now()) / 60000); return m <= 0 ? "expiring" : m < 90 ? `${m} min left` : m < 48 * 60 ? `${Math.round(m / 60)} h left` : `${Math.round(m / 1440)} days left`; };
+
+function SecurityView({ ctx }) {
+  const [ov, setOv] = useState(null);
+  const [events, setEvents] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const [f, setF] = useState({ severity: "medium", q: "", unack: false, hideRoutine: true });
+  const [cfg, setCfg] = useState(null);
+  const [cfgMsg, setCfgMsg] = useState(null);
+  const load = async () => {
+    try {
+      const [o, ev] = await Promise.all([
+        securityApi.overview(),
+        securityApi.events({ severity: f.severity === "all" ? "" : f.severity, q: f.q.trim(), unack: f.unack ? "1" : "", hideRoutine: f.hideRoutine ? "1" : "", limit: 200 }),
+      ]);
+      setOv(o); setEvents(ev); setErr("");
+      setCfg((c) => c || { ...o.config, allowlist: (o.config.allowlist || []).join("\n"), extraRecipients: (o.config.extraRecipients || []).join(", ") });
+      if (ctx.setSecSummary) ctx.setSecSummary({ unacknowledged: o.unacknowledged || 0, blocks: (o.blocks || []).length, locked: (o.locked || []).length });
+    } catch (e) { setErr(e.message || "Couldn't load security data."); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [f.severity, f.unack, f.hideRoutine]);
+  useEffect(() => { const t = setTimeout(load, 350); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [f.q]);
+  useEffect(() => { const t = setInterval(load, 60 * 1000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [f]);
+
+  const act = async (key, fn, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(key);
+    try { await fn(); await load(); } catch (e) { alert(e.message || "That didn't work."); }
+    setBusy("");
+  };
+  const blockedSet = new Set((ov && ov.blocks || []).map((b) => b.ip));
+  const myIp = ov && ov.you && ov.you.ip;
+  const openBlock = (ip = "") => ctx.setModal(() => (cc) => <BlockIpModal ctx={cc} ip={ip} myIp={myIp} onDone={load} />);
+
+  if (err && !ov) return <Card pad><div style={{ color: "var(--danger)" }}>{err}</div></Card>;
+  if (!ov) return <Card pad><div style={{ color: "var(--muted)" }}>Loading security data…</div></Card>;
+
+  const sev = ov.last24h.bySeverity || {};
+  const failed = (ov.last24h.byType.find((t) => t.type === "login_failed") || {}).n || 0;
+  const threats = (sev.high || 0) + (sev.critical || 0);
+  const c = ov.config || {};
+  const R = ov.rules || {};
+  const saveCfg = async () => {
+    setBusy("cfg"); setCfgMsg(null);
+    try {
+      const saved = await securityApi.saveConfig({ autoBlock: !!cfg.autoBlock, emailAlerts: !!cfg.emailAlerts, alertMinSeverity: cfg.alertMinSeverity, allowlist: cfg.allowlist, extraRecipients: cfg.extraRecipients });
+      setCfg({ ...saved, allowlist: (saved.allowlist || []).join("\n"), extraRecipients: (saved.extraRecipients || []).join(", ") });
+      setCfgMsg({ ok: true, text: "Security settings saved." }); await load();
+    } catch (e) { setCfgMsg({ ok: false, text: e.message || "Couldn't save." }); }
+    setBusy("");
+  };
+  const testAlert = async () => {
+    setBusy("test"); setCfgMsg(null);
+    try {
+      const r = await securityApi.testAlert();
+      setCfgMsg(r.sent ? { ok: true, text: `Test alert sent to ${(r.to || []).join(", ")}.` } : { ok: false, text: r.reason === "email_not_configured" ? "Email (SMTP) isn't configured on the server, so alerts can only be seen here. Set the SMTP_* variables in Render to enable email alerts." : `Not sent (${r.reason}).` });
+    } catch (e) { setCfgMsg({ ok: false, text: e.message || "Couldn't send." }); }
+    setBusy("");
+  };
+  const SwitchRow = ({ on, onClick, label, hint }) => (
+    <button type="button" onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: on ? "var(--surface)" : "var(--bg-elevated)", cursor: "pointer" }}>
+      <span style={{ width: 34, height: 20, borderRadius: 20, background: on ? "var(--success)" : "var(--border-strong)", position: "relative", flex: "none", transition: "background .15s" }}>
+        <span style={{ position: "absolute", top: 2, left: on ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.25)" }} />
+      </span>
+      <span style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{label}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</div></span>
+    </button>
+  );
+  const ruleLines = [
+    ["Password guessing on one account", `${R.accountLockout?.failures} failed sign-ins within ${R.accountLockout?.windowMin} min lock that account for ${R.accountLockout?.lockMin} min (allow-listed networks exempt).`],
+    ["Password spraying / credential stuffing", `Failures against ${R.ipFailures?.distinctAccounts}+ different accounts, or ${R.ipFailures?.failures}+ failures, from one address in ${R.ipFailures?.windowMin} min block it for ${R.ipFailures?.blockMin} min.`],
+    ["Vulnerability scanners", `Requests for files like /.env, /wp-login.php or /.git are refused; ${R.probes?.count} in ${R.probes?.windowMin} min block the address for 24 h.`],
+    ["Injection & traversal attacks", `SQL injection, XSS, path traversal, command and JNDI payloads in URLs are rejected; ${R.attackPatterns?.count} in ${R.attackPatterns?.windowMin} min block the address for 24 h.`],
+    ["Forged sign-in tokens", `Tampered or forged tokens are logged; ${R.badTokens?.count} in ${R.badTokens?.windowMin} min block the address for ${R.badTokens?.blockMin} min.`],
+    ["Privilege probing", `A signed-in user refused ${R.deniedWrites?.count} changes in ${R.deniedWrites?.windowMin} min raises a high alert.`],
+    ["Insider risk", `Bank-detail changes, role/permission and signatory changes raise high alerts; ${R.massDelete?.count} deletions by one user in ${R.massDelete?.windowMin} min raise a critical alert.`],
+    ["Former staff", "Terminated staff are refused and their attempts logged."],
+    ["Retention", `Events are kept for ${R.retentionDays} days.`],
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* status banner */}
+      <Card style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", borderColor: threats ? "var(--danger)" : "var(--border)" }}>
+        <ShieldAlert size={22} style={{ color: threats ? "var(--danger)" : "var(--success)" }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 14 }}>{ov.demo ? "Monitoring (demo data)" : "Monitoring active"} · {threats ? `${threats} serious event${threats === 1 ? "" : "s"} in the last 24 hours` : "no serious threats in the last 24 hours"}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 2 }}>
+            Automatic blocking <b>{c.autoBlock ? "on" : "off"}</b> · Email alerts <b>{!c.emailAlerts ? "off" : ov.mailReady ? `on (${c.alertMinSeverity}+)` : "on, but email isn't configured"}</b> · Your address <span className="mono">{myIp}</span>{ov.you.source === "cloudflare" ? " (via Cloudflare)" : ""}{ov.you.allowlisted ? " · allow-listed" : ""}
+          </div>
+        </div>
+        {ov.unacknowledged > 0 && <Btn size="sm" disabled={busy === "ackall"} onClick={() => act("ackall", () => securityApi.ack({ all: true }), `Mark all ${ov.unacknowledged}+ unreviewed events as reviewed?`)}><Check size={13} />Mark all reviewed</Btn>}
+        <Btn size="sm" onClick={load}><RotateCcw size={13} />Refresh</Btn>
+      </Card>
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+        <StatCard Icon={ShieldAlert} label="Threats (24 h)" value={threats} meta={`${ov.unacknowledged} unreviewed (7 days)`} tone={threats ? "danger" : "success"} />
+        <StatCard Icon={LogIn} label="Failed sign-ins (24 h)" value={failed} meta={`${sev.medium || 0} medium · ${sev.low || 0} low events`} tone="warning" />
+        <StatCard Icon={Ban} label="Blocked addresses" value={ov.blocks.length} meta="refused sign-in & token-less API" tone="accent" />
+        <StatCard Icon={Lock} label="Locked accounts" value={ov.locked.length} meta="after repeated failed sign-ins" tone="brand" />
+      </div>
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))" }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Blocked addresses" sub="Signed-in staff on these networks keep working; new sign-ins are refused" right={<Btn size="sm" variant="primary" onClick={() => openBlock("")}><Ban size={13} />Block address</Btn>} />
+          {ov.blocks.length === 0 ? <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--muted)" }}>No addresses are blocked.</div> : ov.blocks.map((b) => (
+            <div key={b.ip} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="mono" style={{ fontWeight: 600, color: "var(--text)" }}>{b.ip}</div>
+                <div style={{ fontSize: 12, color: "var(--text-2)" }}>{b.reason}</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{b.created_by === "auto" ? "Automatic" : `By ${b.created_by}`} · {secWhen(b.created_at)} · {secLeft(b.expires_at)}{b.hits ? ` · ${b.hits} refused request${b.hits === 1 ? "" : "s"}` : ""}</div>
+              </div>
+              <Btn size="sm" disabled={busy === "ub" + b.ip} onClick={() => act("ub" + b.ip, () => securityApi.unblock(b.ip), `Unblock ${b.ip}?`)}><Check size={13} />Unblock</Btn>
+            </div>
+          ))}
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Locked accounts" sub={`Locked after ${R.accountLockout?.failures} failed sign-ins — unlock once you've confirmed it's the real person`} />
+          {ov.locked.length === 0 ? <div style={{ padding: "16px 20px", fontSize: 13, color: "var(--muted)" }}>No accounts are locked.</div> : ov.locked.map((l) => (
+            <div key={l.email} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{l.email}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{l.failures} failed attempts · unlocks automatically at {secWhen(l.until)}</div>
+              </div>
+              <Btn size="sm" disabled={busy === "ul" + l.email} onClick={() => act("ul" + l.email, () => securityApi.unlock(l.email))}><Unlock size={13} />Unlock</Btn>
+            </div>
+          ))}
+          {ov.last24h.topIps.length > 0 && <>
+            <div style={{ padding: "12px 18px 6px", borderTop: "1px solid var(--border)", fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)" }}>Most active suspicious addresses · 24 h</div>
+            {ov.last24h.topIps.map((t) => (
+              <div key={t.ip} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 18px", fontSize: 12.5 }}>
+                <span className="mono" style={{ fontWeight: 600, minWidth: 130, color: "var(--text)", cursor: "pointer" }} onClick={() => setF((x) => ({ ...x, q: t.ip, severity: "all", hideRoutine: false }))} title="Show this address's events">{t.ip}</span>
+                <span style={{ flex: 1, color: "var(--text-2)" }}>{t.n} event{t.n === 1 ? "" : "s"}{t.serious ? <b style={{ color: "var(--danger)" }}> · {t.serious} serious</b> : ""}</span>
+                {blockedSet.has(t.ip) ? <Pill tone="muted">Blocked</Pill> : t.ip !== myIp && <Btn size="sm" variant="danger" onClick={() => openBlock(t.ip)}><Ban size={12} />Block</Btn>}
+              </div>
+            ))}
+            <div style={{ height: 8 }} />
+          </>}
+        </Card>
+      </div>
+
+      <Card style={{ padding: 0 }}>
+        <CardHead title="Security event log" sub="Everything the monitor has seen — newest first" />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
+          <SearchBox value={f.q} onChange={(v) => setF((x) => ({ ...x, q: v }))} placeholder="Search address, account, path…" />
+          <Select value={f.severity} onChange={(e) => setF((x) => ({ ...x, severity: e.target.value }))} style={{ width: "auto" }} options={[{ value: "all", label: "All severities" }, { value: "low", label: "Low and above" }, { value: "medium", label: "Medium and above" }, { value: "high", label: "High and critical" }]} />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={f.unack} onChange={(e) => setF((x) => ({ ...x, unack: e.target.checked }))} />Unreviewed only</label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={f.hideRoutine} onChange={(e) => setF((x) => ({ ...x, hideRoutine: e.target.checked }))} />Hide routine activity</label>
+        </div>
+        <DataTable
+          columns={[
+            { label: "When", render: (e) => <span style={{ whiteSpace: "nowrap", fontSize: 12.5 }}>{secWhen(e.at)}</span> },
+            { label: "Severity", render: (e) => <Pill tone={SEV_TONE[e.severity]}>{e.severity}</Pill> },
+            { label: "Event", render: (e) => (
+              <div style={{ maxWidth: 460 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{SEC_TYPES[e.type] || e.type}</div>
+                <div style={{ fontSize: 12, color: "var(--text-2)" }}>{(e.detail && e.detail.summary) || (e.path ? `${e.method || ""} ${e.path}` : "")}</div>
+              </div>
+            ) },
+            { label: "Source", render: (e) => (
+              <div style={{ fontSize: 12.5 }}>
+                {e.ip ? <div className="mono" style={{ color: "var(--text)", cursor: "pointer" }} onClick={() => setF((x) => ({ ...x, q: e.ip, severity: "all", hideRoutine: false }))} title="Show this address's events">{e.ip}{blockedSet.has(e.ip) && <span style={{ color: "var(--danger)" }}> · blocked</span>}</div> : <span style={{ color: "var(--muted)" }}>—</span>}
+                {e.email && <div style={{ color: "var(--muted)" }}>{e.email}</div>}
+              </div>
+            ) },
+            { label: "", render: (e) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                {e.ip && !blockedSet.has(e.ip) && e.ip !== myIp && ["medium", "high", "critical"].includes(e.severity) && <Btn size="sm" variant="danger" onClick={() => openBlock(e.ip)} title="Block this address"><Ban size={12} /></Btn>}
+                {e.acknowledged
+                  ? <span style={{ fontSize: 11.5, color: "var(--muted)" }} title={e.ack_by ? `Reviewed by ${e.ack_by}` : "Reviewed"}>Reviewed</span>
+                  : <Btn size="sm" disabled={busy === "ack" + e.id} onClick={() => act("ack" + e.id, () => securityApi.ack({ ids: [e.id] }))} title="Mark as reviewed"><Check size={12} />Review</Btn>}
+              </div>
+            ) },
+          ]}
+          rows={events || []}
+          empty={events ? "No events match these filters." : "Loading…"}
+        />
+      </Card>
+
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))" }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Response settings" sub="How the system reacts to threats" />
+          {cfg && <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <SwitchRow on={!!cfg.autoBlock} onClick={() => setCfg((x) => ({ ...x, autoBlock: !x.autoBlock }))} label={cfg.autoBlock ? "Automatic blocking on" : "Automatic blocking off"} hint="Temporarily block addresses that scan, attack or spray passwords" />
+            <SwitchRow on={!!cfg.emailAlerts} onClick={() => setCfg((x) => ({ ...x, emailAlerts: !x.emailAlerts }))} label={cfg.emailAlerts ? "Email alerts on" : "Email alerts off"} hint={ov.mailReady ? "Sent to every Admin account, plus any extra recipients below" : "Email (SMTP) isn't configured on the server yet — alerts show here only"} />
+            <Field label="Email me for">
+              <Select value={cfg.alertMinSeverity} onChange={(e) => setCfg((x) => ({ ...x, alertMinSeverity: e.target.value }))} options={[{ value: "medium", label: "Medium, high and critical events" }, { value: "high", label: "High and critical events (recommended)" }, { value: "critical", label: "Critical events only" }]} />
+            </Field>
+            <Field label="Extra alert recipients" hint="Comma-separated emails, e.g. your IT support"><Input value={cfg.extraRecipients} onChange={(e) => setCfg((x) => ({ ...x, extraRecipients: e.target.value }))} placeholder="it@example.com" /></Field>
+            <Field label="Trusted addresses (allow-list)" hint="One per line — IPs or ranges like 196.43.180.0/24. Never auto-blocked and exempt from account lockout. Use for your office's fixed internet address.">
+              <Textarea value={cfg.allowlist} onChange={(e) => setCfg((x) => ({ ...x, allowlist: e.target.value }))} placeholder="196.43.180.2" />
+            </Field>
+            {myIp && !String(cfg.allowlist).split(/\s+/).includes(myIp) && <div><Btn size="sm" onClick={() => setCfg((x) => ({ ...x, allowlist: (String(x.allowlist || "").trim() ? String(x.allowlist).trim() + "\n" : "") + myIp }))}><Plus size={12} />Add my current address ({myIp})</Btn></div>}
+            {cfgMsg && <div style={{ fontSize: 12.5, color: cfgMsg.ok ? "var(--success)" : "var(--danger)" }}>{cfgMsg.text}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Btn disabled={busy === "test"} onClick={testAlert}><Send size={14} />{busy === "test" ? "Sending…" : "Send test alert"}</Btn>
+              <Btn variant="primary" disabled={busy === "cfg"} onClick={saveCfg}><Check size={14} />{busy === "cfg" ? "Saving…" : "Save settings"}</Btn>
+            </div>
+          </div>}
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="What's being monitored" sub="Detection rules running on the server" />
+          <div style={{ padding: "6px 18px 14px" }}>
+            {ruleLines.map(([k, v]) => (
+              <div key={k} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{k}</div>
+                <div style={{ color: "var(--text-2)" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function BlockIpModal({ ctx, ip: initial, myIp, onDone }) {
+  const [ip, setIp] = useState(initial || "");
+  const [minutes, setMinutes] = useState("1440");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try { await securityApi.block(ip.trim(), Number(minutes), reason.trim() || "Blocked manually"); await onDone(); ctx.setModal(null); }
+    catch (e) { setErr(e.message || "Couldn't block that address."); setBusy(false); }
+  };
+  return (
+    <Modal title="Block an address" sub="Refuses new sign-ins and token-less requests from this address" onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy || !ip.trim() || ip.trim() === myIp} style={{ background: "var(--danger)", borderColor: "var(--danger)", color: "#fff" }} onClick={submit}><Ban size={15} />{busy ? "Blocking…" : "Block address"}</Btn></>}>
+      <div style={formGrid}>
+        <Field label="IP address" required hint={ip.trim() && ip.trim() === myIp ? "That's your own address — you can't block it." : undefined}><Input value={ip} onChange={(e) => setIp(e.target.value)} placeholder="e.g. 185.220.101.34" className="mono" /></Field>
+        <Field label="For"><Select value={minutes} onChange={(e) => setMinutes(e.target.value)} options={[{ value: "60", label: "1 hour" }, { value: "1440", label: "24 hours" }, { value: "10080", label: "7 days" }, { value: "43200", label: "30 days" }, { value: "0", label: "Until removed" }]} /></Field>
+        <Field label="Reason" full><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Repeated attacks from this address" /></Field>
+      </div>
+      {err && <div style={{ marginTop: 12, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
 function SessionsView({ ctx }) {
   const [accounts, setAccounts] = useState(null);
   const [busy, setBusy] = useState("");
@@ -2529,7 +2795,7 @@ function Topbar({ title, sub, view, ctx, onMenu }) {
 
 /* =============================== Dashboard =============================== */
 function StatCard({ Icon, label, value, meta, tone = "brand" }) {
-  const railColor = { brand: "var(--brand)", accent: "var(--accent)", success: "var(--success)", warning: "var(--warning)" }[tone];
+  const railColor = { brand: "var(--brand)", accent: "var(--accent)", success: "var(--success)", warning: "var(--warning)", danger: "var(--danger)" }[tone];
   return (
     <Card style={{ padding: "16px 18px", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: railColor }} />
@@ -2555,6 +2821,10 @@ function actionAlertsFor(ctx) {
   const store = ctx.store || {};
   const employees = store.employees || [];
   const out = [];
+  if (hrAdmin && ctx.secSummary && ctx.secSummary.unacknowledged) {
+    const n = ctx.secSummary.unacknowledged;
+    out.push({ key: "security", module: "security", Icon: ShieldAlert, tone: "danger", title: "Security threats to review", count: n, detail: `high-severity event${n === 1 ? "" : "s"} detected — see Security` });
+  }
   if (isSup) {
     const n = (store.requisitions || []).filter((r) => r.status === "pending_supervisor" && canSuperviseReq(r, myId, employees)).length;
     if (n) out.push({ key: "req_sup", module: "requisitions", Icon: Receipt, tone: "warning", title: "Requisitions to review", count: n, detail: "awaiting your first-level approval" });

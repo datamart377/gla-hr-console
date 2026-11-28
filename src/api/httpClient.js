@@ -149,3 +149,15 @@ export const accountsApi = {
   syncEmail: (empId) => request("POST", "/api/accounts/sync-email", { empId }),
   revoke: (empId) => request("POST", `/api/accounts/${encodeURIComponent(empId)}/revoke`),
 };
+
+// Intrusion detection console (admin / HR).
+export const securityApi = {
+  overview: () => request("GET", "/api/security/overview"),
+  events: (params = {}) => request("GET", "/api/security/events?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v != null)).toString()),
+  ack: (body) => request("POST", "/api/security/events/ack", body),
+  block: (ip, minutes, reason) => request("POST", "/api/security/blocks", { ip, minutes, reason }),
+  unblock: (ip) => request("DELETE", `/api/security/blocks/${encodeURIComponent(ip)}`),
+  unlock: (email) => request("POST", "/api/security/unlock", { email }),
+  saveConfig: (cfg) => request("PUT", "/api/security/config", cfg),
+  testAlert: () => request("POST", "/api/security/test-alert"),
+};

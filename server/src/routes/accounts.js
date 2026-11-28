@@ -22,6 +22,7 @@ import { requireAuth, requireRole } from "../middleware/auth.js";
 import { passwordProblem } from "../passwordPolicy.js";
 import { validate } from "../middleware/validate.js";
 import { sendWelcomeMail } from "../email.js";
+import { audit } from "../security/ids.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("admin", "hr"));
@@ -96,6 +97,7 @@ router.post("/:empId/revoke", async (req, res, next) => {
       [req.params.empId],
     );
     if (!rowCount) return res.status(404).json({ error: "No login exists for that employee." });
+    audit(req, "sessions_revoked", "info", `${req.user.email} ended all sessions for ${req.params.empId}`, { empId: req.params.empId }).catch(() => {});
     res.json({ ok: true, revoked: true });
   } catch (e) { next(e); }
 });
@@ -164,6 +166,7 @@ router.post(
       // The admin knows this password, so it's temporary: the person must choose
       // their own at next sign-in.
       await query(`UPDATE users SET must_change_password = true WHERE id = $1`, [synced.id]);
+      audit(req, "password_set_by_admin", "medium", `${req.user.email} set a temporary password for ${synced.email} (${empId})`, { empId, target: synced.email }).catch(() => {});
       res.json({ ok: true, loginEmail: synced.email, created: synced.created });
     } catch (e) { next(e); }
   },

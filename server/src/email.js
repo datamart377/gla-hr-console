@@ -194,3 +194,22 @@ export async function sendEventMail({ type, empId, data = {} }) {
   await t.sendMail({ from: config.mail.from, to: recipient, subject, html, text });
   return { sent: true, to: recipient };
 }
+
+// Security alert to administrators (intrusion detection). Recipients are
+// resolved server-side by the caller (admin accounts + configured extras).
+export async function sendSecurityAlertMail({ to, subject, lines = [], severity = "high", appUrl }) {
+  const t = getTransport();
+  if (!t) return { sent: false, reason: "email_not_configured" };
+  const list = [...new Set((to || []).filter(Boolean))];
+  if (!list.length) return { sent: false, reason: "no_recipient_email" };
+  const colour = { critical: "#b3261e", high: "#c23a29", medium: "#c9821a", low: "#2f6f9f", info: "#6b747d" }[severity] || "#c23a29";
+  const url = appUrl || config.mail.appUrl;
+  const html = shell("Security alert",
+    `<p style="margin:0 0 10px"><b style="color:${colour};text-transform:uppercase;letter-spacing:.05em">${esc(severity)} severity</b></p>
+     <div style="background:#f4f7f9;border-radius:8px;padding:12px 14px;margin:0 0 14px;font-size:13px">${lines.map((l) => `<div>${esc(l)}</div>`).join("")}</div>
+     <p style="font-size:13px;color:#47515a;margin:0">Review it in IHRSM under <b>Admin → Security</b>, where you can block an address, unlock an account or end sessions.</p>
+     ${url ? `<p style="margin:18px 0 0"><a href="${esc(url)}" style="background:#f0601f;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;display:inline-block;font-weight:600">Open IHRSM</a></p>` : ""}`);
+  const text = `IHRSM security alert (${severity})\n\n${lines.join("\n")}\n\nReview it under Admin -> Security.${url ? `\n${url}` : ""}`;
+  await t.sendMail({ from: config.mail.from, to: list.join(", "), subject: `[IHRSM security] ${subject}`, html, text });
+  return { sent: true, to: list };
+}

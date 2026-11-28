@@ -14,6 +14,7 @@
 import { Router } from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
+import { audit, onRecordDeleted } from "../security/ids.js";
 
 const rowToRecord = (r) => ({ ...r.doc, id: r.id });
 
@@ -434,6 +435,13 @@ export function crudRouter(table) {
       if (table === "employees" && patch.status === "Terminated" && req.params.id === req.user.empId) {
         return res.status(403).json({ error: "You can't terminate your own employment record. Ask another HR or Admin user." });
       }
+      // Remember the bank details before the change, to flag redirection of pay.
+      const BANK_KEYS = ["bankName", "bankAccount", "bankBranch", "bankDetails"];
+      let bankBefore = null;
+      if (table === "employees" && BANK_KEYS.some((k) => k in patch)) {
+        const cur = await query(`SELECT doc FROM employees WHERE id = $1`, [req.params.id]);
+        bankBefore = cur.rows[0] ? cur.rows[0].doc || {} : null;
+      }
       if (!(await mgmtFor(req, table, "write"))) {
         const empId = req.user.empId;
         const fields = STAFF_UPDATE_FIELDS[table];
@@ -472,6 +480,18 @@ export function crudRouter(table) {
       // Terminating employment ends every open session for that person's login.
       if (table === "employees" && patch.status === "Terminated") {
         await query(`UPDATE users SET token_epoch = token_epoch + 1, updated_at = now() WHERE emp_id = $1`, [req.params.id]);
+        audit(req, "employee_terminated", "medium", `${req.user.email} terminated ${req.params.id} — access revoked`, { empId: req.params.id, exitType: patch.exitType || "" }).catch(() => {});
+      }
+      if (bankBefore) {
+        const after = rows[0].doc || {};
+        const sig = (d) => JSON.stringify([d.bankName || "", d.bankAccount || "", d.bankBranch || "", d.bankDetails || []]);
+        if (sig(bankBefore) !== sig(after)) {
+          const self = req.params.id === req.user.empId;
+          const mask = (a) => (a ? `…${String(a).slice(-4)}` : "none");
+          audit(req, "bank_details_changed", "high",
+            `${req.user.email} changed bank details for ${req.params.id}${self ? " (their own record)" : ""}: account ${mask(bankBefore.bankAccount)} → ${mask(after.bankAccount)}`,
+            { empId: req.params.id, self, before: { bank: bankBefore.bankName || "", account: mask(bankBefore.bankAccount) }, after: { bank: after.bankName || "", account: mask(after.bankAccount) } }).catch(() => {});
+        }
       }
       res.json(rowToRecord(rows[0]));
     } catch (e) { next(e); }
@@ -489,6 +509,7 @@ export function crudRouter(table) {
       }
       const { rowCount } = await query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
       if (!rowCount) return res.status(404).json({ error: "Record not found." });
+      onRecordDeleted(req, table, req.params.id).catch(() => {});
       res.json({ id: req.params.id, deleted: true });
     } catch (e) { next(e); }
   });

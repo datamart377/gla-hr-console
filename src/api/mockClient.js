@@ -149,6 +149,60 @@ export const accountsApi = {
   revoke: () => respond({ ok: true, revoked: true, mock: true }),
 };
 
+// Intrusion detection console — illustrative data in the offline demo.
+const _ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+const _sec = {
+  config: { autoBlock: true, emailAlerts: true, alertMinSeverity: "high", allowlist: [], extraRecipients: [] },
+  blocks: [
+    { ip: "185.220.101.34", reason: "sign-in attempts against 6 different accounts (password spraying)", created_at: _ago(38), expires_at: _ago(-22), created_by: "auto", hits: 14 },
+    { ip: "45.148.10.77", reason: "5 scanner probes in 10 min", created_at: _ago(190), expires_at: _ago(-1250), created_by: "auto", hits: 3 },
+  ],
+  events: [
+    { id: 9, at: _ago(12), type: "bank_details_changed", severity: "high", ip: "102.85.14.6", email: "p.wanyama@glassociates.co.ug", method: "PUT", path: "/api/employees/GLA-006", detail: { summary: "p.wanyama@glassociates.co.ug changed bank details for GLA-006 (their own record): account …7665 → …2231" }, acknowledged: false },
+    { id: 8, at: _ago(38), type: "ip_blocked", severity: "high", ip: "185.220.101.34", detail: { summary: "Address 185.220.101.34 blocked for 1 hour(s): sign-in attempts against 6 different accounts (password spraying)" }, acknowledged: false },
+    { id: 7, at: _ago(40), type: "login_failed", severity: "low", ip: "185.220.101.34", email: "admin@glassociates.co.ug", method: "POST", path: "/api/auth/login", detail: { summary: "Failed sign-in for admin@glassociates.co.ug (no such account)" }, acknowledged: false },
+    { id: 6, at: _ago(41), type: "login_failed", severity: "low", ip: "185.220.101.34", email: "r.okello@glassociates.co.ug", method: "POST", path: "/api/auth/login", detail: { summary: "Failed sign-in for r.okello@glassociates.co.ug (wrong password)" }, acknowledged: false },
+    { id: 5, at: _ago(95), type: "attack_pattern", severity: "high", ip: "91.92.241.10", method: "GET", path: "/api/employees?q=' or 1=1--", detail: { summary: "SQL injection attempt in request URL" }, acknowledged: false },
+    { id: 4, at: _ago(190), type: "ip_blocked", severity: "high", ip: "45.148.10.77", detail: { summary: "Address 45.148.10.77 blocked for 24 hour(s): 5 scanner probes in 10 min" }, acknowledged: true, ack_by: "r.okello@glassociates.co.ug" },
+    { id: 3, at: _ago(191), type: "scanner_probe", severity: "medium", ip: "45.148.10.77", method: "GET", path: "/.env", detail: { summary: "Vulnerability scan: request for /.env" }, acknowledged: true },
+    { id: 2, at: _ago(300), type: "new_network_login", severity: "medium", ip: "196.43.180.2", email: "g.auma@glassociates.co.ug", method: "POST", path: "/api/auth/login", detail: { summary: "g.auma@glassociates.co.ug (finance) signed in from a network not seen before for this account" }, acknowledged: false },
+    { id: 1, at: _ago(420), type: "login_success", severity: "info", ip: "102.85.14.6", email: "s.nakato@glassociates.co.ug", method: "POST", path: "/api/auth/login", detail: {}, acknowledged: false },
+  ],
+};
+export const securityApi = {
+  overview: () => {
+    const sev = { info: 0, low: 0, medium: 0, high: 0, critical: 0 };
+    _sec.events.forEach((e) => { sev[e.severity]++; });
+    const byType = Object.entries(_sec.events.reduce((a, e) => (e.type === "login_success" ? a : { ...a, [e.type]: (a[e.type] || 0) + 1 }), {})).map(([type, n]) => ({ type, n }));
+    return respond({
+      monitoring: true, demo: true, config: _sec.config, mailReady: false,
+      rules: { accountLockout: { failures: 5, windowMin: 15, lockMin: 15 }, ipFailures: { failures: 12, distinctAccounts: 4, windowMin: 15, blockMin: 60 }, probes: { count: 5, windowMin: 10, blockMin: 1440 }, attackPatterns: { count: 3, windowMin: 10, blockMin: 1440 }, badTokens: { count: 5, windowMin: 10, blockMin: 60 }, deniedWrites: { count: 10, windowMin: 10 }, massDelete: { count: 10, windowMin: 10 }, retentionDays: 90 },
+      you: { ip: "102.85.14.6", source: "cloudflare", allowlisted: false },
+      last24h: { bySeverity: sev, byType, topIps: [{ ip: "185.220.101.34", n: 9, serious: 1, last: _ago(38) }, { ip: "45.148.10.77", n: 6, serious: 1, last: _ago(190) }, { ip: "91.92.241.10", n: 1, serious: 1, last: _ago(95) }], trend: [] },
+      unacknowledged: _sec.events.filter((e) => !e.acknowledged && ["high", "critical"].includes(e.severity)).length,
+      blocks: _sec.blocks,
+      locked: [{ email: "r.okello@glassociates.co.ug", failures: 5, until: _ago(-9) }],
+    });
+  },
+  events: (p = {}) => {
+    const order = ["info", "low", "medium", "high", "critical"];
+    let l = _sec.events.slice();
+    if (p.severity) l = l.filter((e) => order.indexOf(e.severity) >= order.indexOf(p.severity));
+    if (p.unack === "1") l = l.filter((e) => !e.acknowledged);
+    if (p.hideRoutine === "1") l = l.filter((e) => !["login_success", "record_deleted", "settings_changed", "password_reset_requested"].includes(e.type));
+    if (p.type) l = l.filter((e) => e.type === p.type);
+    if (p.ip) l = l.filter((e) => e.ip === p.ip);
+    if (p.q) { const k = String(p.q).toLowerCase(); l = l.filter((e) => [e.email, e.ip, e.path, e.detail && e.detail.summary].join(" ").toLowerCase().includes(k)); }
+    return respond(l);
+  },
+  ack: (b) => { _sec.events.forEach((e) => { if (b.all || (b.ids || []).includes(e.id)) e.acknowledged = true; }); return respond({ ok: true }); },
+  block: (ip, minutes, reason) => { _sec.blocks.unshift({ ip, reason: reason || "Blocked manually", created_at: new Date().toISOString(), expires_at: minutes ? _ago(-minutes) : null, created_by: "you", hits: 0 }); return respond({ ok: true }); },
+  unblock: (ip) => { _sec.blocks = _sec.blocks.filter((b) => b.ip !== ip); return respond({ ok: true }); },
+  unlock: () => respond({ ok: true }),
+  saveConfig: (c) => { _sec.config = { ..._sec.config, ...c }; return respond(_sec.config); },
+  testAlert: () => respond({ sent: false, reason: "email_not_configured" }),
+};
+
 // Stock management
 export const stockItemsApi = makeCrud("stockItems", "STK");
 export const stockMovementsApi = makeCrud("stockMovements", "MOV");

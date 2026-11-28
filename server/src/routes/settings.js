@@ -7,6 +7,7 @@ import { Router } from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
 import { liveRole, permits, resetRolesCache } from "./crud.js";
+import { audit } from "../security/ids.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -48,6 +49,13 @@ router.put("/", async (req, res, next) => {
       [KEY, JSON.stringify(patch)],
     );
     if (patch.roles) resetRolesCache(); // permission changes take effect immediately
+    // Changes that grant access or put signatures on payment documents are
+    // security-relevant: log them (and alert at high severity).
+    const keys = Object.keys(patch);
+    if (patch.roles) audit(req, "permissions_changed", "high", `${req.user.email} changed role permissions`, { keys }).catch(() => {});
+    if (patch.signatories) audit(req, "signatories_changed", "high", `${req.user.email} changed the approved signatories / signatures`, { keys }).catch(() => {});
+    const other = keys.filter((k) => !["roles", "signatories"].includes(k));
+    if (other.length) audit(req, "settings_changed", "info", `${req.user.email} changed settings: ${other.join(", ")}`, { keys: other }).catch(() => {});
     res.json(rows[0].value);
   } catch (e) { next(e); }
 });

@@ -17,6 +17,8 @@ import settingsRoutes from "./routes/settings.js";
 import notifyRoutes from "./routes/notify.js";
 import accountsRoutes from "./routes/accounts.js";
 import { crudRouter } from "./routes/crud.js";
+import securityRoutes from "./routes/security.js";
+import { idsMiddleware, clientIp, onRateLimited, startHousekeeping } from "./security/ids.js";
 
 // Refuse to run in production with the built-in insecure JWT signing key —
 // otherwise anyone who knows the default could forge admin tokens.
@@ -41,35 +43,32 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // mobile connections where every kilobyte counts.
 app.use(compression());
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
-app.use(express.json({ limit: "25mb" })); // room for requisition attachments (images/PDFs stored inline as data URLs)
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+// Intrusion detection & response runs before everything else that does work:
+// it identifies the client, turns away scanners/injection payloads and
+// enforces IP blocks (see security/ids.js).
+app.use(idsMiddleware());
+app.use(express.json({ limit: "25mb" })); // room for requisition attachments (images/PDFs stored inline as data URLs)
+
+// Rate limits are keyed on the real client address and logged as security events.
+const limiter = (name, max, message) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.clientIp || clientIp(req),
+  handler: (req, res, _next, options) => {
+    onRateLimited(req, name).catch(() => {});
+    res.status(options.statusCode).json(message);
+  },
+});
 
 // Throttle abuse: 300 requests / 15 min per IP across the API.
-app.use("/api", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests — please slow down and try again shortly." },
-}));
-
+app.use("/api", limiter("api", 300, { error: "Too many requests — please slow down and try again shortly." }));
 // Stricter limiter for auth to blunt brute-force attempts.
-app.use("/api/auth/login", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many sign-in attempts — please wait a few minutes." },
-}));
-
+app.use("/api/auth/login", limiter("sign-in", 20, { error: "Too many sign-in attempts — please wait a few minutes." }));
 // Limit password-reset requests to blunt abuse / email flooding.
-app.use("/api/auth/forgot-password", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many reset requests — please wait a few minutes." },
-}));
+app.use("/api/auth/forgot-password", limiter("password-reset", 5, { error: "Too many reset requests — please wait a few minutes." }));
 
 // ---- Health check ----
 app.get("/api/health", async (req, res) => {
@@ -86,6 +85,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/notify", notifyRoutes);
 app.use("/api/accounts", accountsRoutes);
+app.use("/api/security", securityRoutes);
 
 // Domain collections (table name -> REST resource path).
 const COLLECTIONS = {
@@ -143,6 +143,7 @@ if (fs.existsSync(path.join(distDir, "index.html"))) {
 app.use(notFound);
 app.use(errorHandler);
 
+startHousekeeping();
 const server = app.listen(config.port, () => {
   console.log(`IHRSM API listening on http://localhost:${config.port}`);
   console.log(`CORS allowed origins: ${config.corsOrigin.join(", ")}`);

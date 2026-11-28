@@ -10,6 +10,7 @@ import { signToken, requireAuth, EXITED_MSG } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { sendResetMail } from "../email.js";
 import { passwordProblem, isWeakPassword } from "../passwordPolicy.js";
+import { accountLock, onLoginFailed, onLoginSuccess, record, isAllowlisted, clientIp } from "../security/ids.js";
 
 const router = Router();
 
@@ -27,6 +28,16 @@ router.post(
     try {
       const { email, password } = req.body;
       const remember = req.body.remember === true || req.body.remember === "true";
+      // Account lockout after repeated failures (applies to any email, so it
+      // doesn't reveal which addresses have accounts).
+      // Allow-listed (office) networks are exempt, so an outsider can't keep
+      // staff locked out by deliberately failing sign-ins.
+      const lock = isAllowlisted(req.clientIp || clientIp(req)) ? null : await accountLock(email);
+      if (lock) {
+        record("login_while_locked", "low", req, { email, summary: `Sign-in attempt on locked account ${String(email).toLowerCase()}` }).catch(() => {});
+        const mins = Math.max(1, Math.ceil((lock.until - Date.now()) / 60000));
+        return res.status(429).json({ error: `Too many failed sign-in attempts on this account. Try again in ${mins} minute${mins === 1 ? "" : "s"}, or use “Forgot password”.`, code: "ACCOUNT_LOCKED" });
+      }
       const { rows } = await query(
         `SELECT id, email, password_hash, name, role, emp_id, token_epoch, must_change_password FROM users WHERE lower(email) = lower($1)`,
         [email],
@@ -34,15 +45,22 @@ router.post(
       const user = rows[0];
       // Constant-ish comparison path — always run bcrypt to avoid user enumeration.
       const ok = user ? await bcrypt.compare(password, user.password_hash) : await bcrypt.compare(password, "$2a$10$invalidinvalidinvalidinvalidinv");
-      if (!user || !ok) return res.status(401).json({ error: "Invalid email or password." });
+      if (!user || !ok) {
+        await onLoginFailed(req, email, user ? "wrong password" : "no such account");
+        return res.status(401).json({ error: "Invalid email or password." });
+      }
       if (user.emp_id) {
         const emp = await query(`SELECT doc->>'status' AS status FROM employees WHERE id = $1`, [user.emp_id]);
-        if (emp.rows[0] && emp.rows[0].status === "Terminated") return res.status(403).json({ error: EXITED_MSG, code: "ACCOUNT_DEACTIVATED" });
+        if (emp.rows[0] && emp.rows[0].status === "Terminated") {
+          record("former_staff_login", "medium", req, { email: user.email, summary: `Former staff member ${user.email} tried to sign in` }).catch(() => {});
+          return res.status(403).json({ error: EXITED_MSG, code: "ACCOUNT_DEACTIVATED" });
+        }
       }
       const token = signToken(user, { expiresIn: remember ? (process.env.JWT_REMEMBER_EXPIRES || "30d") : config.jwt.expiresIn });
       // A default / weak password must be replaced before the account can be used.
       const mustChange = !!user.must_change_password || isWeakPassword(password, user.email);
       await query(`UPDATE users SET last_login_at = now(), must_change_password = $2 WHERE id = $1`, [user.id, mustChange]);
+      await onLoginSuccess(req, user);
       res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, empId: user.emp_id, mustChangePassword: mustChange } });
     } catch (e) { next(e); }
   },
@@ -58,6 +76,7 @@ router.post(
   async (req, res, next) => {
     const generic = { ok: true, message: "If that email has an account, a password-reset link is on its way." };
     const emailIn = req.body.email;
+    record("password_reset_requested", "info", req, { email: emailIn, summary: `Password reset requested for ${String(emailIn).toLowerCase()}` }).catch(() => {});
     try {
       const { rows } = await query(`SELECT id, email, name FROM users WHERE lower(email) = lower($1)`, [emailIn]);
       const user = rows[0];
@@ -115,6 +134,8 @@ router.post(
       await query(`UPDATE users SET password_hash = $1, must_change_password = false, updated_at = now() WHERE id = $2`, [hash, row.user_id]);
       // Burn this token and any other outstanding tokens for the user.
       await query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [row.user_id]);
+      // Proving control of the mailbox clears any lockout on the account.
+      await record("account_unlocked", "info", req, { email: u.rows[0] && u.rows[0].email, detail: { by: "password reset" }, summary: "Password reset by email link" });
       res.json({ ok: true });
     } catch (e) { next(e); }
   },
@@ -158,6 +179,7 @@ router.post(
       );
       await query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [user.id]);
       const u = upd.rows[0];
+      record("password_changed", "info", req, { summary: `${u.email} changed their password` }).catch(() => {});
       res.json({ ok: true, token: signToken(u), user: { id: u.id, email: u.email, name: u.name, role: u.role, empId: u.emp_id, mustChangePassword: false } });
     } catch (e) { next(e); }
   },

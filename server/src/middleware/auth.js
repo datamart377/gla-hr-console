@@ -2,6 +2,7 @@
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 import { query } from "../db.js";
+import { onBadToken } from "../security/ids.js";
 
 // `te` (token epoch) pins the token to the user's current session generation.
 // Bumping users.token_epoch (an admin "revoke") invalidates every token issued
@@ -24,7 +25,8 @@ export async function requireAuth(req, res, next) {
   let payload;
   try {
     payload = jwt.verify(token, config.jwt.secret);
-  } catch {
+  } catch (err) {
+    onBadToken(req, err).catch(() => {}); // forged/tampered tokens are logged (expiry is normal)
     return res.status(401).json({ error: "Invalid or expired session. Please sign in again." });
   }
   try {
