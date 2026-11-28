@@ -7,7 +7,11 @@ databases:
   - name: ihrsm-db
     databaseName: gla_hr
     user: gla_hr
-    plan: free            # free Postgres (note: free DBs expire after ~30 days)
+    # Paid instance (0.1 CPU / 256 MB, legacy name basic-256mb). Matches the
+    # dashboard. Gives point-in-time recovery and exports (Recovery tab).
+    # Never set this back to "free": free databases have no backups and are
+    # deleted after 30 days.
+    plan: 0.1c-256mb
 
 services:
   - type: web
