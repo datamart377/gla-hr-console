@@ -582,6 +582,9 @@ export function crudRouter(table) {
   router.delete("/:id", async (req, res, next) => {
     try {
       if (!(await mgmtFor(req, table, "delete"))) return res.status(403).json({ error: "You do not have permission to delete this record." });
+      // Finance (and other roles) can add and edit clients, but only HR & Admin
+      // may delete one — whatever the role's "Delete records" setting.
+      if (table === "clients" && !isHrAdmin(req)) return res.status(403).json({ error: "Only HR & Admin can delete a client." });
       if (table === "clients") {
         const used = await query(`SELECT count(*)::int AS n FROM quotations WHERE doc->>'clientId' = $1`, [req.params.id]);
         if (used.rows[0].n) return res.status(409).json({ error: `This client has ${used.rows[0].n} quotation(s) on record and can't be deleted. Mark the client Inactive instead.` });

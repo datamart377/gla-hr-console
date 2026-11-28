@@ -6921,7 +6921,7 @@ function ClientRegister({ ctx }) {
                   ? <Btn size="sm" variant="success" onClick={() => toggleActive(c)} title="Reactivate — allow new quotations"><Check size={13} />Activate</Btn>
                   : <Btn size="sm" variant="warning" onClick={() => toggleActive(c)} title="Deactivate — no new quotations"><Ban size={13} />Deactivate</Btn>)}
                 {manage && <Btn size="sm" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={c.id} />)} title="Edit"><Pencil size={13} /></Btn>}
-                {canDo(ctx, "deleteRecords") && (stats[c.id].n
+                {isHrOrAdmin(ctx) && canDo(ctx, "deleteRecords") && (stats[c.id].n
                   ? <Btn size="sm" disabled title="Has quotations — deactivate instead"><Trash2 size={13} /></Btn>
                   : <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={clientsApi} id={c.id} label={c.name} />)} title="Delete"><Trash2 size={13} /></Btn>)}
               </div>
