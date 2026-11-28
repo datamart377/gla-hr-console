@@ -152,7 +152,11 @@ function shapeQuotation(req, patch, existing) {
   delete out.approval; delete out.rejection; delete out.initiatedBy; delete out.submittedAt; delete out.needsApproval;
   const cur = existing || {};
   const from = existing ? (QUOTE_STATES.includes(cur.status) ? cur.status : "draft") : null;
-  const next = "status" in out ? out.status : (from || "draft");
+  let next = "status" in out ? out.status : (from || "draft");
+  // Quotations HR & Admin create themselves are approved by them by default.
+  if (approver && !existing && ["draft", "pending_approval"].includes(next)) next = "approved";
+  // ...and so is one of their own drafts they save again (not one Finance prepared).
+  if (approver && existing && from === "draft" && next === "draft" && !cur.needsApproval) next = "approved";
   if (!QUOTE_STATES.includes(next)) return { error: "Unknown quotation status." };
   if (!existing) { out.initiatedBy = me; out.needsApproval = !approver; }
   if (!approver) {

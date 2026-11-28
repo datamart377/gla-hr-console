@@ -6790,6 +6790,7 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
             ) },
             { label: "", render: (x) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {approver && x._st === "draft" && !x.needsApproval && <Btn size="sm" variant="success" onClick={() => quoteDecide(ctx, x, true)} title="Approve"><Check size={13} />Approve</Btn>}
                 {approver && x._st === "pending_approval" && <>
                   <Btn size="sm" variant="success" onClick={() => quoteDecide(ctx, x, true)} title="Approve"><Check size={13} />Approve</Btn>
                   <Btn size="sm" variant="danger" onClick={() => quoteDecide(ctx, x, false)} title="Return to the preparer as a draft"><X size={13} /></Btn>
@@ -7123,14 +7124,26 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
       footer={<>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
-        {(!existing || f.status === "draft") && <Btn disabled={busy} onClick={() => save("draft")}>Save draft</Btn>}
-        {approver
-          ? <Btn variant="primary" disabled={busy} onClick={() => save(existing && f.status !== "draft" ? f.status : "sent")}><Send size={15} />{busy ? "Saving…" : existing && f.status !== "draft" ? "Save changes" : "Save as sent"}</Btn>
-          : <Btn variant="primary" disabled={busy} onClick={() => save("pending_approval")}><Send size={15} />{busy ? "Saving…" : "Submit for approval"}</Btn>}
+        {approver ? (() => {
+          // HR & Admin: their own quotations are approved on saving. A quotation
+          // Finance prepared keeps its state (approve it from the list/preview).
+          const fromFinance = existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status);
+          const fresh = !existing || (f.status === "draft" && !fromFinance);
+          return <>
+            {fresh
+              ? <Btn disabled={busy} onClick={() => save("approved")}><Check size={15} />{busy ? "Saving…" : "Save & approve"}</Btn>
+              : <Btn disabled={busy} onClick={() => save(f.status)}><Check size={15} />{busy ? "Saving…" : "Save changes"}</Btn>}
+            {(fresh || f.status === "approved") && <Btn variant="primary" disabled={busy} onClick={() => save("sent")}><Send size={15} />Save as sent</Btn>}
+          </>;
+        })() : <>
+          {(!existing || f.status === "draft") && <Btn disabled={busy} onClick={() => save("draft")}>Save draft</Btn>}
+          <Btn variant="primary" disabled={busy} onClick={() => save("pending_approval")}><Send size={15} />{busy ? "Saving…" : "Submit for approval"}</Btn>
+        </>}
       </>}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {f.status === "draft" && f.rejection && <Banner Icon={AlertTriangle} tone="warning"><b>Returned by {f.rejection.name}{f.rejection.at ? ` on ${fmtDate(f.rejection.at)}` : ""}:</b> {f.rejection.reason || "no reason given"}. Make the changes, then submit it again.</Banner>}
         {!approver && <Banner Icon={ClipboardCheck}>HR &amp; Admin approve quotations before they're issued. Until then it stays a draft — watermarked and unsigned.</Banner>}
+        {approver && !(existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status)) && f.status !== "sent" && <Banner Icon={ClipboardCheck}>As HR &amp; Admin, quotations you prepare are approved by you when saved — they print signed, without the DRAFT watermark.</Banner>}
         <Card style={{ padding: 0 }}>
           <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -7236,6 +7249,7 @@ function QuotationPreview({ ctx, q: raw }) {
       {approver && q.status === "pending_approval" && <Btn variant="success" onClick={() => decide(true)}><Check size={14} />Approve</Btn>}
       {!approver && q.status === "draft" && <Btn variant="primary" onClick={() => setStatus("pending_approval")}><Send size={14} />Submit for approval</Btn>}
       {!approver && q.status === "pending_approval" && <Btn onClick={() => setStatus("draft")} title="Take it back to make changes"><RotateCcw size={14} />Withdraw</Btn>}
+      {approver && q.status === "draft" && !q.needsApproval && <Btn variant="success" onClick={() => setStatus("approved")}><Check size={14} />Approve</Btn>}
       {((approver && q.status === "draft") || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
       {(q.status === "sent") && <Btn variant="danger" onClick={() => setStatus("declined")}><X size={14} />Declined</Btn>}
       {(q.status === "sent") && <Btn variant="success" onClick={() => setStatus("accepted")}><Check size={14} />Accepted</Btn>}
@@ -7297,7 +7311,7 @@ function QuotationPreview({ ctx, q: raw }) {
             {sig.contact && <div style={{ fontSize: 11.5, color: body }}>{sig.contact}</div>}
           </div>
           {sigImg && !quoteIsDraft(q) && <img src={sigImg} alt={`Signature of ${sig.name}`} style={{ height: 70 }} />}
-          {quoteIsDraft(q) && <span style={{ fontSize: 11.5, color: "var(--muted)", fontStyle: "italic" }}>{q.status === "pending_approval" ? "Draft — awaiting HR & Admin approval; signature added once approved" : approver ? "Draft — signature added when saved as sent" : "Draft — signature added once HR & Admin approve it"}</span>}
+          {quoteIsDraft(q) && <span style={{ fontSize: 11.5, color: "var(--muted)", fontStyle: "italic" }}>{q.status === "pending_approval" ? "Draft — awaiting HR & Admin approval; signature added once approved" : approver ? "Draft — signature added once you approve it" : "Draft — signature added once HR & Admin approve it"}</span>}
         </div>
       </div>
     </Modal>
