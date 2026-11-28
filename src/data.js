@@ -1650,3 +1650,151 @@ export const formatDistance = (m) => (m == null ? "—" : m >= 1000 ? (m / 1000)
 export const timeToMinutes = (hhmm) => { if (!hhmm) return null; const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
 export const minutesToTime = (mins) => { if (mins == null || isNaN(mins)) return "—"; const h = Math.floor(mins / 60), m = Math.round(mins % 60); return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; };
 export const LATE_THRESHOLD_MIN = 8 * 60 + 30; // 08:30
+
+/* ================================ TENANCY ================================ */
+// The Administrator's personal apartments: properties & units, tenants,
+// leases, rent charges/payments/arrears, deposits & move-out, maintenance.
+export const UNIT_TYPES = ["Studio", "1 bedroom", "2 bedroom", "3 bedroom", "4+ bedroom", "Bedsitter", "Shop / office", "Other"];
+export const RENT_CYCLES = [[1, "Monthly"], [3, "Quarterly"], [6, "Half-yearly"], [12, "Yearly"]];
+export const PAY_METHODS = ["Cash", "Mobile Money", "Bank transfer", "Cheque"];
+export const PAY_KINDS = [["rent", "Rent / charges"], ["deposit", "Security deposit"]];
+export const MAINT_PRIORITIES = ["Low", "Normal", "High", "Urgent"];
+export const MAINT_STATUSES = [["open", "Open"], ["in_progress", "In progress"], ["done", "Done"]];
+export const cycleLabel = (n) => (RENT_CYCLES.find(([m]) => m === Number(n)) || [0, `Every ${n} months`])[1];
+
+const _iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Add whole months to a YYYY-MM-DD date, clamping to the month's last day.
+export function addMonthsISO(iso, n) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m) return iso;
+  const t = new Date(y, m - 1 + n, 1);
+  const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+  return _iso(new Date(t.getFullYear(), t.getMonth(), Math.min(d || 1, last)));
+}
+export const daysBetween = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+
+export function normalizeLease(l = {}) {
+  return {
+    id: l.id, tenantId: l.tenantId || "", propertyId: l.propertyId || "", unitId: l.unitId || "",
+    startDate: l.startDate || "", endDate: l.endDate || "",
+    rent: Number(l.rent) || 0, cycleMonths: Number(l.cycleMonths) > 0 ? Number(l.cycleMonths) : 1,
+    deposit: Number(l.deposit) || 0, status: ["active", "ended"].includes(l.status) ? l.status : "active",
+    moveInNotes: l.moveInNotes || "", notes: l.notes || "",
+    moveOut: l.moveOut || null, // { date, notes, deductions:[{description, amount}], refund, refundDate, refundMethod, arrearsFromDeposit }
+    createdAt: l.createdAt || "", updatedAt: l.updatedAt || "",
+  };
+}
+// Billing stops only at move-out. A tenant still in occupation after the lease
+// end date keeps being charged (the lease shows as expired until renewed).
+const leaseStop = (l) => (l.status === "ended" && l.moveOut && l.moveOut.date) ? l.moveOut.date : "";
+// Rent charges due so far: one per billing cycle, due on the start date and
+// every cycle after it, up to today and before the lease stops.
+export function rentCharges(lease, today = TODAY) {
+  const l = normalizeLease(lease);
+  if (!l.startDate || !l.rent) return [];
+  const stop = leaseStop(l), out = [];
+  for (let i = 0; i < 600; i++) {
+    const due = addMonthsISO(l.startDate, i * l.cycleMonths);
+    if (due > today || (stop && due >= stop && i > 0)) break;
+    const periodEnd = addMonthsISO(l.startDate, (i + 1) * l.cycleMonths);
+    out.push({ date: due, kind: "rent", description: `Rent ${l.cycleMonths === 1 ? "for" : `(${cycleLabel(l.cycleMonths).toLowerCase()})`} ${fmtPeriod(due, addDaysISO(periodEnd, -1))}`, amount: l.rent * l.cycleMonths });
+  }
+  return out;
+}
+export const addDaysISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return _iso(d); };
+function fmtPeriod(a, b) {
+  const f = (s) => new Date(s + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return `${f(a)} – ${f(b)}`;
+}
+// Full statement for a lease: charges (rent + extra charges) and rent payments
+// in date order with a running balance (positive = tenant owes).
+export function leaseLedger(lease, payments = [], charges = [], today = TODAY) {
+  const l = normalizeLease(lease);
+  const rows = [
+    ...rentCharges(l, today).map((c) => ({ ...c, debit: c.amount, credit: 0 })),
+    ...charges.filter((c) => c.leaseId === l.id).map((c) => ({ date: c.date, kind: "charge", description: c.description || "Charge", ref: c.id, debit: Number(c.amount) || 0, credit: 0 })),
+    ...payments.filter((p) => p.leaseId === l.id && (p.kind || "rent") === "rent").map((p) => ({ date: p.date, kind: "payment", description: `Payment — ${p.method || "Cash"}${p.reference ? ` (${p.reference})` : ""}`, ref: p.receiptNo || p.id, debit: 0, credit: Number(p.amount) || 0 })),
+  ];
+  // Deposit applied to arrears at move-out counts as a payment.
+  if (l.moveOut && Number(l.moveOut.arrearsFromDeposit) > 0) rows.push({ date: l.moveOut.date, kind: "payment", description: "Settled from security deposit", ref: "", debit: 0, credit: Number(l.moveOut.arrearsFromDeposit) });
+  rows.sort((a, b) => (a.date === b.date ? (a.credit ? 1 : 0) - (b.credit ? 1 : 0) : a.date < b.date ? -1 : 1));
+  let bal = 0;
+  rows.forEach((r) => { bal += r.debit - r.credit; r.balance = bal; });
+  return rows;
+}
+// Balance, arrears age and next due date for a lease.
+export function leaseStatus(lease, payments = [], charges = [], today = TODAY) {
+  const l = normalizeLease(lease);
+  const rows = leaseLedger(l, payments, charges, today);
+  const charged = rows.reduce((s, r) => s + r.debit, 0), paid = rows.reduce((s, r) => s + r.credit, 0);
+  const balance = charged - paid;
+  // Oldest charge not yet covered by payments (first-in, first-out).
+  let left = paid, overdueSince = "";
+  for (const r of rows.filter((x) => x.debit)) { if (left >= r.debit) { left -= r.debit; continue; } overdueSince = r.date; break; }
+  const daysOverdue = balance > 0 && overdueSince ? Math.max(0, daysBetween(overdueSince, today)) : 0;
+  let nextDue = "";
+  if (l.status === "active" && l.startDate && l.rent) {
+    for (let i = 0; i < 600; i++) { const d = addMonthsISO(l.startDate, i * l.cycleMonths); if (d > today) { nextDue = d; break; } }
+  }
+  const depositPaid = payments.filter((p) => p.leaseId === l.id && p.kind === "deposit").reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const mo = l.moveOut || {};
+  const deducted = (mo.deductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0) + (Number(mo.arrearsFromDeposit) || 0);
+  const depositHeld = Math.max(0, depositPaid - deducted - (Number(mo.refund) || 0));
+  const daysToEnd = l.endDate ? daysBetween(today, l.endDate) : null;
+  return { balance, charged, paid, overdueSince, daysOverdue, nextDue, depositPaid, depositHeld, depositShort: Math.max(0, l.deposit - depositPaid), daysToEnd, rows };
+}
+export function nextReceiptNo(payments = []) {
+  const nums = payments.map((p) => parseInt(String(p.receiptNo || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+  return "RCT-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, "0");
+}
+export function nextTenancyId(list = [], prefix) {
+  const re = new RegExp(`^${prefix}-(\\d+)$`);
+  const nums = list.map((x) => { const m = re.exec(String(x.id || "")); return m ? Number(m[1]) : NaN; }).filter((n) => !isNaN(n));
+  return `${prefix}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
+}
+
+// ---- demo data (offline demo only) ----
+{
+  const t = TODAY;
+  const ago = (months, day = 1) => { const d = new Date(t + "T00:00:00"); d.setDate(1); d.setMonth(d.getMonth() - months); d.setDate(day); return _iso(d); };
+  data.tenancyMeta = [{ id: "profile", landlordName: "Robert Okello", phone: "+256 772 413 501", email: "", address: "Kyanja, Kampala", paymentInstructions: "Mobile Money: 0772 413 501 (Robert Okello) · Stanbic Bank A/C 9030001234501" }];
+  data.tenancyProperties = [
+    { id: "PRP-001", name: "Kyanja Apartments", location: "Kyanja, Kampala", notes: "Block of 6 apartments", units: [
+      { id: "A1", label: "A1", type: "2 bedroom", rent: 900000 }, { id: "A2", label: "A2", type: "2 bedroom", rent: 900000 },
+      { id: "B1", label: "B1", type: "1 bedroom", rent: 650000 }, { id: "B2", label: "B2", type: "1 bedroom", rent: 650000 },
+      { id: "C1", label: "C1", type: "Studio", rent: 450000 }, { id: "C2", label: "C2", type: "Studio", rent: 450000 },
+    ] },
+    { id: "PRP-002", name: "Najjera Rentals", location: "Najjera, Wakiso", notes: "", units: [
+      { id: "1", label: "Unit 1", type: "Bedsitter", rent: 300000 }, { id: "2", label: "Unit 2", type: "Bedsitter", rent: 300000 },
+    ] },
+  ];
+  data.tenancyTenants = [
+    { id: "TEN-001", name: "Brian Mukasa", phone: "+256 701 220 991", email: "bmukasa@gmail.com", nationalId: "CM90011234ABC", occupation: "Accountant, Stanbic Bank", emergencyName: "Ruth Mukasa", emergencyPhone: "+256 772 118 230", notes: "" },
+    { id: "TEN-002", name: "Esther Nambi", phone: "+256 752 331 004", email: "", nationalId: "CF93022211DEF", occupation: "Nurse, Mulago", emergencyName: "Paul Nambi", emergencyPhone: "+256 704 551 230", notes: "" },
+    { id: "TEN-003", name: "Kato Ivan", phone: "+256 783 009 121", email: "kato.ivan@yahoo.com", nationalId: "", occupation: "Boda business", emergencyName: "", emergencyPhone: "", notes: "Often pays late — call on the 5th" },
+    { id: "TEN-004", name: "Sarah Achieng", phone: "+256 706 440 812", email: "", nationalId: "CF95010188GHI", occupation: "Teacher", emergencyName: "", emergencyPhone: "", notes: "" },
+  ];
+  data.tenancyLeases = [
+    normalizeLease({ id: "LSE-001", tenantId: "TEN-001", propertyId: "PRP-001", unitId: "A1", startDate: ago(10, 1), endDate: addMonthsISO(ago(10, 1), 12), rent: 900000, cycleMonths: 1, deposit: 900000, moveInNotes: "Freshly painted, all fittings OK." }),
+    normalizeLease({ id: "LSE-002", tenantId: "TEN-002", propertyId: "PRP-001", unitId: "B1", startDate: ago(5, 1), endDate: addMonthsISO(ago(5, 1), 12), rent: 650000, cycleMonths: 3, deposit: 650000 }),
+    normalizeLease({ id: "LSE-003", tenantId: "TEN-003", propertyId: "PRP-001", unitId: "C1", startDate: ago(4, 15), endDate: "", rent: 450000, cycleMonths: 1, deposit: 450000 }),
+    normalizeLease({ id: "LSE-004", tenantId: "TEN-004", propertyId: "PRP-002", unitId: "1", startDate: ago(13, 1), endDate: addMonthsISO(ago(13, 1), 24), rent: 300000, cycleMonths: 1, deposit: 300000 }),
+  ];
+  const pays = []; let r = 0;
+  const pay = (leaseId, tenantId, date, amount, method, kind = "rent", reference = "") => pays.push({ id: `PAY-${String(++r).padStart(3, "0")}`, receiptNo: `RCT-${String(r).padStart(4, "0")}`, leaseId, tenantId, date, amount, method, kind, reference, note: "" });
+  pay("LSE-001", "TEN-001", ago(10, 1), 900000, "Bank transfer", "deposit", "STB-TRF");
+  for (let i = 10; i >= 0; i--) pay("LSE-001", "TEN-001", ago(i, 3), 900000, "Mobile Money", "rent", "MM" + (7000 + i));
+  pay("LSE-002", "TEN-002", ago(5, 1), 650000, "Cash", "deposit");
+  pay("LSE-002", "TEN-002", ago(5, 1), 1950000, "Bank transfer"); pay("LSE-002", "TEN-002", ago(2, 2), 1950000, "Bank transfer");
+  pay("LSE-003", "TEN-003", ago(4, 15), 450000, "Cash", "deposit");
+  pay("LSE-003", "TEN-003", ago(4, 16), 450000, "Mobile Money"); pay("LSE-003", "TEN-003", ago(3, 20), 450000, "Mobile Money"); pay("LSE-003", "TEN-003", ago(2, 28), 200000, "Cash");
+  pay("LSE-004", "TEN-004", ago(13, 1), 300000, "Cash", "deposit");
+  for (let i = 13; i >= 0; i--) pay("LSE-004", "TEN-004", ago(i, 2), 300000, "Cash");
+  data.tenancyPayments = pays;
+  data.tenancyCharges = [{ id: "CHG-001", leaseId: "LSE-003", date: ago(1, 5), description: "Water bill (NWSC) — share", amount: 35000 }];
+  data.tenancyMaintenance = [
+    { id: "MNT-001", propertyId: "PRP-001", unitId: "A2", title: "Repaint and fix kitchen tap before re-letting", description: "", priority: "Normal", status: "in_progress", reportedAt: ago(0, 1), completedAt: "", cost: 0, vendor: "Ssali (painter)", notes: "" },
+    { id: "MNT-002", propertyId: "PRP-001", unitId: "B1", title: "Bathroom shower leaking", description: "Tenant reports constant drip", priority: "High", status: "open", reportedAt: _iso(new Date()), completedAt: "", cost: 0, vendor: "", notes: "" },
+    { id: "MNT-003", propertyId: "PRP-002", unitId: "1", title: "Replace security light", description: "", priority: "Low", status: "done", reportedAt: ago(2, 10), completedAt: ago(2, 12), cost: 85000, vendor: "Local electrician", notes: "" },
+  ];
+}

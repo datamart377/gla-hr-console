@@ -30,3 +30,6 @@ export const downloadRequisitionVoucherPdf = wrap("downloadRequisitionVoucherPdf
 export const downloadPurchaseOrderPdf = wrap("downloadPurchaseOrderPdf");
 export const downloadQuotationPdf = wrap("downloadQuotationPdf");
 export const downloadServiceCertificatePdf = wrap("downloadServiceCertificatePdf");
+export const downloadRentReceiptPdf = wrap("downloadRentReceiptPdf");
+export const downloadTenantStatementPdf = wrap("downloadTenantStatementPdf");
+export const downloadRentRollPdf = wrap("downloadRentRollPdf");

@@ -121,6 +121,14 @@ export const requisitionsApi = makeCrud("requisitions");
 export const purchaseOrdersApi = makeCrud("purchase-orders");
 export const quotationsApi = makeCrud("quotations");
 export const clientsApi = makeCrud("clients");
+// Tenancy (Administrator's personal apartments — admin-only on the server)
+export const tenancyMetaApi = makeCrud("tenancy-meta");
+export const tenancyPropertiesApi = makeCrud("tenancy-properties");
+export const tenancyTenantsApi = makeCrud("tenancy-tenants");
+export const tenancyLeasesApi = makeCrud("tenancy-leases");
+export const tenancyPaymentsApi = makeCrud("tenancy-payments");
+export const tenancyChargesApi = makeCrud("tenancy-charges");
+export const tenancyMaintenanceApi = makeCrud("tenancy-maintenance");
 
 // Payroll register is derived server-side from employees in a full build; here
 // it simply reads the employees collection to mirror the mock's shape.

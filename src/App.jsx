@@ -11,8 +11,9 @@ import {
   Receipt, Send, MapPinned, Paperclip, Image as ImageIcon, FileArchive, ShoppingCart, FileSignature, Copy, ChevronUp,
   Settings as SettingsIcon, Megaphone, Building, ShieldCheck as ShieldCheckIcon, Bell,
   Lock, Unlock,
+  Home,
 } from "lucide-react";
-import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf, downloadServiceCertificatePdf } from "./reportLazy.js";
+import { downloadReportPdf, downloadDocumentPdf, downloadRequisitionVoucherPdf, downloadPurchaseOrderPdf, downloadQuotationPdf, downloadServiceCertificatePdf, downloadRentReceiptPdf, downloadTenantStatementPdf, downloadRentRollPdf } from "./reportLazy.js";
 import { COMPANY, SIGNATORIES, PAYROLL_SIGNATORIES, ALL_SIGNATORIES, setReportCompany, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
 import { downloadBankReportXlsx, downloadScheduleXlsx } from "./bankXlsxLazy.js";
 import { GLA_LOGOTYPE, GLA_MARK, GLA_MARK_BG } from "./header.js";
@@ -20,9 +21,10 @@ import {
   employeesApi, leaveApi, attendanceApi, appraisalsApi,
   stockItemsApi, stockMovementsApi, stockClosingsApi, ledgerColumnsApi, payrollRunsApi, suppliersApi, supplierScheduleApi, supplierRunsApi, advancesApi, settingsApi, bankApprovalsApi, requisitionsApi, purchaseOrdersApi, quotationsApi, clientsApi,
   authApi, notifyApi, accountsApi, securityApi, isLive,
+  tenancyMetaApi, tenancyPropertiesApi, tenancyTenantsApi, tenancyLeasesApi, tenancyPaymentsApi, tenancyChargesApi, tenancyMaintenanceApi,
 } from "./api/client.js";
 import {
-  data, TODAY, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
+  data, TODAY, UNIT_TYPES, RENT_CYCLES, PAY_METHODS, PAY_KINDS, MAINT_PRIORITIES, MAINT_STATUSES, cycleLabel, addMonthsISO, normalizeLease, leaseStatus, nextReceiptNo, nextTenancyId, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
   derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
@@ -315,6 +317,7 @@ const NAV = [
   { id: "quotations", label: "Clients", Icon: Handshake, section: "Finance" },
   { id: "stock", label: "Stock", Icon: Boxes, section: "Operations" },
   { id: "reports", label: "Reports", Icon: BarChart3, section: "Operations" },
+  { id: "tenancy", label: "Tenancy", Icon: Home, section: "Personal" },
   { id: "sessions", label: "Sessions", Icon: ShieldCheck, section: "Admin" },
   { id: "security", label: "Security", Icon: ShieldAlert, section: "Admin" },
   { id: "settings", label: "Settings", Icon: SettingsIcon, section: "Admin" },
@@ -362,6 +365,7 @@ const VIEW_META = {
   appraisals: ["Performance Appraisals", "Competency reviews and ratings"],
   reports: ["HR Reports", "Staff analytics — attendance, workforce, leave and payroll"],
   sessions: ["Accounts & Sessions", "Who can sign in, their last activity, and revoking access"],
+  tenancy: ["Tenancy", "Your apartments — units, tenants, leases, rent and arrears, deposits and repairs (private to you)"],
   security: ["Security Monitoring", "Intrusion detection — threats, blocked addresses, locked accounts and alerts"],
   settings: ["Settings Management", "Roles, permissions, announcements and system configuration"],
   staffFile: ["Electronic Staff File", "Complete staff record"],
@@ -538,17 +542,17 @@ function AdminConsole({ ctx }) {
   const navView = view === "staffFile" ? "employees" : view;
   const _isAdmin = ((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role)) === "admin";
   const _isAdminOrHr = ["admin", "hr"].includes((ctx.currentEmp && ctx.currentEmp.roleId) || (ctx.auth && ctx.auth.role));
-  const nav = NAV.filter((n) => canView(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (!["sessions", "security"].includes(n.id) || _isAdminOrHr));
+  const nav = NAV.filter((n) => canView(ctx, n.id) && (n.id !== "approvals" || _isAdmin) && (n.id !== "tenancy" || _isAdmin) && (!["sessions", "security"].includes(n.id) || _isAdminOrHr));
   const [title, sub] = VIEW_META[view] || STAFF_META[view] || ["", ""];
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (v) => { setView(v); setMenuOpen(false); };
-  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: ClientsPage, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, security: SecurityView, settings: SettingsView,
+  const ViewComp = { dashboard: Dashboard, employees: Employees, approvals: ProfileApprovals, leave: Leave, attendance: Attendance, payroll: Payroll, advances: Advances, suppliers: Suppliers, requisitions: Requisitions, quotations: ClientsPage, stock: Stock, appraisals: Appraisals, reports: Reports, sessions: SessionsView, security: SecurityView, tenancy: TenancyPage, settings: SettingsView,
     myportal: ConsoleMyPortal, myprofile: MyProfileEdit, clockin: MyClockIn, myleave: MyLeave, mypayslip: MyPayslip, myadvance: MyAdvance, myfile: ConsoleMyFile }[view];
   // Defence in depth: even if a view is reached directly (not via the sidebar),
   // enforce the same role gate the navigation uses.
   const viewAllowed = view === "staffFile" || view === "dashboard" ||
-    (canView(ctx, view) && (view !== "approvals" || _isAdmin) && (!["sessions", "security"].includes(view) || _isAdminOrHr));
+    (canView(ctx, view) && (view !== "approvals" || _isAdmin) && (view !== "tenancy" || _isAdmin) && (!["sessions", "security"].includes(view) || _isAdminOrHr));
   return (
     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "252px 1fr", minHeight: "100vh" }}>
       {isMobile
@@ -607,6 +611,774 @@ function fmtSessionExpiry(ms) {
   if (h >= 1) return `in ${h} hour${h === 1 ? "" : "s"}`;
   return `in ${Math.max(1, Math.floor(diff / 60000))} min`;
 }
+/* ================================ TENANCY ================================ */
+// The Administrator's personal apartments. Data is loaded only on this page
+// (never into the shared store) and the server serves it to the admin role only.
+const T_APIS = {
+  meta: () => tenancyMetaApi, properties: () => tenancyPropertiesApi, tenants: () => tenancyTenantsApi, leases: () => tenancyLeasesApi,
+  payments: () => tenancyPaymentsApi, charges: () => tenancyChargesApi, maintenance: () => tenancyMaintenanceApi,
+};
+const tUnitLabel = (t, propertyId, unitId) => {
+  const p = (t.properties || []).find((x) => x.id === propertyId);
+  const u = p && (p.units || []).find((x) => x.id === unitId);
+  return p ? `${p.name} · ${u ? u.label : unitId}` : unitId || "—";
+};
+const tTenant = (t, id) => (t.tenants || []).find((x) => x.id === id) || { name: "—" };
+const tActiveLeaseFor = (t, propertyId, unitId) => (t.leases || []).find((l) => l.status !== "ended" && l.propertyId === propertyId && l.unitId === unitId);
+const tStatus = (t, l) => leaseStatus(l, t.payments, t.charges);
+
+function TenancyPage({ ctx }) {
+  const [t, setT] = useState(null);
+  const [err, setErr] = useState("");
+  const [tab, setTab] = useState("overview");
+  const reloadT = async () => {
+    try {
+      const keys = Object.keys(T_APIS);
+      const vals = await Promise.all(keys.map((k) => T_APIS[k]().list()));
+      const next = Object.fromEntries(keys.map((k, i) => [k, vals[i] || []]));
+      next.leases = next.leases.map(normalizeLease);
+      next.profile = (next.meta || []).find((m) => m.id === "profile") || { landlordName: (ctx.currentEmp ? fullName(ctx.currentEmp) : ""), phone: "", email: "", address: "", paymentInstructions: "" };
+      setT(next); setErr("");
+      return next;
+    } catch (e) { setErr(e.message || "Couldn't load tenancy records."); return null; }
+  };
+  useEffect(() => { reloadT(); /* eslint-disable-next-line */ }, []);
+  if (err && !t) return <Card pad><div style={{ color: "var(--danger)" }}>{err}</div></Card>;
+  if (!t) return <Card pad><div style={{ color: "var(--muted)" }}>Loading tenancy records…</div></Card>;
+  const tc = { ...ctx, t, reloadT };
+  const active = t.leases.filter((l) => l.status !== "ended");
+  const arrearsN = active.filter((l) => tStatus(t, l).balance > 0).length;
+  const openMaint = t.maintenance.filter((m) => m.status !== "done").length;
+  const tabs = [["overview", "Overview", 0], ["units", "Properties & units", t.properties.reduce((s, p) => s + (p.units || []).length, 0)], ["tenants", "Tenants", t.tenants.length], ["leases", "Leases", active.length], ["payments", "Payments", t.payments.length], ["maintenance", "Maintenance", openMaint]];
+  return (
+    <>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+        {tabs.map(([id, label, count]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 999, border: "1px solid " + (tab === id ? "var(--brand)" : "var(--border)"), background: tab === id ? "var(--accent-dim)" : "var(--bg-elevated)", color: "var(--text)", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+            {label}{count > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: id === "leases" && arrearsN ? "var(--danger-dim)" : "var(--surface-2)", color: id === "leases" && arrearsN ? "var(--danger)" : "var(--text-2)", borderRadius: 999, padding: "1px 7px" }}>{count}</span>}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <Btn size="sm" onClick={() => ctx.setModal(() => (cc) => <LandlordProfileForm ctx={cc} tc={tc} />)} title="Your name and contacts as printed on receipts and statements"><Pencil size={13} />Landlord details</Btn>
+      </div>
+      {tab === "overview" && <TenancyOverview tc={tc} go={setTab} />}
+      {tab === "units" && <TenancyUnits tc={tc} />}
+      {tab === "tenants" && <TenancyTenants tc={tc} />}
+      {tab === "leases" && <TenancyLeases tc={tc} />}
+      {tab === "payments" && <TenancyPayments tc={tc} />}
+      {tab === "maintenance" && <TenancyMaintenance tc={tc} />}
+    </>
+  );
+}
+
+// Open a tenancy modal; the modal gets the latest tenancy data passed in.
+const tOpen = (tc, render) => tc.setModal(() => (cc) => render(cc));
+
+function TenancyOverview({ tc, go }) {
+  const { t } = tc;
+  const units = t.properties.flatMap((p) => (p.units || []).map((u) => ({ p, u, lease: tActiveLeaseFor(t, p.id, u.id) })));
+  const occupied = units.filter((x) => x.lease).length;
+  const active = t.leases.filter((l) => l.status !== "ended").map((l) => ({ l, s: tStatus(t, l) }));
+  const arrears = active.filter((x) => x.s.balance > 0).sort((a, b) => b.s.balance - a.s.balance);
+  const arrearsTotal = arrears.reduce((s, x) => s + x.s.balance, 0);
+  const monthly = active.reduce((s, x) => s + x.l.rent, 0);
+  const mk = TODAY.slice(0, 7);
+  const collected = t.payments.filter((p) => (p.kind || "rent") === "rent" && String(p.date).slice(0, 7) === mk).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const deposits = t.leases.reduce((s, l) => s + tStatus(t, l).depositHeld, 0);
+  const expiring = active.filter((x) => x.s.daysToEnd != null && x.s.daysToEnd <= 60).sort((a, b) => a.s.daysToEnd - b.s.daysToEnd);
+  const openMaint = t.maintenance.filter((m) => m.status !== "done");
+  const maintCost = t.maintenance.filter((m) => String(m.completedAt || m.reportedAt).slice(0, 4) === TODAY.slice(0, 4)).reduce((s, m) => s + (Number(m.cost) || 0), 0);
+  const rentRoll = () => {
+    const rows = units.map(({ p, u, lease }) => {
+      const s = lease ? tStatus(t, lease) : null;
+      return [p.name, u.label, u.type || "", lease ? tTenant(t, lease.tenantId).name : "VACANT", lease && lease.endDate ? fmtDate(lease.endDate) : lease ? "Open" : "", fmtN(lease ? lease.rent : u.rent), s ? fmtN(Math.max(0, s.balance)) : "", s && s.daysOverdue ? `${s.daysOverdue} days` : "", s ? fmtN(s.depositHeld) : ""];
+    });
+    downloadRentRollPdf({ profile: t.profile, rows, totals: `Occupied ${occupied} of ${units.length} units  ·  Monthly rent roll UGX ${fmtN(monthly)}  ·  Arrears UGX ${fmtN(arrearsTotal)}  ·  Deposits held UGX ${fmtN(deposits)}` });
+  };
+  if (!t.properties.length) {
+    return (
+      <Card pad>
+        <div style={{ textAlign: "center", padding: "28px 10px" }}>
+          <Building2 size={34} style={{ color: "var(--muted)" }} />
+          <h3 style={{ margin: "10px 0 6px", color: "var(--text)" }}>Set up your apartments</h3>
+          <p style={{ color: "var(--text-2)", maxWidth: 520, margin: "0 auto 16px" }}>Add a property and its units, then your tenants and their leases. Rent is charged automatically each period, so you'll always see who has paid and who is in arrears.</p>
+          <Btn variant="primary" onClick={() => tOpen(tc, (cc) => <PropertyForm ctx={cc} tc={tc} id={null} />)}><Plus size={15} />Add your first property</Btn>
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+        <StatCard Icon={Building2} label="Occupancy" value={`${occupied}/${units.length}`} meta={`${units.length ? Math.round((occupied / units.length) * 100) : 0}% occupied · ${units.length - occupied} vacant`} tone="brand" />
+        <StatCard Icon={Coins} label="Collected this month" value={ugxShort(collected)} meta={`of ${ugxShort(monthly)} monthly rent roll`} tone="success" />
+        <StatCard Icon={AlertTriangle} label="Arrears" value={ugxShort(arrearsTotal)} meta={`${arrears.length} tenant${arrears.length === 1 ? "" : "s"} owing`} tone={arrears.length ? "danger" : "success"} />
+        <StatCard Icon={Landmark} label="Deposits held" value={ugxShort(deposits)} meta={`maintenance ${ugxShort(maintCost)} this year`} tone="warning" />
+      </div>
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))" }}>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Arrears" sub="Tenants with money due, oldest debt first" right={<Btn size="sm" onClick={rentRoll}><FileText size={13} />Rent roll PDF</Btn>} />
+          {arrears.length === 0 ? <div style={{ padding: "14px 18px", color: "var(--success)", fontSize: 13 }}>Everyone is paid up.</div> : arrears.map(({ l, s }) => (
+            <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{tTenant(t, l.tenantId).name}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{tUnitLabel(t, l.propertyId, l.unitId)} · overdue since {fmtDate(s.overdueSince)} ({s.daysOverdue} days)</div>
+              </div>
+              <span className="mono" style={{ fontWeight: 700, color: "var(--danger)" }}>{fmtN(s.balance)}</span>
+              <Btn size="sm" variant="success" onClick={() => tOpen(tc, (cc) => <RentPaymentForm ctx={cc} tc={tc} leaseId={l.id} />)}><Plus size={12} />Payment</Btn>
+              <Btn size="sm" onClick={() => tOpen(tc, (cc) => <TenantStatement ctx={cc} tc={tc} leaseId={l.id} />)} title="Statement"><FileText size={12} /></Btn>
+            </div>
+          ))}
+        </Card>
+        <Card style={{ padding: 0 }}>
+          <CardHead title="Leases ending" sub="Expired or ending within 60 days — renew or plan the move-out" />
+          {expiring.length === 0 ? <div style={{ padding: "14px 18px", color: "var(--muted)", fontSize: 13 }}>No leases ending in the next 60 days.</div> : expiring.map(({ l, s }) => (
+            <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)" }}>{tTenant(t, l.tenantId).name}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>{tUnitLabel(t, l.propertyId, l.unitId)} · ends {fmtDate(l.endDate)}</div>
+              </div>
+              <Pill tone={s.daysToEnd < 0 ? "danger" : "warning"}>{s.daysToEnd < 0 ? `Expired ${-s.daysToEnd}d ago` : `${s.daysToEnd} days left`}</Pill>
+              <Btn size="sm" onClick={() => tOpen(tc, (cc) => <LeaseForm ctx={cc} tc={tc} id={l.id} renew />)}><RotateCcw size={12} />Renew</Btn>
+            </div>
+          ))}
+          <div style={{ padding: "12px 18px 6px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center" }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1 }}>Open maintenance · {openMaint.length}</div>
+            <Btn size="sm" variant="ghost" onClick={() => go("maintenance")}>View all<ChevronRight size={13} /></Btn>
+          </div>
+          {openMaint.slice(0, 4).map((m) => (
+            <div key={m.id} style={{ display: "flex", gap: 10, padding: "6px 18px", fontSize: 12.5, alignItems: "center" }}>
+              <Pill tone={m.priority === "Urgent" || m.priority === "High" ? "danger" : "muted"}>{m.priority}</Pill>
+              <span style={{ flex: 1, color: "var(--text)" }}>{m.title}</span>
+              <span style={{ color: "var(--muted)" }}>{tUnitLabel(t, m.propertyId, m.unitId)}</span>
+            </div>
+          ))}
+          <div style={{ height: 10 }} />
+        </Card>
+      </div>
+      <Card style={{ padding: 0 }}>
+        <CardHead title="Units at a glance" sub="Green: paid up · red: in arrears · grey: vacant" />
+        <div style={{ padding: 16, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
+          {units.map(({ p, u, lease }) => {
+            const s = lease ? tStatus(t, lease) : null;
+            const tone = !lease ? "var(--border-strong)" : s.balance > 0 ? "var(--danger)" : "var(--success)";
+            return (
+              <div key={p.id + u.id} style={{ border: "1px solid var(--border)", borderLeft: `4px solid ${tone}`, borderRadius: 10, padding: "10px 12px", background: "var(--surface)", cursor: "pointer" }}
+                onClick={() => lease ? tOpen(tc, (cc) => <TenantStatement ctx={cc} tc={tc} leaseId={lease.id} />) : tOpen(tc, (cc) => <LeaseForm ctx={cc} tc={tc} id={null} propertyId={p.id} unitId={u.id} />)}
+                title={lease ? "Open statement" : "Let this unit"}>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{p.name}</div>
+                <div style={{ fontWeight: 700, color: "var(--text)" }}>{u.label} <span style={{ fontWeight: 400, fontSize: 12, color: "var(--text-2)" }}>{u.type}</span></div>
+                <div style={{ fontSize: 12.5, color: lease ? "var(--text)" : "var(--muted)", marginTop: 4 }}>{lease ? tTenant(t, lease.tenantId).name : "Vacant — click to let"}</div>
+                {s && <div className="mono" style={{ fontSize: 12, marginTop: 2, color: s.balance > 0 ? "var(--danger)" : "var(--success)" }}>{s.balance > 0 ? `owes ${fmtN(s.balance)}` : s.balance < 0 ? `credit ${fmtN(-s.balance)}` : "paid up"}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function LandlordProfileForm({ ctx, tc }) {
+  const [f, setF] = useState({ ...tc.t.profile });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const save = async () => {
+    setBusy(true);
+    const payload = { landlordName: f.landlordName || "", phone: f.phone || "", email: f.email || "", address: f.address || "", paymentInstructions: f.paymentInstructions || "" };
+    try {
+      if ((tc.t.meta || []).some((m) => m.id === "profile")) await tenancyMetaApi.update("profile", payload);
+      else await tenancyMetaApi.create({ id: "profile", ...payload });
+      await tc.reloadT(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal title="Landlord details" sub="Printed at the top of receipts, statements and the rent roll" onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />Save</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Landlord name" full><Input value={f.landlordName} onChange={set("landlordName")} /></Field>
+        <Field label="Phone"><Input value={f.phone} onChange={set("phone")} /></Field>
+        <Field label="Email"><Input value={f.email} onChange={set("email")} /></Field>
+        <Field label="Address" full><Input value={f.address} onChange={set("address")} /></Field>
+        <Field label="How tenants should pay" full hint="Shown on statements, e.g. Mobile Money number or bank account"><Textarea value={f.paymentInstructions} onChange={set("paymentInstructions")} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---- properties & units ---- */
+function TenancyUnits({ tc }) {
+  const { t } = tc;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Toolbar><div style={{ flex: 1 }} /><Btn variant="primary" onClick={() => tOpen(tc, (cc) => <PropertyForm ctx={cc} tc={tc} id={null} />)}><Plus size={16} />Add property</Btn></Toolbar>
+      {t.properties.length === 0 && <Card pad><div style={{ color: "var(--muted)" }}>No properties yet. Use “Add property” to add a building and its units.</div></Card>}
+      {t.properties.map((p) => {
+        const used = t.leases.some((l) => l.propertyId === p.id);
+        return (
+          <Card key={p.id} style={{ padding: 0 }}>
+            <CardHead title={p.name} sub={`${p.location || ""}${p.notes ? ` · ${p.notes}` : ""} · ${(p.units || []).length} unit${(p.units || []).length === 1 ? "" : "s"}`}
+              right={<div style={{ display: "flex", gap: 6 }}>
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <PropertyForm ctx={cc} tc={tc} id={p.id} />)}><Pencil size={13} />Edit</Btn>
+                {!used && <Btn size="sm" onClick={() => tOpen(tc, (cc) => <ConfirmDelete ctx={cc} api={{ remove: async (id) => { await tenancyPropertiesApi.remove(id); await tc.reloadT(); } }} id={p.id} label={p.name} />)} title="Delete property"><Trash2 size={13} /></Btn>}
+              </div>} />
+            <DataTable
+              columns={[
+                { label: "Unit", render: (u) => <b style={{ color: "var(--text)" }}>{u.label}</b> },
+                { label: "Type", render: (u) => u.type || "—" },
+                { label: "Asking rent", num: true, render: (u) => fmtN(u.rent) },
+                { label: "Tenant", render: (u) => { const l = tActiveLeaseFor(t, p.id, u.id); return l ? tTenant(t, l.tenantId).name : <span style={{ color: "var(--muted)" }}>Vacant</span>; } },
+                { label: "Balance", num: true, render: (u) => { const l = tActiveLeaseFor(t, p.id, u.id); if (!l) return "—"; const s = tStatus(t, l); return <span className="mono" style={{ color: s.balance > 0 ? "var(--danger)" : "var(--success)", fontWeight: 600 }}>{fmtN(s.balance)}</span>; } },
+                { label: "Status", render: (u) => { const l = tActiveLeaseFor(t, p.id, u.id); const m = t.maintenance.some((x) => x.propertyId === p.id && x.unitId === u.id && x.status !== "done"); return <div style={{ display: "flex", gap: 5 }}><Pill tone={l ? "success" : "muted"}>{l ? "Occupied" : "Vacant"}</Pill>{m && <Pill tone="warning">Repairs</Pill>}</div>; } },
+                { label: "", render: (u) => { const l = tActiveLeaseFor(t, p.id, u.id); return (
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    {l ? <Btn size="sm" onClick={() => tOpen(tc, (cc) => <TenantStatement ctx={cc} tc={tc} leaseId={l.id} />)}><FileText size={12} />Statement</Btn>
+                      : <Btn size="sm" variant="success" onClick={() => tOpen(tc, (cc) => <LeaseForm ctx={cc} tc={tc} id={null} propertyId={p.id} unitId={u.id} />)}><Plus size={12} />Let unit</Btn>}
+                  </div>
+                ); } },
+              ]}
+              rows={p.units || []}
+              empty="No units — edit the property to add them."
+            />
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function PropertyForm({ ctx, tc, id }) {
+  const existing = id ? tc.t.properties.find((p) => p.id === id) : null;
+  const [f, setF] = useState(() => existing ? { ...existing, units: (existing.units || []).map((u) => ({ ...u })) } : { name: "", location: "", notes: "", units: [{ id: "", label: "", type: UNIT_TYPES[1], rent: "" }] });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const setU = (i, k, v) => setF((s) => ({ ...s, units: s.units.map((u, j) => (j === i ? { ...u, [k]: v } : u)) }));
+  const leased = (uid) => tc.t.leases.some((l) => l.propertyId === id && l.unitId === uid);
+  const save = async () => {
+    if (!String(f.name).trim()) return alert("Enter the property name.");
+    const units = f.units.filter((u) => String(u.label).trim());
+    const labels = units.map((u) => u.label.trim().toLowerCase());
+    if (new Set(labels).size !== labels.length) return alert("Two units have the same name. Give each unit a unique label (e.g. A1, A2).");
+    const taken = new Set(units.map((u) => u.id).filter(Boolean));
+    let n = 1;
+    const withIds = units.map((u) => { if (u.id) return { ...u, label: u.label.trim(), rent: Number(u.rent) || 0 }; while (taken.has(`U${n}`)) n++; taken.add(`U${n}`); return { ...u, id: `U${n}`, label: u.label.trim(), rent: Number(u.rent) || 0 }; });
+    setBusy(true);
+    const payload = { name: f.name.trim(), location: f.location || "", notes: f.notes || "", units: withIds };
+    try {
+      if (existing) await tenancyPropertiesApi.update(id, payload);
+      else await tenancyPropertiesApi.create({ id: nextTenancyId(tc.t.properties, "PRP"), ...payload });
+      await tc.reloadT(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal wide title={existing ? "Edit property" : "Add property"} sub={existing ? existing.id : "A building or plot and the units in it"} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />{existing ? "Save changes" : "Add property"}</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Property name" required><Input value={f.name} onChange={set("name")} placeholder="e.g. Kyanja Apartments" /></Field>
+        <Field label="Location"><Input value={f.location} onChange={set("location")} placeholder="e.g. Kyanja, Kampala" /></Field>
+        <Field label="Notes" full><Input value={f.notes} onChange={set("notes")} /></Field>
+        <FieldsetTitle>Units</FieldsetTitle>
+        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 8 }}>
+          {f.units.map((u, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr auto", gap: 8, alignItems: "center" }}>
+              <Input value={u.label} onChange={(e) => setU(i, "label", e.target.value)} placeholder="Unit (e.g. A1)" />
+              <Select value={u.type} onChange={(e) => setU(i, "type", e.target.value)} options={UNIT_TYPES} />
+              <Input type="number" min={0} value={u.rent} onChange={(e) => setU(i, "rent", e.target.value)} placeholder="Monthly rent (UGX)" />
+              <Btn size="sm" disabled={!!u.id && leased(u.id)} title={u.id && leased(u.id) ? "This unit has lease history and can't be removed" : "Remove unit"} onClick={() => setF((s) => ({ ...s, units: s.units.filter((_, j) => j !== i) }))}><X size={13} /></Btn>
+            </div>
+          ))}
+          <div><Btn size="sm" onClick={() => setF((s) => ({ ...s, units: [...s.units, { id: "", label: "", type: UNIT_TYPES[1], rent: "" }] }))}><Plus size={13} />Add unit</Btn></div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---- tenants ---- */
+function TenancyTenants({ tc }) {
+  const { t } = tc;
+  const [q, setQ] = useState("");
+  const list = t.tenants.filter((x) => !q || [x.name, x.phone, x.email, x.nationalId, x.occupation].join(" ").toLowerCase().includes(q.toLowerCase()));
+  const leaseOf = (id) => t.leases.find((l) => l.tenantId === id && l.status !== "ended") || t.leases.filter((l) => l.tenantId === id).slice(-1)[0];
+  return (
+    <>
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search name, phone, NIN…" />
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" onClick={() => tOpen(tc, (cc) => <TenantForm ctx={cc} tc={tc} id={null} />)}><Plus size={16} />Add tenant</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Tenant", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{x.name}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.occupation || ""}{x.nationalId ? ` · NIN ${x.nationalId}` : ""}</div></div> },
+            { label: "Contact", render: (x) => <div style={{ fontSize: 12.5 }}><div>{x.phone || "—"}</div><div style={{ color: "var(--muted)" }}>{x.email || ""}</div></div> },
+            { label: "Unit", render: (x) => { const l = leaseOf(x.id); return l ? <div style={{ fontSize: 12.5 }}>{tUnitLabel(t, l.propertyId, l.unitId)}{l.status === "ended" && <span style={{ color: "var(--muted)" }}> · moved out</span>}</div> : <span style={{ color: "var(--muted)" }}>No lease</span>; } },
+            { label: "Balance", num: true, render: (x) => { const l = leaseOf(x.id); if (!l) return "—"; const s = tStatus(t, l); return <span className="mono" style={{ fontWeight: 600, color: s.balance > 0 ? "var(--danger)" : "var(--success)" }}>{fmtN(s.balance)}</span>; } },
+            { label: "", render: (x) => { const l = leaseOf(x.id); const used = t.leases.some((ll) => ll.tenantId === x.id); return (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                {l && <Btn size="sm" onClick={() => tOpen(tc, (cc) => <TenantStatement ctx={cc} tc={tc} leaseId={l.id} />)}><FileText size={12} />Statement</Btn>}
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <TenantForm ctx={cc} tc={tc} id={x.id} />)} title="Edit"><Pencil size={12} /></Btn>
+                {!used && <Btn size="sm" onClick={() => tOpen(tc, (cc) => <ConfirmDelete ctx={cc} api={{ remove: async (id) => { await tenancyTenantsApi.remove(id); await tc.reloadT(); } }} id={x.id} label={x.name} />)} title="Delete"><Trash2 size={12} /></Btn>}
+              </div>
+            ); } },
+          ]}
+          rows={list}
+          empty={t.tenants.length ? "No tenants match your search." : "No tenants yet. Use “Add tenant”."}
+        />
+      </Card>
+    </>
+  );
+}
+
+function TenantForm({ ctx, tc, id, onSaved }) {
+  const existing = id ? tc.t.tenants.find((x) => x.id === id) : null;
+  const [f, setF] = useState(existing ? { ...existing } : { name: "", phone: "", email: "", nationalId: "", occupation: "", emergencyName: "", emergencyPhone: "", notes: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const save = async () => {
+    if (!String(f.name).trim()) return alert("Enter the tenant's name.");
+    if (!String(f.phone).trim()) return alert("Enter the tenant's phone number.");
+    setBusy(true);
+    const { id: _i, ...payload } = { ...f, name: f.name.trim() };
+    try {
+      const saved = existing ? await tenancyTenantsApi.update(id, payload) : await tenancyTenantsApi.create({ id: nextTenancyId(tc.t.tenants, "TEN"), ...payload });
+      const nt = await tc.reloadT();
+      if (onSaved) onSaved(saved, nt); else ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal title={existing ? "Edit tenant" : "Add tenant"} sub={existing ? existing.id : "Tenant details"} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />{existing ? "Save changes" : "Add tenant"}</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Full name" required full><Input value={f.name} onChange={set("name")} /></Field>
+        <Field label="Phone" required><Input value={f.phone} onChange={set("phone")} placeholder="+256 7XX XXX XXX" /></Field>
+        <Field label="Email"><Input value={f.email} onChange={set("email")} /></Field>
+        <Field label="National ID (NIN)"><Input value={f.nationalId} onChange={set("nationalId")} /></Field>
+        <Field label="Occupation / employer"><Input value={f.occupation} onChange={set("occupation")} /></Field>
+        <Field label="Emergency contact"><Input value={f.emergencyName} onChange={set("emergencyName")} /></Field>
+        <Field label="Emergency phone"><Input value={f.emergencyPhone} onChange={set("emergencyPhone")} /></Field>
+        <Field label="Notes" full><Textarea value={f.notes} onChange={set("notes")} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---- leases ---- */
+function TenancyLeases({ tc }) {
+  const { t } = tc;
+  const [scope, setScope] = useState("active");
+  const rows = t.leases.filter((l) => scope === "all" || (scope === "ended" ? l.status === "ended" : l.status !== "ended")).map((l) => ({ ...l, _s: tStatus(t, l) }))
+    .sort((a, b) => b._s.balance - a._s.balance);
+  const anyVacant = t.properties.some((p) => (p.units || []).some((u) => !tActiveLeaseFor(t, p.id, u.id)));
+  return (
+    <>
+      <Toolbar>
+        <Select value={scope} onChange={(e) => setScope(e.target.value)} style={{ width: "auto" }} options={[{ value: "active", label: "Current leases" }, { value: "ended", label: "Ended (moved out)" }, { value: "all", label: "All leases" }]} />
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" disabled={!anyVacant} title={anyVacant ? "" : "Every unit is let — add a unit or end a lease first"} onClick={() => tOpen(tc, (cc) => <LeaseForm ctx={cc} tc={tc} id={null} />)}><Plus size={16} />New lease</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Tenant / unit", render: (l) => <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{tTenant(t, l.tenantId).name}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{tUnitLabel(t, l.propertyId, l.unitId)}</div></div> },
+            { label: "Term", render: (l) => <div style={{ fontSize: 12.5 }}>{fmtDate(l.startDate)} → {l.endDate ? fmtDate(l.endDate) : "open"}{l.status !== "ended" && l._s.daysToEnd != null && l._s.daysToEnd <= 60 && <div><Pill tone={l._s.daysToEnd < 0 ? "danger" : "warning"}>{l._s.daysToEnd < 0 ? "Expired" : `Ends in ${l._s.daysToEnd}d`}</Pill></div>}</div> },
+            { label: "Rent", num: true, render: (l) => <div><div className="mono">{fmtN(l.rent)}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{cycleLabel(l.cycleMonths).toLowerCase()}</div></div> },
+            { label: "Deposit", num: true, render: (l) => <div><div className="mono">{fmtN(l._s.depositHeld)}</div>{l._s.depositShort > 0 && l.status !== "ended" && <div style={{ fontSize: 11, color: "var(--warning)" }}>{fmtN(l._s.depositShort)} unpaid</div>}</div> },
+            { label: "Balance", num: true, render: (l) => <div><div className="mono" style={{ fontWeight: 700, color: l._s.balance > 0 ? "var(--danger)" : "var(--success)" }}>{fmtN(l._s.balance)}</div>{l._s.balance > 0 && <div style={{ fontSize: 11, color: "var(--danger)" }}>{l._s.daysOverdue} days overdue</div>}{l.status !== "ended" && l._s.nextDue && l._s.balance <= 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>next due {fmtDate(l._s.nextDue)}</div>}</div> },
+            { label: "", render: (l) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {l.status !== "ended" && <Btn size="sm" variant="success" onClick={() => tOpen(tc, (cc) => <RentPaymentForm ctx={cc} tc={tc} leaseId={l.id} />)}><Plus size={12} />Payment</Btn>}
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <TenantStatement ctx={cc} tc={tc} leaseId={l.id} />)}><FileText size={12} />Statement</Btn>
+                {l.status !== "ended" && <Btn size="sm" onClick={() => tOpen(tc, (cc) => <ChargeForm ctx={cc} tc={tc} leaseId={l.id} />)} title="Add a charge (water, repairs, late fee…)"><Coins size={12} /></Btn>}
+                {l.status !== "ended" && <Btn size="sm" onClick={() => tOpen(tc, (cc) => <LeaseForm ctx={cc} tc={tc} id={l.id} />)} title="Edit / renew"><Pencil size={12} /></Btn>}
+                {l.status !== "ended" && <Btn size="sm" variant="warning" onClick={() => tOpen(tc, (cc) => <MoveOutForm ctx={cc} tc={tc} leaseId={l.id} />)} title="End tenancy & settle deposit"><LogOut size={12} />Move out</Btn>}
+              </div>
+            ) },
+          ]}
+          rows={rows}
+          empty={scope === "ended" ? "No ended leases." : "No current leases. Use “New lease”, or “Let unit” on a vacant unit."}
+        />
+      </Card>
+    </>
+  );
+}
+
+function LeaseForm({ ctx, tc, id, propertyId, unitId, renew, tenantId: presetTenant }) {
+  const { t } = tc;
+  const existing = id ? t.leases.find((l) => l.id === id) : null;
+  const unitRent = (pid, uid) => { const p = t.properties.find((x) => x.id === pid); const u = p && (p.units || []).find((x) => x.id === uid); return u ? Number(u.rent) || 0 : 0; };
+  const [f, setF] = useState(() => existing
+    ? { ...existing, endDate: renew && existing.endDate ? addMonthsISO(existing.endDate, 12) : existing.endDate }
+    : { tenantId: presetTenant || "", propertyId: propertyId || "", unitId: unitId || "", startDate: TODAY, endDate: addMonthsISO(TODAY, 12), rent: unitRent(propertyId, unitId) || "", cycleMonths: 1, deposit: unitRent(propertyId, unitId) || "", moveInNotes: "", notes: "", depositNow: "", depositMethod: "Cash" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const vacant = t.properties.flatMap((p) => (p.units || []).filter((u) => !tActiveLeaseFor(t, p.id, u.id) || (existing && existing.propertyId === p.id && existing.unitId === u.id)).map((u) => ({ value: `${p.id}|${u.id}`, label: `${p.name} · ${u.label} (${u.type}) — ${fmtN(u.rent)}` })));
+  const pickUnit = (v) => { const [pid, uid] = v.split("|"); setF((s) => ({ ...s, propertyId: pid || "", unitId: uid || "", rent: s.rent || unitRent(pid, uid), deposit: s.deposit || unitRent(pid, uid) })); };
+  const freeTenants = t.tenants.filter((x) => !t.leases.some((l) => l.tenantId === x.id && l.status !== "ended" && l.id !== id));
+  const newTenant = () => tOpen(tc, (cc) => <TenantForm ctx={cc} tc={tc} id={null} onSaved={(saved, nt) => cc.setModal(() => (c2) => <LeaseForm ctx={c2} tc={{ ...tc, t: nt || tc.t }} id={id} propertyId={f.propertyId} unitId={f.unitId} tenantId={saved && saved.id} />)} />);
+  const save = async () => {
+    if (!f.tenantId) return alert("Choose the tenant.");
+    if (!f.propertyId || !f.unitId) return alert("Choose the unit.");
+    if (!f.startDate) return alert("Enter the start date.");
+    if (!(Number(f.rent) > 0)) return alert("Enter the monthly rent.");
+    if (f.endDate && f.endDate <= f.startDate) return alert("The end date must be after the start date.");
+    setBusy(true);
+    const now = new Date().toISOString();
+    const payload = { tenantId: f.tenantId, propertyId: f.propertyId, unitId: f.unitId, startDate: f.startDate, endDate: f.endDate || "", rent: Number(f.rent) || 0, cycleMonths: Number(f.cycleMonths) || 1, deposit: Number(f.deposit) || 0, moveInNotes: f.moveInNotes || "", notes: f.notes || "", status: "active", updatedAt: now };
+    try {
+      if (existing) await tenancyLeasesApi.update(id, payload);
+      else {
+        const lid = nextTenancyId(t.leases, "LSE");
+        await tenancyLeasesApi.create({ id: lid, ...payload, createdAt: now });
+        if (Number(f.depositNow) > 0) await tenancyPaymentsApi.create({ id: nextTenancyId(t.payments, "PAY"), receiptNo: nextReceiptNo(t.payments), leaseId: lid, tenantId: f.tenantId, date: f.startDate, amount: Number(f.depositNow), method: f.depositMethod, kind: "deposit", reference: "", note: "Deposit at move-in" });
+      }
+      await tc.reloadT(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal wide title={existing ? (renew ? "Renew lease" : "Edit lease") : "New lease"} sub={existing ? `${tTenant(t, existing.tenantId).name} · ${tUnitLabel(t, existing.propertyId, existing.unitId)}` : "Let a vacant unit to a tenant"} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />{existing ? (renew ? "Renew" : "Save changes") : "Create lease"}</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Tenant" required hint={existing ? undefined : "Tenants already in a unit aren't listed"}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Select value={f.tenantId} disabled={!!existing} onChange={set("tenantId")} style={{ flex: 1, minWidth: 0 }} options={[{ value: "", label: "— select tenant —" }, ...(existing ? t.tenants : freeTenants).map((x) => ({ value: x.id, label: x.name }))]} />
+            {!existing && <Btn onClick={newTenant} title="Add a new tenant"><Plus size={14} />New</Btn>}
+          </div>
+        </Field>
+        <Field label="Unit" required><Select value={f.propertyId && f.unitId ? `${f.propertyId}|${f.unitId}` : ""} disabled={!!existing} onChange={(e) => pickUnit(e.target.value)} options={[{ value: "", label: vacant.length ? "— select vacant unit —" : "No vacant units" }, ...vacant]} /></Field>
+        <Field label="Start date" required><Input type="date" value={f.startDate} disabled={!!existing && !renew && t.payments.some((p) => p.leaseId === id)} onChange={set("startDate")} /></Field>
+        <Field label="End date" hint={renew ? "Extended by 12 months — adjust if needed" : "Leave empty for an open-ended tenancy"}><Input type="date" value={f.endDate} min={f.startDate} onChange={set("endDate")} /></Field>
+        <Field label="Monthly rent (UGX)" required hint={existing ? "A rent change applies to every period, past and future — for a rise from a date, end this lease and start a new one" : undefined}><Input type="number" min={0} value={f.rent} onChange={set("rent")} /></Field>
+        <Field label="Billed"><Select value={String(f.cycleMonths)} onChange={set("cycleMonths")} options={RENT_CYCLES.map(([n, l]) => ({ value: String(n), label: `${l}${n > 1 ? ` (${n} months' rent at a time)` : ""}` }))} /></Field>
+        <Field label="Security deposit required (UGX)"><Input type="number" min={0} value={f.deposit} onChange={set("deposit")} /></Field>
+        {!existing && <Field label="Deposit received now (UGX)" hint="Recorded with a receipt"><div style={{ display: "flex", gap: 8 }}><Input type="number" min={0} value={f.depositNow} onChange={set("depositNow")} style={{ flex: 1 }} /><Select value={f.depositMethod} onChange={set("depositMethod")} options={PAY_METHODS} style={{ width: 150 }} /></div></Field>}
+        <Field label="Condition at move-in" full><Textarea value={f.moveInNotes} onChange={set("moveInNotes")} placeholder="e.g. Freshly painted, 2 keys, meter reading 01234" /></Field>
+        <Field label="Notes" full><Input value={f.notes} onChange={set("notes")} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function RentPaymentForm({ ctx, tc, leaseId }) {
+  const { t } = tc;
+  const leases = t.leases.filter((l) => l.status !== "ended");
+  const [f, setF] = useState({ leaseId: leaseId || "", date: TODAY, amount: "", method: "Mobile Money", kind: "rent", reference: "", note: "" });
+  const [busy, setBusy] = useState(false);
+  const [printAfter, setPrintAfter] = useState(true);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const lease = t.leases.find((l) => l.id === f.leaseId);
+  const s = lease ? tStatus(t, lease) : null;
+  useEffect(() => { if (s && !f.amount) setF((x) => ({ ...x, amount: x.kind === "deposit" ? (s.depositShort || "") : (s.balance > 0 ? s.balance : lease.rent * lease.cycleMonths) })); /* eslint-disable-next-line */ }, [f.leaseId, f.kind]);
+  const save = async () => {
+    if (!lease) return alert("Choose the tenant / lease.");
+    if (!(Number(f.amount) > 0)) return alert("Enter the amount received.");
+    setBusy(true);
+    const payment = { id: nextTenancyId(t.payments, "PAY"), receiptNo: nextReceiptNo(t.payments), leaseId: lease.id, tenantId: lease.tenantId, date: f.date, amount: Number(f.amount), method: f.method, kind: f.kind, reference: f.reference || "", note: f.note || "", createdAt: new Date().toISOString() };
+    try {
+      const saved = await tenancyPaymentsApi.create(payment);
+      const nt = await tc.reloadT();
+      if (printAfter) {
+        const after = nt ? tStatus(nt, lease).balance : null;
+        downloadRentReceiptPdf({ profile: (nt || t).profile, payment: { ...payment, ...(saved || {}) }, tenantName: tTenant(t, lease.tenantId).name, unitLabel: tUnitLabel(t, lease.propertyId, lease.unitId), balanceAfter: after });
+      }
+      ctx.setModal(null);
+    } catch (e) { alert("Couldn't record the payment.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal title="Record payment" sub={lease ? `${tTenant(t, lease.tenantId).name} · ${tUnitLabel(t, lease.propertyId, lease.unitId)}` : "Money received from a tenant"} onClose={() => ctx.setModal(null)}
+      footer={<>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download receipt</label>
+        <Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />{busy ? "Saving…" : "Record payment"}</Btn>
+      </>}>
+      {s && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <Pill tone={s.balance > 0 ? "danger" : "success"}>{s.balance > 0 ? `Owes UGX ${fmtN(s.balance)}` : s.balance < 0 ? `In credit UGX ${fmtN(-s.balance)}` : "Paid up"}</Pill>
+        {s.depositShort > 0 && <Pill tone="warning">Deposit short UGX {fmtN(s.depositShort)}</Pill>}
+        {s.nextDue && <Pill tone="muted">Next due {fmtDate(s.nextDue)}</Pill>}
+      </div>}
+      <div style={formGrid}>
+        <Field label="Tenant / lease" required full><Select value={f.leaseId} disabled={!!leaseId} onChange={(e) => setF((x) => ({ ...x, leaseId: e.target.value, amount: "" }))} options={[{ value: "", label: "— select —" }, ...leases.map((l) => ({ value: l.id, label: `${tTenant(t, l.tenantId).name} — ${tUnitLabel(t, l.propertyId, l.unitId)}` }))]} /></Field>
+        <Field label="For"><Select value={f.kind} onChange={(e) => setF((x) => ({ ...x, kind: e.target.value, amount: "" }))} options={PAY_KINDS.map(([v, l]) => ({ value: v, label: l }))} /></Field>
+        <Field label="Date received" required><Input type="date" value={f.date} max={TODAY} onChange={set("date")} /></Field>
+        <Field label="Amount (UGX)" required><Input type="number" min={0} value={f.amount} onChange={set("amount")} /></Field>
+        <Field label="Method"><Select value={f.method} onChange={set("method")} options={PAY_METHODS} /></Field>
+        <Field label="Reference" hint="Mobile Money / bank transaction ID"><Input value={f.reference} onChange={set("reference")} /></Field>
+        <Field label="Note"><Input value={f.note} onChange={set("note")} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function ChargeForm({ ctx, tc, leaseId }) {
+  const { t } = tc;
+  const lease = t.leases.find((l) => l.id === leaseId);
+  const [f, setF] = useState({ date: TODAY, description: "", amount: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const save = async () => {
+    if (!String(f.description).trim()) return alert("Describe the charge.");
+    if (!(Number(f.amount) > 0)) return alert("Enter the amount.");
+    setBusy(true);
+    try { await tenancyChargesApi.create({ id: nextTenancyId(t.charges, "CHG"), leaseId, tenantId: lease.tenantId, date: f.date, description: f.description.trim(), amount: Number(f.amount) }); await tc.reloadT(); ctx.setModal(null); }
+    catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal title="Add a charge" sub={`${tTenant(t, lease.tenantId).name} · added to what they owe`} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />Add charge</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Description" required full><Input value={f.description} onChange={set("description")} placeholder="e.g. Water bill (NWSC) — October, late payment fee, broken window" /></Field>
+        <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
+        <Field label="Amount (UGX)" required><Input type="number" min={0} value={f.amount} onChange={set("amount")} /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+function TenantStatement({ ctx, tc, leaseId }) {
+  const { t } = tc;
+  const lease = t.leases.find((l) => l.id === leaseId);
+  if (!lease) return null;
+  const tenant = tTenant(t, lease.tenantId);
+  const s = tStatus(t, lease);
+  const pdf = () => downloadTenantStatementPdf({ profile: t.profile, tenantName: tenant.name, tenantPhone: tenant.phone, unitLabel: tUnitLabel(t, lease.propertyId, lease.unitId), lease, rows: s.rows, summary: s });
+  const deposits = t.payments.filter((p) => p.leaseId === lease.id && p.kind === "deposit");
+  return (
+    <Modal wide title={tenant.name} sub={`${tUnitLabel(t, lease.propertyId, lease.unitId)} · ${fmtN(lease.rent)}/month, ${cycleLabel(lease.cycleMonths).toLowerCase()}`} onClose={() => ctx.setModal(null)}
+      footer={<>
+        <Btn onClick={() => ctx.setModal(null)}>Close</Btn>
+        {lease.status !== "ended" && <Btn variant="success" onClick={() => tOpen(tc, (cc) => <RentPaymentForm ctx={cc} tc={tc} leaseId={lease.id} />)}><Plus size={14} />Record payment</Btn>}
+        <Btn variant="primary" onClick={pdf}><FileText size={14} />Statement PDF</Btn>
+      </>}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <Pill tone={s.balance > 0 ? "danger" : "success"}>{s.balance > 0 ? `Owes UGX ${fmtN(s.balance)} · ${s.daysOverdue} days overdue` : s.balance < 0 ? `In credit UGX ${fmtN(-s.balance)}` : "Paid up"}</Pill>
+        <Pill tone="muted">Deposit held UGX {fmtN(s.depositHeld)}{s.depositShort > 0 && lease.status !== "ended" ? ` (UGX ${fmtN(s.depositShort)} unpaid)` : ""}</Pill>
+        {lease.status === "ended" ? <Pill tone="muted">Moved out {fmtDate(lease.moveOut && lease.moveOut.date)}</Pill> : s.nextDue && <Pill tone="info">Next due {fmtDate(s.nextDue)}</Pill>}
+        {tenant.phone && <Pill tone="muted">{tenant.phone}</Pill>}
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 620 }}>
+          <thead><tr>{["Date", "Details", "Ref", "Charged", "Paid", "Balance"].map((h, i) => <th key={h} style={{ textAlign: i >= 3 ? "right" : "left", padding: "7px 8px", borderBottom: "1px solid var(--border-strong)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--text-2)" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {s.rows.length === 0 && <tr><td colSpan={6} style={{ padding: 12, color: "var(--muted)" }}>Nothing charged yet — rent becomes due on {fmtDate(lease.startDate)}.</td></tr>}
+            {s.rows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
+                <td style={{ padding: "6px 8px", color: "var(--text)" }}>{r.description}</td>
+                <td style={{ padding: "6px 8px", color: "var(--muted)" }} className="mono">{r.ref || ""}</td>
+                <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">{r.debit ? fmtN(r.debit) : ""}</td>
+                <td style={{ padding: "6px 8px", textAlign: "right", color: "var(--success)" }} className="mono">{r.credit ? fmtN(r.credit) : ""}</td>
+                <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600, color: r.balance > 0 ? "var(--danger)" : "var(--text)" }} className="mono">{fmtN(r.balance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {(deposits.length > 0 || lease.moveInNotes || (lease.moveOut && lease.moveOut.notes)) && (
+        <div style={{ marginTop: 14, fontSize: 12.5, color: "var(--text-2)", display: "flex", flexDirection: "column", gap: 4 }}>
+          {deposits.map((p) => <div key={p.id}>Deposit received {fmtDate(p.date)}: <b className="mono">UGX {fmtN(p.amount)}</b> ({p.method}, {p.receiptNo})</div>)}
+          {lease.moveInNotes && <div><b>At move-in:</b> {lease.moveInNotes}</div>}
+          {lease.moveOut && lease.moveOut.notes && <div><b>At move-out:</b> {lease.moveOut.notes}</div>}
+          {lease.moveOut && (lease.moveOut.deductions || []).map((d, i) => <div key={i}>Deducted from deposit: {d.description} — UGX {fmtN(d.amount)}</div>)}
+          {lease.moveOut && Number(lease.moveOut.refund) > 0 && <div>Deposit refunded {fmtDate(lease.moveOut.refundDate)}: <b className="mono">UGX {fmtN(lease.moveOut.refund)}</b> ({lease.moveOut.refundMethod})</div>}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// End a tenancy: move-out date, inspection notes, deposit deductions, use the
+// deposit to clear arrears, and refund the rest.
+function MoveOutForm({ ctx, tc, leaseId }) {
+  const { t } = tc;
+  const lease = t.leases.find((l) => l.id === leaseId);
+  const [f, setF] = useState({ date: TODAY, notes: "", deductions: [], useForArrears: true, refundMethod: "Mobile Money", refundDate: TODAY });
+  const [busy, setBusy] = useState(false);
+  if (!lease) return null;
+  // Balance as at the move-out date (rent stops being charged from then).
+  const s = leaseStatus({ ...lease, status: "ended", moveOut: { date: f.date } }, t.payments, t.charges, f.date < TODAY ? TODAY : f.date);
+  const depositPaid = s.depositPaid;
+  const deductions = f.deductions.filter((d) => String(d.description).trim() && Number(d.amount) > 0).map((d) => ({ description: d.description.trim(), amount: Number(d.amount) }));
+  const dedTotal = deductions.reduce((a, d) => a + d.amount, 0);
+  const afterDed = Math.max(0, depositPaid - dedTotal);
+  const arrearsFromDeposit = f.useForArrears && s.balance > 0 ? Math.min(s.balance, afterDed) : 0;
+  const refund = Math.max(0, afterDed - arrearsFromDeposit);
+  const owedAfter = Math.max(0, s.balance - arrearsFromDeposit);
+  const setD = (i, k, v) => setF((x) => ({ ...x, deductions: x.deductions.map((d, j) => (j === i ? { ...d, [k]: v } : d)) }));
+  const save = async () => {
+    if (!f.date) return alert("Enter the move-out date.");
+    if (f.date < lease.startDate) return alert("Move-out can't be before the lease started.");
+    if (!window.confirm(`End ${tTenant(t, lease.tenantId).name}'s tenancy on ${fmtDate(f.date)}?\n\nRent stops from that date and the unit becomes vacant.${refund ? `\nDeposit refund to record: UGX ${fmtN(refund)}.` : ""}${owedAfter ? `\nThe tenant will still owe UGX ${fmtN(owedAfter)}.` : ""}`)) return;
+    setBusy(true);
+    try {
+      await tenancyLeasesApi.update(lease.id, { status: "ended", moveOut: { date: f.date, notes: f.notes, deductions, arrearsFromDeposit, refund, refundDate: refund ? f.refundDate : "", refundMethod: refund ? f.refundMethod : "" }, updatedAt: new Date().toISOString() });
+      await tc.reloadT(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  const row = (k, v, strong, tone) => <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13, fontWeight: strong ? 700 : 400, color: tone || "var(--text)" }}><span>{k}</span><span className="mono">{v}</span></div>;
+  return (
+    <Modal wide title="Move out & settle deposit" sub={`${tTenant(t, lease.tenantId).name} · ${tUnitLabel(t, lease.propertyId, lease.unitId)}`} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><LogOut size={15} />{busy ? "Saving…" : "End tenancy"}</Btn></>}>
+      <div style={{ display: "grid", gap: 18, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+        <div style={formGrid}>
+          <Field label="Move-out date" required><Input type="date" value={f.date} min={lease.startDate} onChange={(e) => setF((x) => ({ ...x, date: e.target.value }))} /></Field>
+          <Field label="Condition at move-out" full><Textarea value={f.notes} onChange={(e) => setF((x) => ({ ...x, notes: e.target.value }))} placeholder="Inspection notes: walls, fittings, keys returned, meter reading…" /></Field>
+          <FieldsetTitle>Deductions from deposit</FieldsetTitle>
+          <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 8 }}>
+            {f.deductions.map((d, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8 }}>
+                <Input value={d.description} onChange={(e) => setD(i, "description", e.target.value)} placeholder="e.g. Repaint living room" />
+                <Input type="number" min={0} value={d.amount} onChange={(e) => setD(i, "amount", e.target.value)} placeholder="UGX" />
+                <Btn size="sm" onClick={() => setF((x) => ({ ...x, deductions: x.deductions.filter((_, j) => j !== i) }))}><X size={13} /></Btn>
+              </div>
+            ))}
+            <div><Btn size="sm" onClick={() => setF((x) => ({ ...x, deductions: [...x.deductions, { description: "", amount: "" }] }))}><Plus size={13} />Add deduction</Btn></div>
+          </div>
+          <label style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--text-2)" }}><input type="checkbox" checked={f.useForArrears} onChange={(e) => setF((x) => ({ ...x, useForArrears: e.target.checked }))} />Use the deposit to clear unpaid rent</label>
+          {refund > 0 && <>
+            <Field label="Refund paid on"><Input type="date" value={f.refundDate} onChange={(e) => setF((x) => ({ ...x, refundDate: e.target.value }))} /></Field>
+            <Field label="Refund method"><Select value={f.refundMethod} onChange={(e) => setF((x) => ({ ...x, refundMethod: e.target.value }))} options={PAY_METHODS} /></Field>
+          </>}
+        </div>
+        <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", alignSelf: "start" }}>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--text)" }}>Settlement</div>
+          {row("Rent & charges owed at move-out", fmtN(Math.max(0, s.balance)), false, s.balance > 0 ? "var(--danger)" : undefined)}
+          {row("Deposit paid", fmtN(depositPaid))}
+          {row("Less deductions", `− ${fmtN(dedTotal)}`)}
+          {row("Less applied to unpaid rent", `− ${fmtN(arrearsFromDeposit)}`)}
+          <div style={{ borderTop: "1px solid var(--border-strong)", marginTop: 6, paddingTop: 6 }}>
+            {row("Refund due to tenant", `UGX ${fmtN(refund)}`, true, "var(--success)")}
+            {row("Tenant still owes", `UGX ${fmtN(owedAfter)}`, true, owedAfter ? "var(--danger)" : "var(--text-2)")}
+          </div>
+          {s.balance < 0 && <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 8 }}>The tenant has UGX {fmtN(-s.balance)} paid in advance — refund it separately if due.</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---- payments ---- */
+function TenancyPayments({ tc }) {
+  const { t } = tc;
+  const months = [...new Set(t.payments.map((p) => String(p.date).slice(0, 7)))].sort().reverse();
+  const [m, setM] = useState(months[0] || TODAY.slice(0, 7));
+  const [q, setQ] = useState("");
+  const list = t.payments.filter((p) => (!m || String(p.date).slice(0, 7) === m) && (!q || [tTenant(t, p.tenantId).name, p.receiptNo, p.reference].join(" ").toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => String(b.date + b.receiptNo).localeCompare(String(a.date + a.receiptNo)));
+  const total = list.filter((p) => (p.kind || "rent") === "rent").reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const dep = list.filter((p) => p.kind === "deposit").reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const receipt = (p) => {
+    const lease = t.leases.find((l) => l.id === p.leaseId) || {};
+    downloadRentReceiptPdf({ profile: t.profile, payment: p, tenantName: tTenant(t, p.tenantId).name, unitLabel: tUnitLabel(t, lease.propertyId, lease.unitId), balanceAfter: null });
+  };
+  return (
+    <>
+      <Toolbar>
+        <SearchBox value={q} onChange={setQ} placeholder="Search tenant, receipt, reference…" />
+        <Select value={m} onChange={(e) => setM(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All months" }, ...(months.includes(TODAY.slice(0, 7)) ? [] : [TODAY.slice(0, 7)]).concat(months).map((k) => ({ value: k, label: monthLabel(k) }))]} />
+        <div style={{ fontSize: 13, color: "var(--text-2)" }}>Rent <b className="mono" style={{ color: "var(--text)" }}>UGX {fmtN(total)}</b>{dep ? <> · deposits <b className="mono">UGX {fmtN(dep)}</b></> : null}</div>
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" disabled={!t.leases.some((l) => l.status !== "ended")} onClick={() => tOpen(tc, (cc) => <RentPaymentForm ctx={cc} tc={tc} />)}><Plus size={16} />Record payment</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Receipt", render: (p) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)" }}>{p.receiptNo || p.id}</span> },
+            { label: "Date", render: (p) => fmtDate(p.date) },
+            { label: "Tenant", render: (p) => { const l = t.leases.find((x) => x.id === p.leaseId) || {}; return <div><div style={{ fontWeight: 600, color: "var(--text)" }}>{tTenant(t, p.tenantId).name}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{tUnitLabel(t, l.propertyId, l.unitId)}</div></div>; } },
+            { label: "For", render: (p) => <Pill tone={p.kind === "deposit" ? "warning" : "muted"}>{p.kind === "deposit" ? "Deposit" : "Rent"}</Pill> },
+            { label: "Method", render: (p) => <div style={{ fontSize: 12.5 }}>{p.method}{p.reference && <div className="mono" style={{ color: "var(--muted)" }}>{p.reference}</div>}</div> },
+            { label: "Amount", num: true, render: (p) => <span className="mono" style={{ fontWeight: 600 }}>{fmtN(p.amount)}</span> },
+            { label: "", render: (p) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => receipt(p)}><Printer size={12} />Receipt</Btn>
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <ConfirmDelete ctx={cc} api={{ remove: async (id) => { await tenancyPaymentsApi.remove(id); await tc.reloadT(); } }} id={p.id} label={`${p.receiptNo} — UGX ${fmtN(p.amount)} from ${tTenant(t, p.tenantId).name}`} />)} title="Delete (entered by mistake)"><Trash2 size={12} /></Btn>
+              </div>
+            ) },
+          ]}
+          rows={list}
+          empty="No payments in this period."
+        />
+      </Card>
+    </>
+  );
+}
+
+/* ---- maintenance ---- */
+function TenancyMaintenance({ tc }) {
+  const { t } = tc;
+  const [st, setSt] = useState("open");
+  const list = t.maintenance.filter((m) => st === "all" || (st === "open" ? m.status !== "done" : m.status === "done"))
+    .sort((a, b) => MAINT_PRIORITIES.indexOf(b.priority) - MAINT_PRIORITIES.indexOf(a.priority) || String(b.reportedAt).localeCompare(String(a.reportedAt)));
+  const yearCost = t.maintenance.filter((m) => String(m.completedAt || m.reportedAt).slice(0, 4) === TODAY.slice(0, 4)).reduce((s, m) => s + (Number(m.cost) || 0), 0);
+  const setStatus = async (m, status) => { await tenancyMaintenanceApi.update(m.id, { status, completedAt: status === "done" ? (m.completedAt || TODAY) : "" }); await tc.reloadT(); };
+  return (
+    <>
+      <Toolbar>
+        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "open", label: "Open & in progress" }, { value: "done", label: "Done" }, { value: "all", label: "All" }]} />
+        <div style={{ fontSize: 13, color: "var(--text-2)" }}>Spent this year <b className="mono" style={{ color: "var(--text)" }}>UGX {fmtN(yearCost)}</b></div>
+        <div style={{ flex: 1 }} />
+        <Btn variant="primary" disabled={!t.properties.length} onClick={() => tOpen(tc, (cc) => <MaintenanceForm ctx={cc} tc={tc} id={null} />)}><Plus size={16} />Log repair</Btn>
+      </Toolbar>
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Issue", render: (m) => <div style={{ maxWidth: 380 }}><div style={{ fontWeight: 600, color: "var(--text)" }}>{m.title}</div>{m.description && <div style={{ fontSize: 12, color: "var(--muted)" }}>{m.description}</div>}</div> },
+            { label: "Unit", render: (m) => <span style={{ fontSize: 12.5 }}>{tUnitLabel(t, m.propertyId, m.unitId)}</span> },
+            { label: "Priority", render: (m) => <Pill tone={m.priority === "Urgent" || m.priority === "High" ? "danger" : m.priority === "Normal" ? "info" : "muted"}>{m.priority}</Pill> },
+            { label: "Reported", render: (m) => <div style={{ fontSize: 12.5 }}>{fmtDate(m.reportedAt)}{m.completedAt && <div style={{ color: "var(--success)" }}>done {fmtDate(m.completedAt)}</div>}</div> },
+            { label: "Cost", num: true, render: (m) => <div><div className="mono">{Number(m.cost) ? fmtN(m.cost) : "—"}</div>{m.vendor && <div style={{ fontSize: 11, color: "var(--muted)" }}>{m.vendor}</div>}</div> },
+            { label: "Status", render: (m) => <Select value={m.status} onChange={(e) => setStatus(m, e.target.value)} style={{ width: "auto", padding: "5px 8px", fontSize: 12.5 }} options={MAINT_STATUSES.map(([v, l]) => ({ value: v, label: l }))} /> },
+            { label: "", render: (m) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <MaintenanceForm ctx={cc} tc={tc} id={m.id} />)} title="Edit"><Pencil size={12} /></Btn>
+                <Btn size="sm" onClick={() => tOpen(tc, (cc) => <ConfirmDelete ctx={cc} api={{ remove: async (id) => { await tenancyMaintenanceApi.remove(id); await tc.reloadT(); } }} id={m.id} label={m.title} />)} title="Delete"><Trash2 size={12} /></Btn>
+              </div>
+            ) },
+          ]}
+          rows={list}
+          empty={st === "open" ? "No open repairs." : "Nothing here."}
+        />
+      </Card>
+    </>
+  );
+}
+
+function MaintenanceForm({ ctx, tc, id }) {
+  const { t } = tc;
+  const existing = id ? t.maintenance.find((m) => m.id === id) : null;
+  const units = t.properties.flatMap((p) => (p.units || []).map((u) => ({ value: `${p.id}|${u.id}`, label: `${p.name} · ${u.label}` })));
+  const [f, setF] = useState(existing ? { ...existing } : { propertyId: "", unitId: "", title: "", description: "", priority: "Normal", status: "open", reportedAt: TODAY, completedAt: "", cost: "", vendor: "", notes: "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const save = async () => {
+    if (!f.propertyId) return alert("Choose the unit.");
+    if (!String(f.title).trim()) return alert("Describe the issue.");
+    setBusy(true);
+    const { id: _i, ...rest } = f;
+    const payload = { ...rest, title: f.title.trim(), cost: Number(f.cost) || 0, completedAt: f.status === "done" ? (f.completedAt || TODAY) : "" };
+    try {
+      if (existing) await tenancyMaintenanceApi.update(id, payload);
+      else await tenancyMaintenanceApi.create({ id: nextTenancyId(t.maintenance, "MNT"), ...payload });
+      await tc.reloadT(); ctx.setModal(null);
+    } catch (e) { alert("Couldn't save.\n\n" + (e.message || "")); setBusy(false); }
+  };
+  return (
+    <Modal title={existing ? "Edit repair" : "Log a repair"} sub="Maintenance request for a unit" onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn><Btn variant="primary" disabled={busy} onClick={save}><Check size={15} />Save</Btn></>}>
+      <div style={formGrid}>
+        <Field label="Unit" required><Select value={f.propertyId ? `${f.propertyId}|${f.unitId}` : ""} onChange={(e) => { const [p, u] = e.target.value.split("|"); setF((s) => ({ ...s, propertyId: p || "", unitId: u || "" })); }} options={[{ value: "", label: "— select unit —" }, ...units]} /></Field>
+        <Field label="Priority"><Select value={f.priority} onChange={set("priority")} options={MAINT_PRIORITIES} /></Field>
+        <Field label="Issue" required full><Input value={f.title} onChange={set("title")} placeholder="e.g. Bathroom shower leaking" /></Field>
+        <Field label="Details" full><Textarea value={f.description} onChange={set("description")} /></Field>
+        <Field label="Reported on"><Input type="date" value={f.reportedAt} onChange={set("reportedAt")} /></Field>
+        <Field label="Status"><Select value={f.status} onChange={set("status")} options={MAINT_STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></Field>
+        <Field label="Fixed by"><Input value={f.vendor} onChange={set("vendor")} placeholder="Plumber, electrician…" /></Field>
+        <Field label="Cost (UGX)"><Input type="number" min={0} value={f.cost} onChange={set("cost")} /></Field>
+        {f.status === "done" && <Field label="Completed on"><Input type="date" value={f.completedAt || TODAY} onChange={set("completedAt")} /></Field>}
+      </div>
+    </Modal>
+  );
+}
+
 /* ======================= Security monitoring (IDS) ======================= */
 const SEC_TYPES = {
   login_failed: "Failed sign-in", login_success: "Sign-in", account_locked: "Account locked", login_while_locked: "Sign-in on locked account",

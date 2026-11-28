@@ -25,7 +25,13 @@ const PREFIXES = {
   supplier_schedule: "SL", supplier_runs: "SPR", advances: "ADV",
   stock_items: "STK", stock_movements: "MOV", stock_closings: "CLS",
   bank_approvals: "BAPP", requisitions: "REQ", quotations: "QUO", clients: "CLI",
+  tenancy_meta: "TM", tenancy_properties: "PRP", tenancy_tenants: "TEN", tenancy_leases: "LSE",
+  tenancy_payments: "PAY", tenancy_charges: "CHG", tenancy_maintenance: "MNT",
 };
+
+// The Administrator's personal tenancy records: visible to the Admin role only.
+// No role permission can open them up, and staff self-service never applies.
+const ADMIN_ONLY = new Set(["tenancy_meta", "tenancy_properties", "tenancy_tenants", "tenancy_leases", "tenancy_payments", "tenancy_charges", "tenancy_maintenance"]);
 
 const genId = (table) => {
   const prefix = PREFIXES[table] || "REC";
@@ -322,6 +328,11 @@ async function updateRequisition(req, res, next) {
 export function crudRouter(table) {
   const router = Router();
   router.use(requireAuth);
+  if (ADMIN_ONLY.has(table)) {
+    router.use((req, res, next) => (req.user && req.user.role === "admin"
+      ? next()
+      : res.status(403).json({ error: "This area is private to the Administrator." })));
+  }
 
   // LIST
   router.get("/", async (req, res, next) => {

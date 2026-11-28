@@ -120,6 +120,14 @@ quotationsApi.create = (record) => _rawQuoteCreate(normalizeQuotation(record));
 export const clientsApi = makeCrud("clients", "CLI");
 const _rawClientCreate = clientsApi.create;
 clientsApi.create = (record) => _rawClientCreate(normalizeClient(record));
+// Tenancy (Administrator's personal apartments)
+export const tenancyMetaApi = makeCrud("tenancyMeta", "TM");
+export const tenancyPropertiesApi = makeCrud("tenancyProperties", "PRP");
+export const tenancyTenantsApi = makeCrud("tenancyTenants", "TEN");
+export const tenancyLeasesApi = makeCrud("tenancyLeases", "LSE");
+export const tenancyPaymentsApi = makeCrud("tenancyPayments", "PAY");
+export const tenancyChargesApi = makeCrud("tenancyCharges", "CHG");
+export const tenancyMaintenanceApi = makeCrud("tenancyMaintenance", "MNT");
 export const purchaseOrdersApi = makeCrud("purchaseOrders", "PO");
 const _rawPoCreate = purchaseOrdersApi.create;
 purchaseOrdersApi.create = (record) => _rawPoCreate(normalizePurchaseOrder(record));

@@ -107,6 +107,14 @@ const COLLECTIONS = {
   "purchase-orders": "purchase_orders",
   quotations: "quotations",
   clients: "clients",
+  // Administrator's personal tenancy module (admin-only, see crud.js)
+  "tenancy-meta": "tenancy_meta",
+  "tenancy-properties": "tenancy_properties",
+  "tenancy-tenants": "tenancy_tenants",
+  "tenancy-leases": "tenancy_leases",
+  "tenancy-payments": "tenancy_payments",
+  "tenancy-charges": "tenancy_charges",
+  "tenancy-maintenance": "tenancy_maintenance",
 };
 for (const [path, table] of Object.entries(COLLECTIONS)) {
   app.use(`/api/${path}`, crudRouter(table));

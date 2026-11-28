@@ -847,3 +847,127 @@ export function downloadPurchaseOrderPdf(po, opts = {}) {
   }
   doc.save(`Purchase-Order-${String(poNo).replace(/[/\\]/g, "-")}${approved ? "" : "-DRAFT"}.pdf`);
 }
+
+/* ------------------------------- tenancy -------------------------------- */
+// Personal landlord documents (rent receipts, tenant statements, rent roll).
+// Deliberately NOT on the Global Link letterhead — these belong to the
+// landlord personally; the header carries the landlord's own details.
+function landlordHeader(doc, profile, title, subtitle) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const p = profile || {};
+  let y = 46;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.setTextColor(...INK);
+  doc.text(String(p.landlordName || "Landlord"), MARGIN, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY);
+  const lines = [p.address, [p.phone, p.email].filter(Boolean).join("  ·  ")].filter(Boolean);
+  lines.forEach((l, i) => doc.text(String(l), MARGIN, y + 15 + i * 12));
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(...BRAND);
+  doc.text(String(title).toUpperCase(), pageW - MARGIN, y, { align: "right" });
+  if (subtitle) { doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY); doc.text(String(subtitle), pageW - MARGIN, y + 15, { align: "right" }); }
+  y += 15 + Math.max(lines.length, 1) * 12 + 6;
+  doc.setDrawColor(...BRAND); doc.setLineWidth(1.6); doc.line(MARGIN, y, pageW - MARGIN, y);
+  return y + 20;
+}
+function landlordFooter(doc, profile) {
+  const pageW = doc.internal.pageSize.getWidth(), pageH = doc.internal.pageSize.getHeight();
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...RULE); doc.setLineWidth(0.5); doc.line(MARGIN, pageH - 34, pageW - MARGIN, pageH - 34);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...MUTED);
+    doc.text(`${(profile && profile.landlordName) || "Landlord"} · generated ${todayLong()}`, MARGIN, pageH - 22);
+    doc.text(`Page ${i} of ${n}`, pageW - MARGIN, pageH - 22, { align: "right" });
+  }
+}
+const tMoney = (n) => "UGX " + Math.round(Number(n) || 0).toLocaleString("en-US");
+const tDate = (s) => { if (!s) return "—"; const d = new Date(String(s).slice(0, 10) + "T00:00:00"); return isNaN(d) ? String(s) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
+function kvBlock(doc, y, rows) {
+  const pageW = doc.internal.pageSize.getWidth();
+  return runTable(doc, {
+    startY: y, guard: () => {}, body: rows.map(([k, v]) => [k, v == null || v === "" ? "—" : String(v)]),
+    columnStyles: { 0: { cellWidth: (pageW - MARGIN * 2) * 0.32, fontStyle: "bold", textColor: INK, fillColor: KVFILL } },
+  });
+}
+
+/** Rent receipt for one payment. */
+export function downloadRentReceiptPdf({ profile, payment, tenantName, unitLabel, balanceAfter }) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a5" });
+  const pageW = doc.internal.pageSize.getWidth();
+  let y = landlordHeader(doc, profile, "Receipt", payment.receiptNo || payment.id);
+  y = kvBlock(doc, y, [
+    ["Received from", tenantName],
+    ["Premises", unitLabel],
+    ["Date", tDate(payment.date)],
+    ["For", payment.kind === "deposit" ? "Security deposit" : "Rent / charges"],
+    ["Method", `${payment.method || "Cash"}${payment.reference ? ` · Ref ${payment.reference}` : ""}`],
+    ...(payment.note ? [["Note", payment.note]] : []),
+  ]);
+  y += 16;
+  doc.setFillColor(...KVFILL); doc.roundedRect(MARGIN, y, pageW - MARGIN * 2, 46, 4, 4, "F");
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY);
+  doc.text("Amount received", MARGIN + 12, y + 18);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...INK);
+  doc.text(tMoney(payment.amount), pageW - MARGIN - 12, y + 30, { align: "right" });
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...BRAND);
+  const words = doc.splitTextToSize(`${numberToWords(payment.amount)} Uganda Shillings only`, (pageW - MARGIN * 2) * 0.55);
+  doc.text(words, MARGIN + 12, y + 31);
+  y += 62;
+  if (payment.kind !== "deposit" && balanceAfter != null) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY);
+    doc.text(balanceAfter > 0 ? `Balance still due after this payment: ${tMoney(balanceAfter)}` : balanceAfter < 0 ? `Paid in advance (credit): ${tMoney(-balanceAfter)}` : "Account fully paid up to date.", MARGIN, y);
+    y += 16;
+  }
+  y += 34;
+  doc.setDrawColor(...RULE); doc.line(MARGIN, y, MARGIN + 160, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(...BODY);
+  doc.text(`Received by: ${(profile && profile.landlordName) || "Landlord"}`, MARGIN, y + 12);
+  landlordFooter(doc, profile);
+  doc.save(`Receipt-${payment.receiptNo || payment.id}.pdf`);
+}
+
+/** Tenant statement: charges and payments with running balance. */
+export function downloadTenantStatementPdf({ profile, tenantName, tenantPhone, unitLabel, lease, rows, summary }) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  let y = landlordHeader(doc, profile, "Statement", `As at ${tDate(new Date().toISOString())}`);
+  y = kvBlock(doc, y, [
+    ["Tenant", `${tenantName}${tenantPhone ? ` · ${tenantPhone}` : ""}`],
+    ["Premises", unitLabel],
+    ["Lease", `${tDate(lease.startDate)} to ${lease.endDate ? tDate(lease.endDate) : "open-ended"}${lease.status === "ended" ? " (ended)" : ""}`],
+    ["Rent", `${tMoney(lease.rent)} per month, billed ${lease.cycleMonths === 1 ? "monthly" : `every ${lease.cycleMonths} months`}`],
+    ["Security deposit held", tMoney(summary.depositHeld)],
+  ]);
+  y += 12;
+  y = runTable(doc, {
+    startY: y, guard: () => {},
+    head: ["Date", "Details", "Ref", "Charged", "Paid", "Balance"],
+    body: rows.length ? rows.map((r) => [tDate(r.date), r.description, r.ref || "", r.debit ? tMoney(r.debit) : "", r.credit ? tMoney(r.credit) : "", tMoney(r.balance)]) : [["", "No transactions yet", "", "", "", ""]],
+    columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" } },
+  });
+  y += 14;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+  doc.setTextColor(...(summary.balance > 0 ? [180, 50, 40] : [20, 120, 70]));
+  doc.text(summary.balance > 0 ? `Amount due: ${tMoney(summary.balance)}` : summary.balance < 0 ? `In credit: ${tMoney(-summary.balance)}` : "Fully paid — nothing due", MARGIN, y);
+  if (profile && profile.paymentInstructions) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY);
+    doc.text(doc.splitTextToSize(`How to pay: ${profile.paymentInstructions}`, doc.internal.pageSize.getWidth() - MARGIN * 2), MARGIN, y + 18);
+  }
+  landlordFooter(doc, profile);
+  doc.save(`Statement-${String(tenantName).replace(/\s+/g, "-")}.pdf`);
+}
+
+/** Rent roll: every unit with tenant, rent, balance and status. */
+export function downloadRentRollPdf({ profile, rows, totals }) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  let y = landlordHeader(doc, profile, "Rent roll", `As at ${tDate(new Date().toISOString())}`);
+  y = runTable(doc, {
+    startY: y, guard: () => {},
+    head: ["Property", "Unit", "Type", "Tenant", "Lease ends", "Monthly rent", "Balance due", "Overdue", "Deposit held"],
+    body: rows,
+    columnStyles: { 5: { halign: "right" }, 6: { halign: "right", fontStyle: "bold" }, 8: { halign: "right" } },
+  });
+  y += 14;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...INK);
+  doc.text(totals, MARGIN, y);
+  landlordFooter(doc, profile);
+  doc.save(`Rent-Roll-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
