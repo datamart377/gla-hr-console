@@ -7042,6 +7042,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const cur = f.currency || "UGX";
   const save = async (status) => {
     if (!f.clientId || !allClients.some((c) => c.id === f.clientId)) return alert("Select the client this quotation is for. New clients are added on the Client register first.");
+    if (!String(f.attn || "").trim()) return alert("Enter who the quotation is for at the client (Attn).");
     if (!String(f.quoteNo).trim()) return alert("Enter the quotation reference (Our Ref).");
     const valid = f.lineItems.filter((it) => String(it.description || "").trim());
     if (!valid.length) return alert("Add at least one item with a description.");
@@ -7052,7 +7053,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
       const now = new Date().toISOString();
       const nextStatus = status || f.status;
       const payload = {
-        ...f, client: (selClient && selClient.name) || f.client.trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
+        ...f, client: (selClient && selClient.name) || f.client.trim(), attn: String(f.attn).trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
         lineItems: valid.map((it) => ({ description: String(it.description).trim(), unit: String(it.unit || "").trim() || "item", qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
         status: nextStatus, sentAt: nextStatus === "sent" ? (f.sentAt || now) : f.sentAt, preparedBy: f.preparedBy || me, updatedAt: now,
       };
@@ -7081,7 +7082,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
               <Select value={f.clientId} disabled={lockedClient} onChange={(e) => pickClient(e.target.value)}
                 options={[{ value: "", label: "— select client —" }, ...clientOpts.map((c) => ({ value: c.id, label: c.status === "Inactive" ? `${c.name} (inactive)` : c.name }))]} />
             </Field>
-            <Field label="Attn"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
+            <Field label="Attn" required hint="The person at the client this quotation is addressed to"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
             <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
             <Field label="Sites" full hint={selClient && selClient.sites.length ? `${selClient.name} sites: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
             <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
@@ -7149,6 +7150,11 @@ function QuotationPreview({ ctx, q: raw }) {
   const sig = SIGNATORIES[0] || {};
   const sigImg = isSigImage(sig.signature) ? sig.signature : signatureFor(sig.name);
   const setStatus = async (status) => {
+    if (status === "sent" && !String(q.attn || "").trim()) {
+      alert("Add the Attn (the person at the client this quotation is addressed to) before marking it as sent.");
+      setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />);
+      return;
+    }
     const now = new Date().toISOString();
     await quotationsApi.update(q.id, { status, ...(status === "sent" ? { sentAt: q.sentAt || now } : {}), ...(status === "accepted" || status === "declined" ? { decidedAt: now } : {}), updatedAt: now });
     await ctx.reload(); setModal(null);

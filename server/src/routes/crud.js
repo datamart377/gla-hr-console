@@ -409,6 +409,7 @@ export function crudRouter(table) {
       if (table === "quotations") {
         const problem = await linkQuoteClient(body, true);
         if (problem) return res.status(400).json({ error: problem });
+        if (!String(body.attn || "").trim()) return res.status(400).json({ error: "Enter who the quotation is for at the client (Attn)." });
       }
       if (table === "clients") {
         if (!String(body.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });
@@ -475,6 +476,12 @@ export function crudRouter(table) {
       if (table === "quotations") {
         const problem = await linkQuoteClient(patch, false);
         if (problem) return res.status(400).json({ error: problem });
+        // Attn is mandatory: it can't be cleared, and a quotation can't be sent without it.
+        if ("attn" in patch && !String(patch.attn || "").trim()) return res.status(400).json({ error: "Enter who the quotation is for at the client (Attn)." });
+        if (patch.status === "sent" && !("attn" in patch)) {
+          const cur = await query(`SELECT doc->>'attn' AS attn FROM quotations WHERE id = $1`, [req.params.id]);
+          if (cur.rows[0] && !String(cur.rows[0].attn || "").trim()) return res.status(400).json({ error: "Add the Attn before marking this quotation as sent." });
+        }
       }
       if (table === "clients" && "name" in patch) {
         if (!String(patch.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });
