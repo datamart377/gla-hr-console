@@ -521,7 +521,7 @@ export function downloadRequisitionVoucherPdf(req, opts = {}) {
 /* ------------------------------- quotation -------------------------------- */
 /**
  * downloadQuotationPdf(q) — a client quotation in the Global Link template:
- * letterhead, a details block (Quote to / Scope of works / Sites / Attn / Our
+ * letterhead, a details block (Quote to / Scope of works / Location / Attn / Our
  * Ref / Date / Quote validity / Currency), the priced items with 18% VAT per
  * line, TOTALS, amount in words and the approved signatory (with signature &
  * stamp). A draft is watermarked and unsigned.
@@ -556,7 +556,7 @@ export function downloadQuotationPdf(q) {
   const details = [
     [{ content: "Quote to:", styles: kcell }, vcell(q.client, true)],
     [{ content: "Scope of works", styles: kcell }, vcell(q.scope)],
-    [{ content: "Sites:", styles: kcell }, vcell(q.sites)],
+    [{ content: "Location:", styles: kcell }, vcell(q.sites)],
     [{ content: "Attn:", styles: kcell }, vcell(q.attn)],
     [{ content: "Our Ref", styles: kcell }, vcell(ref, true)],
     [{ content: "Date", styles: kcell }, vcell(longDate(q.date))],

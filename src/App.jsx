@@ -6669,7 +6669,7 @@ function PurchaseOrderPreview({ ctx, po: raw }) {
 
 /* ============================== Quotations ===============================
    Client quotations in the Global Link template: Quote to / Scope of works /
-   Sites / Attn / Our Ref / Date / Quote validity / Currency, priced items with
+   Location / Attn / Our Ref / Date / Quote validity / Currency, priced items with
    18% VAT added per line, totals, amount in words and the approved signatory.
    ========================================================================== */
 const QUOTE_CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
@@ -6692,7 +6692,7 @@ function excelQuote(ctx, raw) {
     meta: [
       `Quote to: ${q.client || "—"}${q.attn ? "    Attn: " + q.attn : ""}`,
       `Scope of works: ${q.scope || "—"}`,
-      `Sites: ${q.sites || "—"}`,
+      `Location: ${q.sites || "—"}`,
       `Our Ref: ${q.quoteNo || "—"}    Date: ${fmtDate(q.date)}    Quote validity: ${q.validityDays} calendar days (to ${fmtDate(quoteValidUntil(q))})    Currency: ${QUOTE_CURRENCY_WORDS[cur] || cur}`,
       `Amount in words: ${poAmountWords(t.grand)} ${QUOTE_CURRENCY_WORDS[cur] || cur} only`,
     ],
@@ -6735,7 +6735,7 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
         <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
       </div>
       <Toolbar>
-        <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or site…" />
+        <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or location…" />
         <Select value={cid} onChange={(e) => setCid(e.target.value)} style={{ width: "auto", maxWidth: 240 }} options={[{ value: "", label: "All clients" }, ...clients.slice().sort((x, y) => x.name.localeCompare(y.name)).map((c) => ({ value: c.id, label: c.name }))]} />
         <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
         <div style={{ flex: 1 }} />
@@ -6746,7 +6746,7 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
           columns={[
             { label: "Our Ref", render: (x) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span> },
             { label: "Client", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)", cursor: x.clientId ? "pointer" : "default" }} onClick={() => x.clientId && setModal(() => (cc) => <ClientView ctx={cc} id={x.clientId} />)} title={x.clientId ? "View client" : undefined}>{x.client || "—"}</div>{x.attn && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Attn: {x.attn}</div>}</div> },
-            { label: "Scope / Sites", render: (x) => <div style={{ maxWidth: 320 }}><div style={{ color: "var(--text)" }}>{x.scope || "—"}</div>{x.sites && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.sites}</div>}</div> },
+            { label: "Scope / Location", render: (x) => <div style={{ maxWidth: 320 }}><div style={{ color: "var(--text)" }}>{x.scope || "—"}</div>{x.sites && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.sites}</div>}</div> },
             { label: "Date", render: (x) => fmtDate(x.date) },
             { label: "Valid until", render: (x) => <span style={{ color: x._st === "expired" ? "var(--warning)" : "var(--text-2)" }}>{fmtDate(quoteValidUntil(x))}</span> },
             { label: "Total", num: true, render: (x) => <span className="mono">{x.currency} {fmtN(x._t.grand)}</span> },
@@ -6847,7 +6847,7 @@ function ClientRegister({ ctx }) {
         <StatCard Icon={Check} label="Won value" value={ugxShort(won)} meta="accepted quotations" tone="success" />
       </div>
       <Toolbar>
-        <SearchBox value={q} onChange={setQ} placeholder="Search name, TIN, contact, site…" />
+        <SearchBox value={q} onChange={setQ} placeholder="Search name, TIN, contact, location…" />
         <Select value={cat} onChange={(e) => setCat(e.target.value)} options={[{ value: "", label: "All categories" }, ...CLIENT_CATEGORIES.map((c) => ({ value: c, label: c }))]} style={{ width: "auto" }} />
         <div style={{ flex: 1 }} />
         {manage && <Btn variant="primary" onClick={() => setModal(() => (cc) => <ClientForm ctx={cc} id={null} />)}><Plus size={16} />Add client</Btn>}
@@ -6861,7 +6861,7 @@ function ClientRegister({ ctx }) {
             { label: "Contact", render: (c) => (
               <div><div>{c.contactPerson || "—"}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{c.phone || c.email || ""}</div></div>
             ) },
-            { label: "Sites", render: (c) => c.sites.length ? <div style={{ maxWidth: 240, fontSize: 12.5 }}>{c.sites.slice(0, 2).join(", ")}{c.sites.length > 2 && <span style={{ color: "var(--muted)" }}> +{c.sites.length - 2} more</span>}</div> : <span style={{ color: "var(--muted)" }}>—</span> },
+            { label: "Locations", render: (c) => c.sites.length ? <div style={{ maxWidth: 240, fontSize: 12.5 }}>{c.sites.slice(0, 2).join(", ")}{c.sites.length > 2 && <span style={{ color: "var(--muted)" }}> +{c.sites.length - 2} more</span>}</div> : <span style={{ color: "var(--muted)" }}>—</span> },
             { label: "Quotations", render: (c) => { const st = stats[c.id]; return st.n
               ? <div style={{ cursor: "pointer" }} onClick={() => ctx.showClientQuotes(c.id)} title="Show this client's quotations"><div style={{ color: "var(--brand)", fontWeight: 600 }}>{st.n} · UGX {fmtN(st.quoted)}</div><div style={{ fontSize: 11.5, color: "var(--muted)" }}>{st.open ? `${st.open} open · ` : ""}last {fmtDate(st.last)}</div></div>
               : <span style={{ color: "var(--muted)" }}>None yet</span>; } },
@@ -6935,8 +6935,8 @@ function ClientForm({ ctx, id }) {
         <Field label="Primary phone" required><Input value={f.phone} onChange={set("phone")} placeholder="e.g. +256 7XX XXX XXX" /></Field>
         <Field label="Secondary phone"><Input value={f.phone2 || ""} onChange={set("phone2")} placeholder="Optional alternate number" /></Field>
         <Field label="Email"><Input value={f.email} onChange={set("email")} /></Field>
-        <FieldsetTitle>Sites / stations</FieldsetTitle>
-        <Field label="Sites" full hint="One per line — offered when filling in “Sites” on this client's quotations"><Textarea value={f.sites} onChange={set("sites")} placeholder={"SUL Mayuge\nShell Ndeeba"} /></Field>
+        <FieldsetTitle>Locations</FieldsetTitle>
+        <Field label="Locations" full hint="One per line — offered when filling in “Location” on this client's quotations"><Textarea value={f.sites} onChange={set("sites")} placeholder={"SUL Mayuge\nShell Ndeeba"} /></Field>
         <FieldsetTitle>Quotation defaults</FieldsetTitle>
         <Field label="Currency" hint="Default for new quotations"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
         <Field label="Quote validity (days)" hint="Default for new quotations"><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
@@ -6979,7 +6979,7 @@ function ClientView({ ctx, id }) {
       {row("Primary phone", c.phone)}
       {c.phone2 && row("Secondary phone", c.phone2)}
       {row("Email", c.email)}
-      {row("Sites", c.sites.join(", "))}
+      {row("Locations", c.sites.join(", "))}
       {row("Notes", c.notes)}
       <div style={{ marginTop: 14 }}>
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>Quotations · {st.n}{st.n ? ` · UGX ${fmtN(st.quoted)} quoted · UGX ${fmtN(st.won)} won` : ""}</div>
@@ -7020,7 +7020,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const lockedClient = !!presetClientId && !existing;
   const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
   const selClient = allClients.find((c) => c.id === f.clientId) || null;
-  // Switch client: Attn and Sites follow the client unless they were typed in.
+  // Switch client: Attn and Location follow the client unless they were typed in.
   const applyClient = (s, c) => {
     const prev = allClients.find((x) => x.id === s.clientId);
     const attnWasDefault = !s.attn || (prev && s.attn === prev.contactPerson);
@@ -7084,7 +7084,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
             </Field>
             <Field label="Attn" required hint="The person at the client this quotation is addressed to"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
             <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
-            <Field label="Sites" full hint={selClient && selClient.sites.length ? `${selClient.name} sites: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
+            <Field label="Location" full hint={selClient && selClient.sites.length ? `${selClient.name} locations: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
             <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
             <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
@@ -7195,7 +7195,7 @@ function QuotationPreview({ ctx, q: raw }) {
           <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: ".04em", color: ink }}>QUOTATION</div>
         </div>
         <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
-          {kv("Quote to:", q.client, true)}{kv("Scope of works", q.scope)}{kv("Sites:", q.sites)}{kv("Attn:", q.attn)}
+          {kv("Quote to:", q.client, true)}{kv("Scope of works", q.scope)}{kv("Location:", q.sites)}{kv("Attn:", q.attn)}
           {kv("Our Ref", q.quoteNo, true)}{kv("Date", fmtDateLong(q.date))}{kv("Quote validity", `${q.validityDays} calendar days (valid until ${fmtDate(quoteValidUntil(q))})`, true)}{kv("Currency", QUOTE_CURRENCY_WORDS[cur] || cur)}
         </div>
         <div style={{ overflowX: "auto" }}>
