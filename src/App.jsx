@@ -26,7 +26,7 @@ import {
 import {
   data, TODAY, UNIT_TYPES, RENT_CYCLES, PAY_METHODS, PAY_KINDS, MAINT_PRIORITIES, MAINT_STATUSES, cycleLabel, addMonthsISO, normalizeLease, leaseStatus, nextReceiptNo, nextTenancyId, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
-  quoteIsDraft, derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
+  quoteIsDraft, quoteRef, derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
   normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, reqPayable, reqAdjusted, REQ_STAGES, reqStageIndex, reqStagesFor, reqStageIndexFor, reqIsFinanceDirect,
@@ -6694,34 +6694,43 @@ function excelQuote(ctx, raw) {
   const t = quoteTotals(q);
   const cur = q.currency || "UGX";
   downloadScheduleXlsx({
-    title: quoteIsDraft(q) ? "QUOTATION — DRAFT" : "QUOTATION", eyebrow: "QUOTATION",
-    subtitle: `${q.quoteNo || ""} · ${q.client || ""}`,
+    title: `QUOTATION${q.revision ? ` — REVISION ${q.revision}` : ""}${quoteIsDraft(q) ? (q.revision ? " (DRAFT)" : " — DRAFT") : ""}`, eyebrow: "QUOTATION",
+    subtitle: `${quoteRef(q)} · ${q.client || ""}`,
     meta: [
       `Quote to: ${q.client || "—"}${q.attn ? "    Attn: " + q.attn : ""}`,
       `Scope of works: ${q.scope || "—"}`,
       `Location: ${q.sites || "—"}`,
-      `Our Ref: ${q.quoteNo || "—"}    Date: ${fmtDate(q.date)}    Quote validity: ${q.validityDays} calendar days (to ${fmtDate(quoteValidUntil(q))})    Currency: ${QUOTE_CURRENCY_WORDS[cur] || cur}`,
+      ...(q.revision ? [`Revision: Rev. ${q.revision}${q.revisionReason ? ` — ${q.revisionReason}` : ""}. Supersedes all earlier versions of ${q.quoteNo}.`] : []),
+      `Our Ref: ${q.revision ? `${q.quoteNo} — Revision ${q.revision}` : (q.quoteNo || "—")}    Date: ${fmtDate(q.date)}    Quote validity: ${q.validityDays} calendar days (to ${fmtDate(quoteValidUntil(q))})    Currency: ${QUOTE_CURRENCY_WORDS[cur] || cur}`,
       `Amount in words: ${poAmountWords(t.grand)} ${QUOTE_CURRENCY_WORDS[cur] || cur} only`,
     ],
     columns: [
       { header: "No", width: 5 }, { header: "Description & Specification", width: 48, wrap: true }, { header: "Item", width: 8 }, { header: "Qty", width: 7 },
       { header: `Rate (${cur})`, money: true }, { header: `Sub total (${cur})`, money: true }, { header: `${t.rate}% VAT`, money: true }, { header: `Total (${cur})`, money: true },
     ],
-    rows: t.lines.filter((l) => l.description || l.sub).map((l, i) => [i + 1, l.description, l.unit, l.qty, l.rate, l.sub, l.vat, l.total]),
-    totalsRow: ["", "TOTALS", "", "", "", t.sub, t.vat, t.grand],
-    filename: `GLA-Quotation-${String(q.quoteNo || q.id || "").replace(/[/\\]/g, "-")}.xlsx`,
+    rows: [
+      ...t.lines.filter((l) => l.description || l.sub).map((l, i) => [i + 1, l.description, l.unit, l.qty, l.rate, l.sub, l.vat, l.total]),
+      ...(t.discount ? [["", "TOTALS BEFORE DISCOUNT", "", "", "", t.sub, t.lineVat, t.lineTotal], ["", t.discountLabel, "", "", "", -t.discount, -(t.lineVat - t.vat), -(t.lineTotal - t.grand)]] : []),
+    ],
+    totalsRow: t.discount ? ["", "TOTALS AFTER DISCOUNT", "", "", "", t.netSub, t.vat, t.grand] : ["", "TOTALS", "", "", "", t.sub, t.vat, t.grand],
+    filename: `GLA-Quotation-${String(quoteRef(q)).replace(/ Rev\. /, "-Rev").replace(/[/\\]/g, "-").replace(/\s+/g, "")}.xlsx`,
   });
 }
+
+// Revisions: a family is the original plus its revisions (same reference).
+const quoteFamily = (q) => q.revisionOf || q.id;
+const quoteRevisionInProgress = (q, all) => (all || []).some((y) => y.previousId && quoteFamily(y) === quoteFamily(q) && ["draft", "pending_approval"].includes(y.status) && !y.supersededBy);
+const quoteCanRevise = (q, all) => !q.supersededBy && ["approved", "sent", "declined", "accepted"].includes(q.status) && !quoteRevisionInProgress(q, all);
 
 // HR & Admin decide on a quotation another role submitted for approval.
 async function quoteDecide(ctx, q, approve) {
   try {
     if (approve) {
       if (!String(q.attn || "").trim()) { alert("Add the Attn before approving this quotation."); return false; }
-      if (!window.confirm(`Approve quotation ${q.quoteNo} for ${q.client}?\n\nIt will carry the approved signatory's signature and can then be sent to the client.`)) return false;
+      if (!window.confirm(`Approve quotation ${quoteRef(q)} for ${q.client}?\n\nIt will carry the approved signatory's signature and can then be sent to the client.`)) return false;
       await quotationsApi.update(q.id, { status: "approved", updatedAt: new Date().toISOString() });
     } else {
-      const reason = window.prompt(`Return quotation ${q.quoteNo} to ${(q.initiatedBy && q.initiatedBy.name) || "the preparer"} as a draft?\n\nReason / what to change:`);
+      const reason = window.prompt(`Return quotation ${quoteRef(q)} to ${(q.initiatedBy && q.initiatedBy.name) || "the preparer"} as a draft?\n\nReason / what to change:`);
       if (reason == null) return false;
       if (!reason.trim()) { alert("Please give a reason so the preparer knows what to change."); return false; }
       await quotationsApi.update(q.id, { status: "draft", rejectReason: reason.trim(), updatedAt: new Date().toISOString() });
@@ -6740,8 +6749,11 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
   const all = (store.quotations || []).map(normalizeQuotation).sort((a, b) => String(b.date + b.createdAt).localeCompare(String(a.date + a.createdAt)));
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
+  const [showOld, setShowOld] = useState(false);
   const withStatus = all.map((x) => ({ ...x, _st: quoteDisplayStatus(x, TODAY), _t: quoteTotals(x) }));
-  let rows = withStatus;
+  const current = withStatus.filter((x) => !x.supersededBy);
+  const oldCount = withStatus.length - current.length;
+  let rows = showOld || st === "superseded" ? withStatus : current;
   if (st) rows = rows.filter((x) => x._st === st);
   if (cid) rows = rows.filter((x) => x.clientId === cid);
   if (q.trim()) { const k = q.trim().toLowerCase(); rows = rows.filter((x) => [x.quoteNo, x.client, x.attn, x.scope, x.sites].join(" ").toLowerCase().includes(k)); }
@@ -6759,7 +6771,7 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
         <Banner Icon={ClipboardCheck}><b>{pending.length} quotation{pending.length === 1 ? "" : "s"} awaiting your approval.</b> They stay drafts (watermarked, unsigned) until you approve them. <span style={{ color: "var(--brand)", fontWeight: 600, cursor: "pointer" }} onClick={() => setSt("pending_approval")}>Show them</span></Banner>
       )}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
-        <StatCard Icon={FileSignature} label="Quotations" value={all.length} meta={`${withStatus.filter((x) => x._st === "draft").length} draft · ${pending.length} awaiting approval`} tone="brand" />
+        <StatCard Icon={FileSignature} label="Quotations" value={current.length} meta={`${current.filter((x) => x._st === "draft").length} draft · ${pending.length} awaiting approval${oldCount ? ` · ${oldCount} superseded` : ""}`} tone="brand" />
         <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
         <StatCard Icon={Check} label="Accepted" value={won.length} meta={`${ugxShort(ugx(won))} won`} tone="success" />
         <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
@@ -6767,19 +6779,25 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
       <Toolbar>
         <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or location…" />
         <Select value={cid} onChange={(e) => setCid(e.target.value)} style={{ width: "auto", maxWidth: 240 }} options={[{ value: "", label: "All clients" }, ...clients.slice().sort((x, y) => x.name.localeCompare(y.name)).map((c) => ({ value: c.id, label: c.name }))]} />
-        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
+        <Select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: "auto" }} options={[{ value: "", label: "All statuses" }, ...[...QUOTE_STATUSES, "expired", "superseded"].map((x) => ({ value: x, label: quoteStatusLabel(x) }))]} />
+        {oldCount > 0 && <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text-2)" }}><input type="checkbox" checked={showOld} onChange={(e) => setShowOld(e.target.checked)} />Show earlier revisions ({oldCount})</label>}
         <div style={{ flex: 1 }} />
         <Btn variant="primary" disabled={!clients.some((c) => c.status !== "Inactive")} title={clients.length ? "Start a quotation for a client" : "Add a client on the Client register first"} onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} clientId={cid || undefined} />)}><Plus size={16} />New quotation</Btn>
       </Toolbar>
       <Card>
         <DataTable
           columns={[
-            { label: "Our Ref", render: (x) => <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span> },
+            { label: "Our Ref", render: (x) => (
+              <div style={{ opacity: x.supersededBy ? 0.6 : 1 }}>
+                <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer" }} onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview quotation">{x.quoteNo || x.id}</span>
+                {x.revision > 0 && <div><Tag>Rev. {x.revision}</Tag></div>}
+              </div>
+            ) },
             { label: "Client", render: (x) => <div><div style={{ fontWeight: 600, color: "var(--text)", cursor: x.clientId ? "pointer" : "default" }} onClick={() => x.clientId && setModal(() => (cc) => <ClientView ctx={cc} id={x.clientId} />)} title={x.clientId ? "View client" : undefined}>{x.client || "—"}</div>{x.attn && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Attn: {x.attn}</div>}</div> },
             { label: "Scope / Location", render: (x) => <div style={{ maxWidth: 320 }}><div style={{ color: "var(--text)" }}>{x.scope || "—"}</div>{x.sites && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{x.sites}</div>}</div> },
             { label: "Date", render: (x) => fmtDate(x.date) },
             { label: "Valid until", render: (x) => <span style={{ color: x._st === "expired" ? "var(--warning)" : "var(--text-2)" }}>{fmtDate(quoteValidUntil(x))}</span> },
-            { label: "Total", num: true, render: (x) => <span className="mono">{x.currency} {fmtN(x._t.grand)}</span> },
+            { label: "Total", num: true, render: (x) => <div><span className="mono">{x.currency} {fmtN(x._t.grand)}</span>{x._t.discount > 0 && <div style={{ fontSize: 11, color: "var(--success)" }}>{x._t.discountLabel.replace("Less ", "")} applied</div>}</div> },
             { label: "Status", render: (x) => (
               <div>
                 <Pill tone={quoteStatusTone(x._st)}>{quoteStatusLabel(x._st)}</Pill>
@@ -6798,8 +6816,9 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printQuote(ctx, x)} title="Download PDF"><Printer size={13} />PDF</Btn>
                 <Btn size="sm" onClick={() => excelQuote(ctx, x)} title="Download Excel"><Download size={13} /></Btn>
-                {(approver || x.status === "draft") && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} copyOf={x.id} />)} title="Duplicate as a new quotation"><Copy size={13} /></Btn>
+                {!x.supersededBy && (approver || x.status === "draft") && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
+                {quoteCanRevise(x, all) && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} reviseOf={x.id} />)} title="Revise — e.g. a discount or changed items; keeps the same reference"><RotateCcw size={13} />Revise</Btn>}
+                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} copyOf={x.id} />)} title="Duplicate as a new quotation (new reference)"><Copy size={13} /></Btn>
                 {canDel && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={quotationsApi} id={x.id} label={x.quoteNo || x.id} />)} title="Delete"><Trash2 size={13} /></Btn>}
               </div>
             ) },
@@ -6852,7 +6871,9 @@ function nextClientId(clients) {
 function clientQuoteStats(c, quotations) {
   const mine = (quotations || []).filter((x) => x.clientId === c.id).map((x) => { const n = normalizeQuotation(x); return { ...n, _st: quoteDisplayStatus(n, TODAY), _t: quoteTotals(n) }; });
   const ugxOf = (l) => l.filter((x) => (x.currency || "UGX") === "UGX").reduce((a, x) => a + x._t.grand, 0);
-  return { list: mine, n: mine.length, open: mine.filter((x) => x._st === "sent").length, quoted: ugxOf(mine), won: ugxOf(mine.filter((x) => x._st === "accepted")), last: mine.map((x) => x.date).sort().pop() || "" };
+  // Superseded revisions stay in the history but don't count twice.
+  const live = mine.filter((x) => !x.supersededBy);
+  return { list: mine, n: live.length, open: live.filter((x) => x._st === "sent").length, quoted: ugxOf(live), won: ugxOf(live.filter((x) => x._st === "accepted")), last: live.map((x) => x.date).sort().pop() || "" };
 }
 
 function ClientRegister({ ctx }) {
@@ -7034,7 +7055,7 @@ function ClientView({ ctx, id }) {
         {history.length === 0 && <div style={{ fontSize: 12.5, color: "var(--muted)" }}>No quotations for this client yet.</div>}
         {history.map((x) => (
           <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12.5, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
-            <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer", minWidth: 92 }} onClick={() => ctx.setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)}>{x.quoteNo || x.id}</span>
+            <span className="mono" style={{ fontWeight: 600, color: "var(--brand)", cursor: "pointer", minWidth: 92 }} onClick={() => ctx.setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)}>{quoteRef(x)}</span>
             <span style={{ color: "var(--text-2)", minWidth: 84 }}>{fmtDate(x.date)}</span>
             <span style={{ flex: 1, color: "var(--text)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.scope || "—"}</span>
             <span className="mono" style={{ fontWeight: 600 }}>{x.currency} {fmtN(x._t.grand)}</span>
@@ -7046,17 +7067,24 @@ function ClientView({ ctx, id }) {
   );
 }
 
-function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
+function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) {
   const { store, setModal, reload } = ctx;
   const list = store.quotations || [];
   const allClients = (store.clients || []).map(normalizeClient);
   const existing = id ? list.find((x) => x.id === id) : null;
-  const source = copyOf ? list.find((x) => x.id === copyOf) : null;
+  const revisedFrom = reviseOf ? list.find((x) => x.id === reviseOf) : null;
+  const source = copyOf ? list.find((x) => x.id === copyOf) : revisedFrom;
+  // Next revision number for this quotation's family (display; the server assigns it).
+  const nextRev = revisedFrom ? Math.max(0, ...list.filter((x) => (x.revisionOf || x.id) === (revisedFrom.revisionOf || revisedFrom.id)).map((x) => Number(x.revision) || 0)) + 1 : 0;
   const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "");
   const [f, setF] = useState(() => {
     const base = existing ? normalizeQuotation(existing) : normalizeQuotation({
-      ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined, approval: null, rejection: null, initiatedBy: null, submittedAt: null, needsApproval: false } : {}),
-      quoteNo: nextQuoteNumber(list), date: TODAY, preparedBy: me,
+      ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined, approval: null, rejection: null, initiatedBy: null, submittedAt: null, needsApproval: false, supersededBy: "", revisionReason: "" } : {}),
+      // A revision keeps the reference; a duplicate gets the next one.
+      ...(revisedFrom
+        ? { quoteNo: revisedFrom.quoteNo, previousId: revisedFrom.id, revision: nextRev, revisionOf: revisedFrom.revisionOf || revisedFrom.id }
+        : { quoteNo: nextQuoteNumber(list), previousId: "", revision: 0, revisionOf: "" }),
+      date: TODAY, preparedBy: me,
     });
     // Link to the client record (older quotations are matched by name).
     const c = presetClientId ? allClients.find((x) => x.id === presetClientId) : clientOfQuote(base, allClients);
@@ -7065,7 +7093,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
     return { ...base, clientId: c.id, client: c.name, attn: base.attn || c.contactPerson, sites: base.sites || (c.sites.length === 1 ? c.sites[0] : ""),
       ...(fresh ? { currency: c.currency, vatRate: c.vatDefault ? 18 : 0, validityDays: c.validityDays } : {}) };
   });
-  const lockedClient = !!presetClientId && !existing;
+  const lockedClient = (!!presetClientId && !existing) || !!f.previousId; // a revision stays with its client
   // Roles other than HR & Admin prepare quotations for HR & Admin approval.
   const approver = isHrOrAdmin(ctx);
   const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
@@ -7094,9 +7122,10 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
     if (!f.clientId || !allClients.some((c) => c.id === f.clientId)) return alert("Select the client this quotation is for. New clients are added on the Client register first.");
     if (!String(f.attn || "").trim()) return alert("Enter who the quotation is for at the client (Attn).");
     if (!String(f.quoteNo).trim()) return alert("Enter the quotation reference (Our Ref).");
+    if (f.previousId && !String(f.revisionReason || "").trim()) return alert("Say what changed in this revision (e.g. 5% discount agreed with the client).");
     const valid = f.lineItems.filter((it) => String(it.description || "").trim());
     if (!valid.length) return alert("Add at least one item with a description.");
-    const dup = list.find((x) => x.id !== (existing && existing.id) && String(x.quoteNo).trim().toLowerCase() === String(f.quoteNo).trim().toLowerCase());
+    const dup = !f.previousId && !(existing && existing.previousId) && list.find((x) => x.id !== (existing && existing.id) && (x.revisionOf || x.id) !== (existing && (existing.revisionOf || existing.id)) && String(x.quoteNo).trim().toLowerCase() === String(f.quoteNo).trim().toLowerCase());
     if (dup && !window.confirm(`Reference ${f.quoteNo} is already used by another quotation (${dup.client || dup.id}). Save anyway?`)) return;
     setBusy(true);
     try {
@@ -7104,11 +7133,13 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
       const nextStatus = status || f.status;
       const payload = {
         ...f, client: (selClient && selClient.name) || f.client.trim(), attn: String(f.attn).trim(), quoteNo: f.quoteNo.trim(), validityDays: Number(f.validityDays) || 30, vatRate: Number(f.vatRate) || 0,
+        discountType: f.discountType === "amount" ? "amount" : "percent", discountValue: Number(f.discountValue) > 0 ? Number(f.discountValue) : 0, revisionReason: String(f.revisionReason || "").trim(),
         lineItems: valid.map((it) => ({ description: String(it.description).trim(), unit: String(it.unit || "").trim() || "item", qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
         status: nextStatus, sentAt: nextStatus === "sent" ? (f.sentAt || now) : f.sentAt, preparedBy: f.preparedBy || me, updatedAt: now,
       };
       // Approval fields are stamped by the server, never sent from here.
-      ["approval", "rejection", "initiatedBy", "submittedAt", "needsApproval"].forEach((k) => { delete payload[k]; });
+      ["approval", "rejection", "initiatedBy", "submittedAt", "needsApproval", "revision", "revisionOf", "supersededBy"].forEach((k) => { delete payload[k]; });
+      if (existing || !f.previousId) delete payload.previousId;
       if (!approver && existing && f.status !== "draft") { alert("This quotation is no longer a draft, so it can't be changed."); setBusy(false); return; }
       const saved = existing ? await quotationsApi.update(existing.id, payload) : await quotationsApi.create({ ...payload, createdAt: now });
       await reload();
@@ -7120,7 +7151,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const td = { padding: "5px 6px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
   const num = { ...td, textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12.5, whiteSpace: "nowrap", paddingTop: 12 };
   return (
-    <Modal wide title={existing ? "Edit quotation" : source ? "Duplicate quotation" : "New quotation"} sub={`${f.quoteNo}${selClient ? " · " + selClient.name : ""}`} onClose={() => setModal(null)}
+    <Modal wide title={existing ? (existing.previousId ? `Edit revision ${existing.revision}` : "Edit quotation") : revisedFrom ? `Revise quotation ${revisedFrom.quoteNo}` : source ? "Duplicate quotation" : "New quotation"} sub={`${quoteRef(f)}${selClient ? " · " + selClient.name : ""}`} onClose={() => setModal(null)}
       footer={<>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
@@ -7141,6 +7172,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
         </>}
       </>}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {(revisedFrom || (existing && existing.previousId)) && <Banner Icon={RotateCcw}><b>Revision {f.revision} of {f.quoteNo}.</b> The reference stays the same; “Revision {f.revision}” is printed on the quotation. The previous version is marked superseded once this revision is approved.</Banner>}
         {f.status === "draft" && f.rejection && <Banner Icon={AlertTriangle} tone="warning"><b>Returned by {f.rejection.name}{f.rejection.at ? ` on ${fmtDate(f.rejection.at)}` : ""}:</b> {f.rejection.reason || "no reason given"}. Make the changes, then submit it again.</Banner>}
         {!approver && <Banner Icon={ClipboardCheck}>HR &amp; Admin approve quotations before they're issued. Until then it stays a draft — watermarked and unsigned.</Banner>}
         {approver && !(existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status)) && f.status !== "sent" && <Banner Icon={ClipboardCheck}>As HR &amp; Admin, quotations you prepare are approved by you when saved — they print signed, without the DRAFT watermark.</Banner>}
@@ -7154,7 +7186,8 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
             <Field label="Attn" required hint="The person at the client this quotation is addressed to"><Input value={f.attn} onChange={set("attn")} placeholder={selClient && selClient.contactPerson ? selClient.contactPerson : "Contact person"} /></Field>
             <Field label="Scope of works" full><Input value={f.scope} onChange={set("scope")} placeholder="e.g. Repairs to Peripheral area Lighting" /></Field>
             <Field label="Location" full hint={selClient && selClient.sites.length ? `${selClient.name} locations: ${selClient.sites.join(", ")}` : undefined}><Input list="gla-quote-sites" value={f.sites} onChange={set("sites")} placeholder="e.g. SUL Mayuge" /><datalist id="gla-quote-sites">{(selClient ? selClient.sites : []).map((x) => <option key={x} value={x} />)}</datalist></Field>
-            <Field label="Our Ref" required hint="Continues the Gla/NNN/YY series"><Input value={f.quoteNo} onChange={set("quoteNo")} /></Field>
+            <Field label="Our Ref" required hint={f.previousId ? `Same reference — printed as ${f.quoteNo} Rev. ${f.revision}` : "Continues the Gla/NNN/YY series"}><Input value={f.quoteNo} disabled={!!f.previousId} onChange={set("quoteNo")} /></Field>
+            {f.previousId && <Field label="What changed in this revision?" required full hint="Printed on the quotation"><Input value={f.revisionReason} onChange={set("revisionReason")} placeholder="e.g. 5% discount agreed with client; item 3 quantity revised" /></Field>}
             <Field label="Date"><Input type="date" value={f.date} onChange={set("date")} /></Field>
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
             <Field label="Currency"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
@@ -7191,8 +7224,25 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
                 })}
                 <tr>
                   <td style={td} /><td style={{ ...td, fontWeight: 700, paddingTop: 10 }}>TOTALS</td><td style={td} /><td style={td} /><td style={td} />
-                  <td style={{ ...num, fontWeight: 700 }}>{fmtN(t.sub)}</td><td style={{ ...num, fontWeight: 700 }}>{fmtN(t.vat)}</td><td style={{ ...num, fontWeight: 800, color: "var(--brand)" }}>{cur} {fmtN(t.grand)}</td><td style={td} />
+                  <td style={{ ...num, fontWeight: 700 }}>{fmtN(t.sub)}</td><td style={{ ...num, fontWeight: 700 }}>{fmtN(t.lineVat)}</td><td style={{ ...num, fontWeight: 800, color: t.discount ? "var(--text)" : "var(--brand)" }}>{t.discount ? "" : `${cur} `}{fmtN(t.lineTotal)}</td><td style={td} />
                 </tr>
+                <tr>
+                  <td style={td} />
+                  <td colSpan={4} style={{ ...td, paddingTop: 8 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12.5, color: "var(--text-2)", fontWeight: 600 }}>Discount</span>
+                      <Select value={f.discountType} onChange={set("discountType")} style={{ width: 130, padding: "5px 8px" }} options={[{ value: "percent", label: "Percentage %" }, { value: "amount", label: `Amount (${cur})` }]} />
+                      <Input type="number" min={0} value={f.discountValue || ""} onChange={set("discountValue")} placeholder="0" style={{ width: 120, padding: "5px 8px" }} />
+                      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>off the sub total, before VAT</span>
+                    </div>
+                  </td>
+                  {t.discount ? <><td style={{ ...num, color: "var(--danger)" }}>−{fmtN(t.discount)}</td><td style={{ ...num, color: "var(--danger)" }}>−{fmtN(t.lineVat - t.vat)}</td><td style={{ ...num, color: "var(--danger)" }}>−{fmtN(t.lineTotal - t.grand)}</td></> : <><td style={td} /><td style={td} /><td style={td} /></>}
+                  <td style={td} />
+                </tr>
+                {t.discount > 0 && <tr>
+                  <td style={td} /><td style={{ ...td, fontWeight: 700, paddingTop: 10 }}>TOTALS AFTER DISCOUNT</td><td style={td} /><td style={td} /><td style={td} />
+                  <td style={{ ...num, fontWeight: 700 }}>{fmtN(t.netSub)}</td><td style={{ ...num, fontWeight: 700 }}>{fmtN(t.vat)}</td><td style={{ ...num, fontWeight: 800, color: "var(--brand)" }}>{cur} {fmtN(t.grand)}</td><td style={td} />
+                </tr>}
               </tbody>
             </table>
             <datalist id="gla-quote-units">{QUOTE_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
@@ -7253,17 +7303,19 @@ function QuotationPreview({ ctx, q: raw }) {
       {((approver && q.status === "draft") || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
       {(q.status === "sent") && <Btn variant="danger" onClick={() => setStatus("declined")}><X size={14} />Declined</Btn>}
       {(q.status === "sent") && <Btn variant="success" onClick={() => setStatus("accepted")}><Check size={14} />Accepted</Btn>}
-      {(approver || q.status === "draft") && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
+      {!q.supersededBy && (approver || q.status === "draft") && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
+      {quoteCanRevise(q, ctx.store.quotations) && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} reviseOf={q.id} />)}><RotateCcw size={14} />Revise</Btn>}
       <Btn onClick={() => excelQuote(ctx, raw)}><Download size={14} />Excel</Btn>
       <Btn variant="primary" onClick={() => printQuote(ctx, raw)}><Printer size={14} />Download PDF</Btn>
     </>
   );
   return (
-    <Modal wide title="Quotation preview" sub={`${q.quoteNo}${q.client ? " · " + q.client : ""}`} onClose={() => setModal(null)} footer={footer}>
+    <Modal wide title={q.revision ? `Quotation preview — Revision ${q.revision}` : "Quotation preview"} sub={`${quoteRef(q)}${q.client ? " · " + q.client : ""}`} onClose={() => setModal(null)} footer={footer}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
           Prepared by {(q.initiatedBy && q.initiatedBy.name) || q.preparedBy || "—"}{q.submittedAt ? ` · submitted ${fmtDate(q.submittedAt)}` : ""}{q.approval ? ` · approved by ${q.approval.name} ${fmtDate(q.approval.at)}` : ""}{q.sentAt ? ` · sent ${fmtDate(q.sentAt)}` : ""}{q.decidedAt ? ` · ${quoteStatusLabel(q.status).toLowerCase()} ${fmtDate(q.decidedAt)}` : ""}
           {q.status === "draft" && q.rejection && <div style={{ color: "var(--danger)", marginTop: 2 }}>Returned by {q.rejection.name}: {q.rejection.reason}</div>}
+          {q.supersededBy && (() => { const nx = (ctx.store.quotations || []).find((x) => x.id === q.supersededBy); return <div style={{ color: "var(--warning)", marginTop: 2 }}>Superseded by {nx ? quoteRef(nx) : "a later revision"} — this version is kept for the record.</div>; })()}
         </div>
         <Pill tone={quoteStatusTone(disp)}>{quoteStatusLabel(disp)}</Pill>
       </div>
@@ -7277,7 +7329,7 @@ function QuotationPreview({ ctx, q: raw }) {
         </div>
         <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
           {kv("Quote to:", q.client, true)}{kv("Scope of works", q.scope)}{kv("Location:", q.sites)}{kv("Attn:", q.attn)}
-          {kv("Our Ref", q.quoteNo, true)}{kv("Date", fmtDateLong(q.date))}{kv("Quote validity", `${q.validityDays} calendar days (valid until ${fmtDate(quoteValidUntil(q))})`, true)}{kv("Currency", QUOTE_CURRENCY_WORDS[cur] || cur)}
+          {kv("Our Ref", q.revision ? `${q.quoteNo} — Revision ${q.revision}` : q.quoteNo, true)}{q.revision > 0 && kv("Revision", `Rev. ${q.revision}${q.revisionReason ? ` — ${q.revisionReason}` : ""}`)}{kv("Date", fmtDateLong(q.date))}{kv("Quote validity", `${q.validityDays} calendar days (valid until ${fmtDate(quoteValidUntil(q))})`, true)}{kv("Currency", QUOTE_CURRENCY_WORDS[cur] || cur)}
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
@@ -7294,8 +7346,18 @@ function QuotationPreview({ ctx, q: raw }) {
               ))}
               <tr>
                 <td style={td} /><td style={{ ...td, fontWeight: 800, fontStyle: "italic" }}>TOTALS</td><td style={td} /><td style={td} /><td style={td} />
-                <td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.sub)}</td><td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.vat)}</td><td style={{ ...td, ...rt, fontWeight: 800, color: "var(--brand)" }}>{fmtN(t.grand)}</td>
+                <td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.sub)}</td><td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.lineVat)}</td><td style={{ ...td, ...rt, fontWeight: 800, color: t.discount ? ink : "var(--brand)" }}>{fmtN(t.lineTotal)}</td>
               </tr>
+              {t.discount > 0 && <>
+                <tr>
+                  <td style={td} /><td colSpan={4} style={{ ...td, fontWeight: 700, fontStyle: "italic", textAlign: "right", color: "var(--danger)" }}>{t.discountLabel}</td>
+                  <td style={{ ...td, ...rt, color: "var(--danger)" }}>−{fmtN(t.discount)}</td><td style={{ ...td, ...rt, color: "var(--danger)" }}>−{fmtN(t.lineVat - t.vat)}</td><td style={{ ...td, ...rt, color: "var(--danger)" }}>−{fmtN(t.lineTotal - t.grand)}</td>
+                </tr>
+                <tr>
+                  <td style={td} /><td colSpan={4} style={{ ...td, fontWeight: 800, fontStyle: "italic", textAlign: "right" }}>TOTALS AFTER DISCOUNT</td>
+                  <td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.netSub)}</td><td style={{ ...td, ...rt, fontWeight: 800 }}>{fmtN(t.vat)}</td><td style={{ ...td, ...rt, fontWeight: 800, color: "var(--brand)" }}>{fmtN(t.grand)}</td>
+                </tr>
+              </>}
             </tbody>
           </table>
         </div>

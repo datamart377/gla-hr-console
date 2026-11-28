@@ -133,7 +133,43 @@ async function shapePurchaseOrder(req, patch, existing) {
 // approved a quotation stays a draft (prints with a DRAFT watermark and no
 // signature). Approval/rejection stamps are set here, never trusted from the client.
 const QUOTE_STATES = ["draft", "pending_approval", "approved", "sent", "accepted", "declined"];
-const QUOTE_CONTENT = new Set(["client", "clientId", "attn", "scope", "sites", "quoteNo", "date", "validityDays", "currency", "vatRate", "lineItems", "notes"]);
+const QUOTE_CONTENT = new Set(["client", "clientId", "attn", "scope", "sites", "quoteNo", "date", "validityDays", "currency", "vatRate", "lineItems", "notes", "discountType", "discountValue", "revisionReason"]);
+// Revision bookkeeping is the server's: these fields are never taken from a client.
+const QUOTE_REVISION_KEYS = ["revision", "revisionOf", "supersededBy"];
+// A revision keeps the original's reference (Gla/001/26) and gets the next
+// revision number. Only the latest, issued version can be revised, and only one
+// revision may be in progress at a time.
+async function prepareRevision(body) {
+  QUOTE_REVISION_KEYS.forEach((k) => delete body[k]);
+  if (!body.previousId) { delete body.previousId; return null; }
+  const { rows } = await query(`SELECT id, doc FROM quotations WHERE id = $1`, [body.previousId]);
+  if (!rows.length) return "The quotation being revised no longer exists.";
+  const prev = rows[0].doc || {};
+  if (prev.supersededBy) return "That version has already been superseded — revise the latest revision instead.";
+  if (!["approved", "sent", "declined", "accepted"].includes(prev.status)) return "Only an approved or sent quotation can be revised. Edit the draft instead.";
+  if (!String(body.revisionReason || "").trim()) return "Say what changed in this revision (e.g. 5% discount agreed with the client).";
+  const root = prev.revisionOf || rows[0].id;
+  const fam = await query(`SELECT doc FROM quotations WHERE id = $1 OR doc->>'revisionOf' = $1`, [root]);
+  if (fam.rows.some((r) => r.doc && r.doc.previousId && ["draft", "pending_approval"].includes(r.doc.status) && !r.doc.supersededBy)) {
+    return "A revision of this quotation is already in progress. Finish or delete it first.";
+  }
+  const maxRev = fam.rows.reduce((m, r) => Math.max(m, Number(r.doc && r.doc.revision) || 0), 0);
+  body.quoteNo = prev.quoteNo;          // the identifier never changes
+  body.clientId = prev.clientId;
+  body.revision = maxRev + 1;
+  body.revisionOf = root;
+  body.revisionReason = String(body.revisionReason).trim().slice(0, 300);
+  return null;
+}
+// Once a revision is approved (or sent), the version it revises is superseded.
+async function supersedePrevious(doc, id) {
+  if (!doc || !doc.previousId || !["approved", "sent", "accepted"].includes(doc.status)) return;
+  await query(
+    `UPDATE quotations SET doc = doc || jsonb_build_object('supersededBy', $2::text), updated_at = now()
+      WHERE id = $1 AND COALESCE(doc->>'supersededBy', '') = ''`,
+    [doc.previousId, id],
+  );
+}
 // Moves a non-approver may make: from -> allowed next states.
 const QUOTE_STAFF_MOVES = {
   draft: ["draft", "pending_approval"],
@@ -464,6 +500,8 @@ export function crudRouter(table) {
         body[OWN_FIELD[table]] = req.user.empId; // force the new row to belong to the caller
       }
       if (table === "quotations") {
+        const revProblem = await prepareRevision(body);
+        if (revProblem) return res.status(400).json({ error: revProblem });
         const problem = await linkQuoteClient(body, true);
         if (problem) return res.status(400).json({ error: problem });
         if (!String(body.attn || "").trim()) return res.status(400).json({ error: "Enter who the quotation is for at the client (Attn)." });
@@ -482,6 +520,7 @@ export function crudRouter(table) {
         `INSERT INTO ${table} (id, doc) VALUES ($1, $2) RETURNING id, doc`,
         [id, JSON.stringify(doc)],
       );
+      if (table === "quotations") await supersedePrevious(rows[0].doc, rows[0].id);
       res.status(201).json(rowToRecord(rows[0]));
     } catch (e) {
       if (e.code === "23505") return res.status(409).json({ error: "A record with that id already exists." });
@@ -541,6 +580,12 @@ export function crudRouter(table) {
         const cur = await query(`SELECT doc FROM quotations WHERE id = $1`, [req.params.id]);
         if (!cur.rows.length) return res.status(404).json({ error: "Record not found." });
         const curDoc = cur.rows[0].doc || {};
+        QUOTE_REVISION_KEYS.forEach((k) => delete patch[k]);
+        delete patch.previousId;
+        if (curDoc.previousId) delete patch.quoteNo; // a revision keeps the original's reference
+        if (curDoc.supersededBy && Object.keys(patch).some((k) => QUOTE_CONTENT.has(k) || k === "status")) {
+          return res.status(400).json({ error: "This version has been superseded by a later revision and can no longer be changed." });
+        }
         if (["approved", "sent"].includes(patch.status) && !("attn" in patch) && !String(curDoc.attn || "").trim()) {
           return res.status(400).json({ error: "Add the Attn before approving or sending this quotation." });
         }
@@ -560,6 +605,7 @@ export function crudRouter(table) {
         [req.params.id, JSON.stringify(patch)],
       );
       if (!rows.length) return res.status(404).json({ error: "Record not found." });
+      if (table === "quotations") await supersedePrevious(rows[0].doc, rows[0].id);
       // Terminating employment ends every open session for that person's login.
       if (table === "employees" && patch.status === "Terminated") {
         await query(`UPDATE users SET token_epoch = token_epoch + 1, updated_at = now() WHERE emp_id = $1`, [req.params.id]);

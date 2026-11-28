@@ -18,6 +18,7 @@ import { GLA_HEADER, GLA_HEADER_RATIO } from "./header.js";
 // Letterhead text + signatories live in a tiny dependency-free module so the
 // app can import them without loading jsPDF. Re-exported here for compatibility.
 import { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories, signatureFor, isSigImage, samePerson } from "./reportConstants.js";
+import { quoteTotals, quoteRef } from "./data.js";
 export { COMPANY, setReportCompany, SIGNATORIES, setReportSignatories };
 
 /* -------------------------------- palette -------------------------------- */
@@ -534,13 +535,11 @@ export function downloadQuotationPdf(q) {
   const cur = q.currency || "UGX";
   const rate = Number(q.vatRate) || 0;
   const CURRENCY_WORDS = { UGX: "Uganda Shillings", USD: "US Dollars", EUR: "Euros", GBP: "Pounds Sterling", AED: "UAE Dirhams", KES: "Kenya Shillings" };
-  const lines = (q.lineItems || []).map((li) => {
-    const sub = Math.round((Number(li.qty) || 0) * (Number(li.rate) || 0));
-    const v = Math.round(sub * rate / 100);
-    return { ...li, sub, vat: v, total: sub + v };
-  });
-  const sub = lines.reduce((a, l) => a + l.sub, 0), vat = lines.reduce((a, l) => a + l.vat, 0), grand = sub + vat;
-  const ref = q.quoteNo || q.id || "";
+  const T = quoteTotals(q);
+  const lines = T.lines;
+  const sub = T.sub, grand = T.grand;
+  const rev = Number(q.revision) || 0;
+  const ref = quoteRef(q);
   // Not approved yet (draft or awaiting HR & Admin approval) => still a draft.
   const draft = q.status === "draft" || q.status === "pending_approval";
   const validUntil = (() => { const d = new Date((q.date || "") + "T00:00:00"); if (isNaN(d)) return ""; d.setDate(d.getDate() + (Number(q.validityDays) || 30)); return d.toISOString().slice(0, 10); })();
@@ -549,7 +548,8 @@ export function downloadQuotationPdf(q) {
   const qrText = [`${COMPANY.name} — QUOTATION`, `Ref: ${ref}`, `To: ${q.client || "-"}`, `Total: ${cur} ${voMoney(grand)}`, `Date: ${voDate(q.date)}`, `Valid until: ${voDate(validUntil)}`].join("\n");
   let y = drawLetterhead(doc);
   drawTopRightQR(doc, qrText);
-  y = drawTitleBlock(doc, y, { eyebrow: "Quotation", title: draft ? "QUOTATION — DRAFT" : "QUOTATION", subtitle: null, meta: [], reference: ref });
+  const title = `QUOTATION${rev ? ` — REVISION ${rev}` : ""}${draft ? (rev ? " (DRAFT)" : " — DRAFT") : ""}`;
+  y = drawTitleBlock(doc, y, { eyebrow: rev ? `Quotation · Revision ${rev}` : "Quotation", title, subtitle: null, meta: [], reference: ref });
 
   // Details block — label column right-aligned and shaded, values in italics.
   const kcell = { fontStyle: "bold", textColor: INK, fillColor: KVFILL, halign: "right" };
@@ -559,7 +559,8 @@ export function downloadQuotationPdf(q) {
     [{ content: "Scope of works", styles: kcell }, vcell(q.scope)],
     [{ content: "Location:", styles: kcell }, vcell(q.sites)],
     [{ content: "Attn:", styles: kcell }, vcell(q.attn)],
-    [{ content: "Our Ref", styles: kcell }, vcell(ref, true)],
+    [{ content: "Our Ref", styles: kcell }, vcell(rev ? `${q.quoteNo} — Revision ${rev}` : ref, true)],
+    ...(rev ? [[{ content: "Revision", styles: kcell }, vcell(`Rev. ${rev}${q.revisionReason ? ` — ${q.revisionReason}` : ""}. Supersedes all earlier versions of ${q.quoteNo}.`)]] : []),
     [{ content: "Date", styles: kcell }, vcell(longDate(q.date))],
     [{ content: "Quote validity", styles: kcell }, vcell(`${Number(q.validityDays) || 30} calendar days (valid until ${voDate(validUntil)})`, true)],
     [{ content: "Currency", styles: kcell }, vcell(CURRENCY_WORDS[cur] || cur)],
@@ -569,12 +570,15 @@ export function downloadQuotationPdf(q) {
   // Items.
   const head = ["No", "Description & Specification", "Item", "Qty", "Rate", "Sub total", `${rate}% VAT`, "Sub total"];
   const body = lines.map((l, i) => [String(i + 1), l.description || "", l.unit || "", voMoney(l.qty), voMoney(l.rate), voMoney(l.sub), voMoney(l.vat), voMoney(l.total)]);
-  body.push([
-    "", { content: "TOTALS", styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } }, "", "", "",
-    { content: voMoney(sub), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
-    { content: voMoney(vat), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
-    { content: voMoney(grand), styles: { fontStyle: "bolditalic", halign: "right", textColor: INK } },
-  ]);
+  const tot = (label, a, b, c, color) => {
+    const st = { fontStyle: "bolditalic", halign: "right", textColor: color || INK };
+    return ["", { content: label, colSpan: 4, styles: st }, { content: a, styles: st }, { content: b, styles: st }, { content: c, styles: st }];
+  };
+  body.push(tot("TOTALS", voMoney(sub), voMoney(T.lineVat), voMoney(T.lineTotal)));
+  if (T.discount) {
+    body.push(tot(T.discountLabel, `-${voMoney(T.discount)}`, `-${voMoney(T.lineVat - T.vat)}`, `-${voMoney(T.lineTotal - grand)}`, [176, 40, 30]));
+    body.push(tot("TOTALS AFTER DISCOUNT", voMoney(T.netSub), voMoney(T.vat), voMoney(grand)));
+  }
   y = runTable(doc, { head, body, startY: y + 12, guard, columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 170 }, 2: { cellWidth: 36 }, 3: { halign: "right", cellWidth: 36 }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } } });
 
   // Amount in words (as in the template: red words, currency in brand colour).
@@ -620,7 +624,7 @@ export function downloadQuotationPdf(q) {
       try { doc.restoreGraphicsState(); } catch (e) { /* noop */ }
     }
   }
-  doc.save(`Quotation-${String(ref).replace(/[/\\]/g, "-")}${draft ? "-DRAFT" : ""}.pdf`);
+  doc.save(`Quotation-${String(ref).replace(/ Rev\. /, "-Rev").replace(/[/\\]/g, "-").replace(/\s+/g, "")}${draft ? "-DRAFT" : ""}.pdf`);
 }
 
 /* -------------------------- certificate of service ------------------------- */

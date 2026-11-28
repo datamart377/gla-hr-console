@@ -454,8 +454,11 @@ export function normalizePurchaseOrder(po = {}) {
 // draft -> pending_approval -> approved (by HR & Admin) -> sent -> accepted/declined.
 // Until approved they remain drafts: DRAFT watermark, no signature.
 export const QUOTE_STATUSES = ["draft", "pending_approval", "approved", "sent", "accepted", "declined"];
-export const quoteStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting approval", approved: "Approved", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired" }[s] || s);
-export const quoteStatusTone = (s) => ({ draft: "muted", pending_approval: "warning", approved: "info", sent: "accent", accepted: "success", declined: "danger", expired: "warning" }[s] || "muted");
+export const quoteStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting approval", approved: "Approved", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired", superseded: "Superseded" }[s] || s);
+export const quoteStatusTone = (s) => ({ draft: "muted", pending_approval: "warning", approved: "info", sent: "accent", accepted: "success", declined: "danger", expired: "warning", superseded: "muted" }[s] || "muted");
+// A revised quotation keeps its reference (Gla/001/26); the revision number is
+// printed alongside it ("Gla/001/26 Rev. 1").
+export const quoteRef = (q) => { const n = Number(q && q.revision) || 0; const no = (q && (q.quoteNo || q.id)) || ""; return n ? `${no} Rev. ${n}` : no; };
 // Still a draft for printing purposes (watermark, no signature).
 export const quoteIsDraft = (q) => ["draft", "pending_approval"].includes(q && q.status);
 export const QUOTE_UNITS = ["item", "lot", "lsum", "mtrs", "pcs", "nos", "sets", "rolls", "ltrs", "kgs", "days", "hrs", "trips"];
@@ -510,6 +513,15 @@ export function normalizeQuotation(q = {}) {
     vatRate: q.vatRate === 0 || q.vatRate === "0" ? 0 : Number(q.vatRate ?? 18) || 18,
     lineItems: lineItems.length ? lineItems : [{ description: "", unit: "item", qty: 1, rate: 0 }],
     notes: q.notes || "",
+    // Optional discount on the sub total (before VAT): a percentage or an amount.
+    discountType: q.discountType === "amount" ? "amount" : "percent",
+    discountValue: Number(q.discountValue) > 0 ? Number(q.discountValue) : 0,
+    // Revisions share the original's reference; revision 0 is the original.
+    revision: Number(q.revision) > 0 ? Number(q.revision) : 0,
+    revisionOf: q.revisionOf || "",       // id of the original quotation in this family
+    previousId: q.previousId || "",       // id of the version this one revises
+    revisionReason: q.revisionReason || "",
+    supersededBy: q.supersededBy || "",   // set once a later revision is approved
     status: QUOTE_STATUSES.includes(q.status) ? q.status : "draft",
     preparedBy: q.preparedBy || "",
     sentAt: q.sentAt || null,
@@ -533,12 +545,20 @@ export function quoteTotals(q) {
     return { ...li, sub, vat, total: sub + vat };
   });
   const sub = lines.reduce((a, l) => a + l.sub, 0);
-  const vat = lines.reduce((a, l) => a + l.vat, 0);
-  return { lines, sub, vat, grand: sub + vat, rate };
+  const lineVat = lines.reduce((a, l) => a + l.vat, 0);
+  const lineTotal = sub + lineVat;
+  // Discount comes off the sub total before VAT; VAT is then charged on the rest.
+  const dv = Number(q && q.discountValue) || 0;
+  const discount = dv > 0 ? Math.min(sub, Math.round(q.discountType === "amount" ? dv : sub * dv / 100)) : 0;
+  const netSub = sub - discount;
+  const vat = discount ? Math.round(netSub * rate / 100) : lineVat;
+  const discountLabel = discount ? (q.discountType === "amount" ? "Less discount" : `Less discount (${dv}%)`) : "";
+  // sub/lineVat/lineTotal: the items as listed; netSub/vat/grand: what is payable.
+  return { lines, sub, lineVat, lineTotal, discount, discountLabel, netSub, vat, grand: netSub + vat, rate };
 }
 // Valid-until date and whether an unanswered quote has lapsed.
 export const quoteValidUntil = (q) => { const d = new Date((q.date || "") + "T00:00:00"); if (isNaN(d)) return ""; d.setDate(d.getDate() + (Number(q.validityDays) || 30)); return d.toISOString().slice(0, 10); };
-export const quoteDisplayStatus = (q, today = new Date().toISOString().slice(0, 10)) => (q.status === "sent" && quoteValidUntil(q) && quoteValidUntil(q) < today ? "expired" : q.status);
+export const quoteDisplayStatus = (q, today = new Date().toISOString().slice(0, 10)) => (q.supersededBy ? "superseded" : q.status === "sent" && quoteValidUntil(q) && quoteValidUntil(q) < today ? "expired" : q.status);
 // Next reference, continuing the Gla/NNN/YY series from the highest one used.
 export function nextQuoteNumber(existing = []) {
   const yy = String(new Date().getFullYear()).slice(-2);
