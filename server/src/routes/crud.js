@@ -192,23 +192,35 @@ function shapeQuotation(req, patch, existing) {
   const cur = existing || {};
   const from = existing ? (QUOTE_STATES.includes(cur.status) ? cur.status : "draft") : null;
   let next = "status" in out ? out.status : (from || "draft");
-  // Quotations HR & Admin create themselves are approved by them by default.
-  if (approver && !existing && ["draft", "pending_approval"].includes(next)) next = "approved";
-  // ...and so is one of their own drafts they save again (not one Finance prepared).
-  if (approver && existing && from === "draft" && next === "draft" && !cur.needsApproval) next = "approved";
+  const editsContent = !existing || Object.keys(out).some((k) => QUOTE_CONTENT.has(k) && JSON.stringify(out[k]) !== JSON.stringify(cur[k]));
+  // Revisions and discounted quotations always need an explicit HR & Admin
+  // approval — even when HR or Admin prepared them.
+  const isRevision = !!(out.previousId || cur.previousId);
+  const discounted = (Number("discountValue" in out ? out.discountValue : cur.discountValue) || 0) > 0;
+  const needsExplicit = isRevision || discounted;
+  // An issued quotation is never edited in place: changes go through Revise (and approval).
+  if (existing && editsContent && ["approved", "sent", "accepted", "declined"].includes(from)) {
+    return { error: "This quotation has been approved, so it can't be changed directly. Use Revise — the revision goes to HR & Admin for approval." };
+  }
+  if (approver) {
+    if (needsExplicit) {
+      // Approval must be its own step (the Approve action), never a side effect of saving changes.
+      if (editsContent && ["approved", "sent"].includes(next)) next = "pending_approval";
+    } else if (!existing && ["draft", "pending_approval"].includes(next)) {
+      next = "approved"; // HR & Admin's own plain quotations are approved by them by default
+    } else if (existing && from === "draft" && next === "draft" && !cur.needsApproval) {
+      next = "approved"; // ...including one of their own drafts saved again
+    }
+  }
   if (!QUOTE_STATES.includes(next)) return { error: "Unknown quotation status." };
-  if (!existing) { out.initiatedBy = me; out.needsApproval = !approver; }
+  if (!existing) { out.initiatedBy = me; out.needsApproval = !approver || needsExplicit; }
+  else if (needsExplicit && editsContent && !cur.needsApproval) out.needsApproval = true;
   if (!approver) {
     if (!existing && !["draft", "pending_approval"].includes(next)) return { error: "Save the quotation as a draft or submit it to HR & Admin for approval." };
-    if (existing) {
-      if (!(QUOTE_STAFF_MOVES[from] || []).includes(next)) {
-        return { error: from === "pending_approval" || from === "draft" ? "Only HR & Admin can approve a quotation." : "That change isn't allowed for this quotation." };
-      }
-      const editsContent = Object.keys(out).some((k) => QUOTE_CONTENT.has(k) && JSON.stringify(out[k]) !== JSON.stringify(cur[k]));
-      if (editsContent && from !== "draft") {
-        return { error: from === "pending_approval" ? "This quotation is waiting for HR & Admin approval. Withdraw it to draft to make changes." : "This quotation has been approved and can't be changed. Duplicate it to prepare a revised quotation." };
-      }
+    if (existing && !(QUOTE_STAFF_MOVES[from] || []).includes(next)) {
+      return { error: from === "pending_approval" || from === "draft" ? "Only HR & Admin can approve a quotation." : "That change isn't allowed for this quotation." };
     }
+    // Finance may keep editing a quotation while it awaits approval; it stays in the queue.
   }
   // Awarded / Rejected — only from an approved or sent quotation, with the details.
   if (["accepted", "declined"].includes(next) && next !== from) {

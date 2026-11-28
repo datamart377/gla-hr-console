@@ -6854,7 +6854,7 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printQuote(ctx, x)} title="Download PDF"><Printer size={13} />PDF</Btn>
                 <Btn size="sm" onClick={() => excelQuote(ctx, x)} title="Download Excel"><Download size={13} /></Btn>
-                {!x.supersededBy && (approver || x.status === "draft") && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
+                {!x.supersededBy && ["draft", "pending_approval"].includes(x.status) && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
                 {quoteCanSetOutcome(x) && <>
                   <Btn size="sm" variant="success" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={x} outcome="accepted" />)} title="Client awarded it — record their order number"><Check size={13} />Awarded</Btn>
                   <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={x} outcome="declined" />)} title="Client rejected it — add a remark"><X size={13} />Rejected</Btn>
@@ -7138,6 +7138,8 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
   const lockedClient = (!!presetClientId && !existing) || !!f.previousId; // a revision stays with its client
   // Roles other than HR & Admin prepare quotations for HR & Admin approval.
   const approver = isHrOrAdmin(ctx);
+  // Revisions and discounted quotations always need an explicit approval step.
+  const needsExplicit = !!f.previousId || Number(f.discountValue) > 0;
   const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
   const selClient = allClients.find((c) => c.id === f.clientId) || null;
   // Switch client: Attn and Location follow the client unless they were typed in.
@@ -7182,7 +7184,7 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
       // Approval fields are stamped by the server, never sent from here.
       ["approval", "rejection", "initiatedBy", "submittedAt", "needsApproval", "revision", "revisionOf", "supersededBy"].forEach((k) => { delete payload[k]; });
       if (existing || !f.previousId) delete payload.previousId;
-      if (!approver && existing && f.status !== "draft") { alert("This quotation is no longer a draft, so it can't be changed."); setBusy(false); return; }
+      if (existing && !["draft", "pending_approval"].includes(existing.status)) { alert("This quotation has been approved, so it can't be changed directly. Use Revise — the revision goes to HR & Admin for approval."); setBusy(false); return; }
       const saved = existing ? await quotationsApi.update(existing.id, payload) : await quotationsApi.create({ ...payload, createdAt: now });
       await reload();
       if (printAfter) printQuote(ctx, saved || payload);
@@ -7197,18 +7199,21 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
       footer={<>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
-        {approver ? (() => {
-          // HR & Admin: their own quotations are approved on saving. A quotation
-          // Finance prepared keeps its state (approve it from the list/preview).
+        {approver && !needsExplicit ? (() => {
+          // HR & Admin: their own plain quotations are approved on saving. A
+          // quotation Finance prepared keeps its state (approve it from the list/preview).
           const fromFinance = existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status);
           const fresh = !existing || (f.status === "draft" && !fromFinance);
           return <>
             {fresh
               ? <Btn disabled={busy} onClick={() => save("approved")}><Check size={15} />{busy ? "Saving…" : "Save & approve"}</Btn>
               : <Btn disabled={busy} onClick={() => save(f.status)}><Check size={15} />{busy ? "Saving…" : "Save changes"}</Btn>}
-            {(fresh || f.status === "approved") && <Btn variant="primary" disabled={busy} onClick={() => save("sent")}><Send size={15} />Save as sent</Btn>}
+            {fresh && <Btn variant="primary" disabled={busy} onClick={() => save("sent")}><Send size={15} />Save as sent</Btn>}
           </>;
-        })() : <>
+        })() : existing && f.status === "pending_approval" ? (
+          // Still awaiting approval: changes keep it in the approval queue.
+          <Btn variant="primary" disabled={busy} onClick={() => save("pending_approval")}><Check size={15} />{busy ? "Saving…" : "Save changes"}</Btn>
+        ) : <>
           {(!existing || f.status === "draft") && <Btn disabled={busy} onClick={() => save("draft")}>Save draft</Btn>}
           <Btn variant="primary" disabled={busy} onClick={() => save("pending_approval")}><Send size={15} />{busy ? "Saving…" : "Submit for approval"}</Btn>
         </>}
@@ -7217,7 +7222,9 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
         {(revisedFrom || (existing && existing.previousId)) && <Banner Icon={RotateCcw}><b>Revision {f.revision} of {f.quoteNo}.</b> The reference stays the same; “Revision {f.revision}” is printed on the quotation. The previous version is marked superseded once this revision is approved.</Banner>}
         {f.status === "draft" && f.rejection && <Banner Icon={AlertTriangle} tone="warning"><b>Returned by {f.rejection.name}{f.rejection.at ? ` on ${fmtDate(f.rejection.at)}` : ""}:</b> {f.rejection.reason || "no reason given"}. Make the changes, then submit it again.</Banner>}
         {!approver && <Banner Icon={ClipboardCheck}>HR &amp; Admin approve quotations before they're issued. Until then it stays a draft — watermarked and unsigned.</Banner>}
-        {approver && !(existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status)) && f.status !== "sent" && <Banner Icon={ClipboardCheck}>As HR &amp; Admin, quotations you prepare are approved by you when saved — they print signed, without the DRAFT watermark.</Banner>}
+        {approver && needsExplicit && <Banner Icon={ClipboardCheck} tone="warning">{f.previousId ? "Revisions" : "Discounted quotations"} need an explicit HR &amp; Admin approval. Submit it, then approve it with <b>Approve</b> on the quotation — until then it stays a draft.</Banner>}
+        {approver && !needsExplicit && !(existing && f.needsApproval && ["draft", "pending_approval"].includes(f.status)) && <Banner Icon={ClipboardCheck}>As HR &amp; Admin, quotations you prepare are approved by you when saved — they print signed, without the DRAFT watermark. Revisions and discounted quotations need a separate approval.</Banner>}
+        {!approver && f.status === "pending_approval" && <Banner Icon={ClipboardCheck}>This quotation is awaiting HR &amp; Admin approval. You can still change it — it stays in their approval queue.</Banner>}
         <Card style={{ padding: 0 }}>
           <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -7234,7 +7241,7 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
             <Field label="Currency"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
             <Field label="VAT"><Select value={String(f.vatRate)} onChange={set("vatRate")} options={[{ value: "18", label: "18% VAT added per item" }, { value: "0", label: "No VAT" }]} /></Field>
-            {existing && approver && !["accepted", "declined"].includes(f.status) && <Field label="Status" hint="Use Awarded / Rejected on the quotation to record the client's decision"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.filter((x) => !["accepted", "declined"].includes(x)).map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
+
           </div>
         </Card>
         <Card style={{ padding: 0 }}>
@@ -7339,13 +7346,13 @@ function QuotationPreview({ ctx, q: raw }) {
       <Btn onClick={() => setModal(null)}>Close</Btn>
       {approver && q.status === "pending_approval" && <Btn variant="danger" onClick={() => decide(false)}><X size={14} />Return</Btn>}
       {approver && q.status === "pending_approval" && <Btn variant="success" onClick={() => decide(true)}><Check size={14} />Approve</Btn>}
-      {!approver && q.status === "draft" && <Btn variant="primary" onClick={() => setStatus("pending_approval")}><Send size={14} />Submit for approval</Btn>}
+      {(!approver || q.needsApproval) && q.status === "draft" && <Btn variant="primary" onClick={() => setStatus("pending_approval")}><Send size={14} />Submit for approval</Btn>}
       {!approver && q.status === "pending_approval" && <Btn onClick={() => setStatus("draft")} title="Take it back to make changes"><RotateCcw size={14} />Withdraw</Btn>}
       {approver && q.status === "draft" && !q.needsApproval && <Btn variant="success" onClick={() => setStatus("approved")}><Check size={14} />Approve</Btn>}
-      {((approver && q.status === "draft") || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
+      {((approver && q.status === "draft" && !q.needsApproval) || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
       {quoteCanSetOutcome(q) && <Btn variant="danger" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={q} outcome="declined" />)}><X size={14} />Rejected</Btn>}
       {quoteCanSetOutcome(q) && <Btn variant="success" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={q} outcome="accepted" />)}><Check size={14} />Awarded</Btn>}
-      {!q.supersededBy && (approver || q.status === "draft") && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
+      {!q.supersededBy && ["draft", "pending_approval"].includes(q.status) && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
       {quoteCanRevise(q, ctx.store.quotations) && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} reviseOf={q.id} />)}><RotateCcw size={14} />Revise</Btn>}
       <Btn onClick={() => excelQuote(ctx, raw)}><Download size={14} />Excel</Btn>
       <Btn variant="primary" onClick={() => printQuote(ctx, raw)}><Printer size={14} />Download PDF</Btn>
