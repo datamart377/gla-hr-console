@@ -541,7 +541,8 @@ export function downloadQuotationPdf(q) {
   });
   const sub = lines.reduce((a, l) => a + l.sub, 0), vat = lines.reduce((a, l) => a + l.vat, 0), grand = sub + vat;
   const ref = q.quoteNo || q.id || "";
-  const draft = q.status === "draft";
+  // Not approved yet (draft or awaiting HR & Admin approval) => still a draft.
+  const draft = q.status === "draft" || q.status === "pending_approval";
   const validUntil = (() => { const d = new Date((q.date || "") + "T00:00:00"); if (isNaN(d)) return ""; d.setDate(d.getDate() + (Number(q.validityDays) || 30)); return d.toISOString().slice(0, 10); })();
   const longDate = (s) => { try { return new Date(s + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); } catch { return voDate(s); } };
 
@@ -607,7 +608,7 @@ export function downloadQuotationPdf(q) {
   let ly = sy + 22;
   if (sig.title) { ly += 13; doc.setFont("helvetica", "bold"); doc.setFontSize(8.8); doc.setTextColor(...BRAND); doc.text(String(sig.title), MARGIN, ly); }
   if (sig.contact) { ly += 13; doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...BODY); doc.text(String(sig.contact), MARGIN, ly); }
-  if (draft) { ly += 14; doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text("Draft — not yet issued", MARGIN, ly); }
+  if (draft) { ly += 14; doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...MUTED); doc.text(q.status === "pending_approval" ? "Draft — awaiting HR & Admin approval" : "Draft — not yet issued", MARGIN, ly); }
 
   drawFooters(doc);
   if (draft) {

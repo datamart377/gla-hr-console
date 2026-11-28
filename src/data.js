@@ -450,9 +450,14 @@ export function normalizePurchaseOrder(po = {}) {
    validity / currency, priced line items with 18% VAT added per line, amount
    in words and the approved signatory.
    ========================================================================= */
-export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined"];
-export const quoteStatusLabel = (s) => ({ draft: "Draft", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired" }[s] || s);
-export const quoteStatusTone = (s) => ({ draft: "muted", sent: "accent", accepted: "success", declined: "danger", expired: "warning" }[s] || "muted");
+// Quotations initiated by roles other than HR & Admin (e.g. Finance) go
+// draft -> pending_approval -> approved (by HR & Admin) -> sent -> accepted/declined.
+// Until approved they remain drafts: DRAFT watermark, no signature.
+export const QUOTE_STATUSES = ["draft", "pending_approval", "approved", "sent", "accepted", "declined"];
+export const quoteStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting approval", approved: "Approved", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired" }[s] || s);
+export const quoteStatusTone = (s) => ({ draft: "muted", pending_approval: "warning", approved: "info", sent: "accent", accepted: "success", declined: "danger", expired: "warning" }[s] || "muted");
+// Still a draft for printing purposes (watermark, no signature).
+export const quoteIsDraft = (q) => ["draft", "pending_approval"].includes(q && q.status);
 export const QUOTE_UNITS = ["item", "lot", "lsum", "mtrs", "pcs", "nos", "sets", "rolls", "ltrs", "kgs", "days", "hrs", "trips"];
 /* --------------------------------- clients --------------------------------- */
 // The firms Global Link quotes to. Every quotation is raised against one.
@@ -509,6 +514,11 @@ export function normalizeQuotation(q = {}) {
     preparedBy: q.preparedBy || "",
     sentAt: q.sentAt || null,
     decidedAt: q.decidedAt || null,
+    initiatedBy: q.initiatedBy || null,   // { by, name, role, at } — stamped by the server
+    needsApproval: !!q.needsApproval,
+    submittedAt: q.submittedAt || null,
+    approval: q.approval || null,         // { by, name, role, at }
+    rejection: q.rejection || null,       // { by, name, at, reason }
     createdAt: q.createdAt || new Date().toISOString(),
     updatedAt: q.updatedAt || new Date().toISOString(),
   };
@@ -644,7 +654,7 @@ data.settings = {
   roles: [
     { id: "admin", name: "Administrator", system: true, description: "Full access to every module and action, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
     { id: "hr", name: "HR Officer", description: "Runs day-to-day HR: staff, leave, attendance, payroll, stock and settings, plus staff self-service.", modules: allMods(true), actions: allActs(true) },
-    { id: "finance", name: "Finance Officer", description: "Staff self-service plus salary advances, suppliers & purchase orders, requisition payments and stock.", modules: { dashboard: true, employees: false, leave: true, attendance: true, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: false, settings: false, selfservice: true, quotations: false }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
+    { id: "finance", name: "Finance Officer", description: "Staff self-service plus salary advances, suppliers & purchase orders, requisition payments, stock and client quotations (approved by HR & Admin).", modules: { dashboard: true, employees: false, leave: true, attendance: true, payroll: false, advances: true, suppliers: true, stock: true, appraisals: false, reports: false, settings: false, selfservice: true, quotations: true }, actions: { editEmployees: false, approveLeave: false, processPayroll: false, manageAdvances: true, manageStock: true, manageSettings: false, manageSuppliers: false, manageAttendance: false, deleteRecords: false } },
     { id: "staff", name: "Staff (self-service)", system: true, portalOnly: true, description: "Self-service portal only — clock-in, leave, payslip, advances.", modules: allMods(false), actions: allActs(false) },
   ],
   announcements: [

@@ -128,6 +128,59 @@ async function shapePurchaseOrder(req, patch, existing) {
   return out;
 }
 
+// ---- Quotation approval -------------------------------------------------
+// HR & Admin approve quotations initiated by other roles (e.g. Finance). Until
+// approved a quotation stays a draft (prints with a DRAFT watermark and no
+// signature). Approval/rejection stamps are set here, never trusted from the client.
+const QUOTE_STATES = ["draft", "pending_approval", "approved", "sent", "accepted", "declined"];
+const QUOTE_CONTENT = new Set(["client", "clientId", "attn", "scope", "sites", "quoteNo", "date", "validityDays", "currency", "vatRate", "lineItems", "notes"]);
+// Moves a non-approver may make: from -> allowed next states.
+const QUOTE_STAFF_MOVES = {
+  draft: ["draft", "pending_approval"],
+  pending_approval: ["pending_approval", "draft"], // draft = withdraw
+  approved: ["approved", "sent"],
+  sent: ["sent", "accepted", "declined"],
+  accepted: ["accepted"],
+  declined: ["declined"],
+};
+function shapeQuotation(req, patch, existing) {
+  const now = new Date().toISOString();
+  const approver = isHrAdmin(req);
+  const me = { by: req.user.empId || "", name: req.user.name || req.user.email || "", role: req.user.role, at: now };
+  const out = { ...patch };
+  const rejectReason = out.rejectReason; delete out.rejectReason;
+  delete out.approval; delete out.rejection; delete out.initiatedBy; delete out.submittedAt; delete out.needsApproval;
+  const cur = existing || {};
+  const from = existing ? (QUOTE_STATES.includes(cur.status) ? cur.status : "draft") : null;
+  const next = "status" in out ? out.status : (from || "draft");
+  if (!QUOTE_STATES.includes(next)) return { error: "Unknown quotation status." };
+  if (!existing) { out.initiatedBy = me; out.needsApproval = !approver; }
+  if (!approver) {
+    if (!existing && !["draft", "pending_approval"].includes(next)) return { error: "Save the quotation as a draft or submit it to HR & Admin for approval." };
+    if (existing) {
+      if (!(QUOTE_STAFF_MOVES[from] || []).includes(next)) {
+        return { error: from === "pending_approval" || from === "draft" ? "Only HR & Admin can approve a quotation." : "That change isn't allowed for this quotation." };
+      }
+      const editsContent = Object.keys(out).some((k) => QUOTE_CONTENT.has(k) && JSON.stringify(out[k]) !== JSON.stringify(cur[k]));
+      if (editsContent && from !== "draft") {
+        return { error: from === "pending_approval" ? "This quotation is waiting for HR & Admin approval. Withdraw it to draft to make changes." : "This quotation has been approved and can't be changed. Duplicate it to prepare a revised quotation." };
+      }
+    }
+  }
+  out.status = next;
+  if (next === "pending_approval" && from !== "pending_approval") { out.submittedAt = now; out.rejection = null; }
+  // HR/Admin approving — or sending directly, which is approval too.
+  if (approver && ["approved", "sent"].includes(next) && !cur.approval && !["approved", "sent", "accepted", "declined"].includes(from || "")) {
+    out.approval = { ...me };
+    out.rejection = null;
+  }
+  // HR/Admin returning it to the initiator with a reason.
+  if (approver && next === "draft" && from === "pending_approval") {
+    out.rejection = { ...me, reason: String(rejectReason || "").slice(0, 500) };
+  }
+  return { out };
+}
+
 // Final (second-level) requisition approvers: HR & Admin only.
 const isHrAdmin = (req) => ["admin", "hr"].includes(req.user && req.user.role);
 // First-level requisition approver: any employee flagged isSupervisor (looked up live).
@@ -410,6 +463,9 @@ export function crudRouter(table) {
         const problem = await linkQuoteClient(body, true);
         if (problem) return res.status(400).json({ error: problem });
         if (!String(body.attn || "").trim()) return res.status(400).json({ error: "Enter who the quotation is for at the client (Attn)." });
+        const shaped = shapeQuotation(req, body, null);
+        if (shaped.error) return res.status(403).json({ error: shaped.error });
+        Object.keys(body).forEach((k) => delete body[k]); Object.assign(body, shaped.out);
       }
       if (table === "clients") {
         if (!String(body.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });
@@ -478,10 +534,15 @@ export function crudRouter(table) {
         if (problem) return res.status(400).json({ error: problem });
         // Attn is mandatory: it can't be cleared, and a quotation can't be sent without it.
         if ("attn" in patch && !String(patch.attn || "").trim()) return res.status(400).json({ error: "Enter who the quotation is for at the client (Attn)." });
-        if (patch.status === "sent" && !("attn" in patch)) {
-          const cur = await query(`SELECT doc->>'attn' AS attn FROM quotations WHERE id = $1`, [req.params.id]);
-          if (cur.rows[0] && !String(cur.rows[0].attn || "").trim()) return res.status(400).json({ error: "Add the Attn before marking this quotation as sent." });
+        const cur = await query(`SELECT doc FROM quotations WHERE id = $1`, [req.params.id]);
+        if (!cur.rows.length) return res.status(404).json({ error: "Record not found." });
+        const curDoc = cur.rows[0].doc || {};
+        if (["approved", "sent"].includes(patch.status) && !("attn" in patch) && !String(curDoc.attn || "").trim()) {
+          return res.status(400).json({ error: "Add the Attn before approving or sending this quotation." });
         }
+        const shaped = shapeQuotation(req, patch, curDoc);
+        if (shaped.error) return res.status(403).json({ error: shaped.error });
+        patch = shaped.out;
       }
       if (table === "clients" && "name" in patch) {
         if (!String(patch.name || "").trim()) return res.status(400).json({ error: "Enter the client's name." });

@@ -26,7 +26,7 @@ import {
 import {
   data, TODAY, UNIT_TYPES, RENT_CYCLES, PAY_METHODS, PAY_KINDS, MAINT_PRIORITIES, MAINT_STATUSES, cycleLabel, addMonthsISO, normalizeLease, leaseStatus, nextReceiptNo, nextTenancyId, normalizeClient, CLIENT_STATUSES, CLIENT_CATEGORIES, sameClientName, clientOfQuote, DEPARTMENTS, deptList, positionsFor, CONTRACT_TYPES, EMP_STATUSES, EXIT_TYPES, isExited, serviceLabel, statutoryNotice, payrollEmployee, SITES, LEAVE_TYPES, LEAVE_COLORS,
   APPRAISAL_METRICS, MARITAL_STATUSES, TERMS_TYPES, REPEATER_SCHEMAS,
-  derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
+  quoteIsDraft, derivePayslip, deriveLeaveBalance, appraisalOverall, workingDaysBetween, normalizeEmployee,
   deriveSupplier, resolveScheduleLine, SUPPLIER_CATEGORIES, SUPPLIER_STATUSES, SUPPLIER_WHT_RATE, SUPPLIER_VAT_RATE,
   advanceInstallment, advanceModified, ADVANCE_MAX_MONTHS, withAdvanceDeductions, advanceRepaymentForMonth, advanceProgress,
   normalizeRequisition, REQ_STATUSES, reqStatusLabel, reqStatusTone, reqTotal, reqPayable, reqAdjusted, REQ_STAGES, reqStageIndex, reqStagesFor, reqStageIndexFor, reqIsFinanceDirect,
@@ -3599,6 +3599,13 @@ function actionAlertsFor(ctx) {
     const n = ctx.secSummary.unacknowledged;
     out.push({ key: "security", module: "security", Icon: ShieldAlert, tone: "danger", title: "Security threats to review", count: n, detail: `high-severity event${n === 1 ? "" : "s"} detected — see Security` });
   }
+  if (hrAdmin) {
+    const n = (store.quotations || []).filter((q) => q.status === "pending_approval").length;
+    if (n) out.push({ key: "quote_admin", module: "quotations", Icon: FileSignature, tone: "accent", title: "Quotations — approval", count: n, detail: "prepared by Finance, awaiting HR & Admin approval" });
+  } else {
+    const n = (store.quotations || []).filter((q) => q.status === "draft" && q.rejection && q.initiatedBy && q.initiatedBy.by === myId).length;
+    if (n) out.push({ key: "quote_returned", module: "quotations", Icon: FileSignature, tone: "warning", title: "Quotations returned", count: n, detail: "sent back by HR & Admin — make the changes and resubmit" });
+  }
   if (isSup) {
     const n = (store.requisitions || []).filter((r) => r.status === "pending_supervisor" && canSuperviseReq(r, myId, employees)).length;
     if (n) out.push({ key: "req_sup", module: "requisitions", Icon: Receipt, tone: "warning", title: "Requisitions to review", count: n, detail: "awaiting your first-level approval" });
@@ -6687,7 +6694,7 @@ function excelQuote(ctx, raw) {
   const t = quoteTotals(q);
   const cur = q.currency || "UGX";
   downloadScheduleXlsx({
-    title: "QUOTATION", eyebrow: "QUOTATION",
+    title: quoteIsDraft(q) ? "QUOTATION — DRAFT" : "QUOTATION", eyebrow: "QUOTATION",
     subtitle: `${q.quoteNo || ""} · ${q.client || ""}`,
     meta: [
       `Quote to: ${q.client || "—"}${q.attn ? "    Attn: " + q.attn : ""}`,
@@ -6704,6 +6711,24 @@ function excelQuote(ctx, raw) {
     totalsRow: ["", "TOTALS", "", "", "", t.sub, t.vat, t.grand],
     filename: `GLA-Quotation-${String(q.quoteNo || q.id || "").replace(/[/\\]/g, "-")}.xlsx`,
   });
+}
+
+// HR & Admin decide on a quotation another role submitted for approval.
+async function quoteDecide(ctx, q, approve) {
+  try {
+    if (approve) {
+      if (!String(q.attn || "").trim()) { alert("Add the Attn before approving this quotation."); return false; }
+      if (!window.confirm(`Approve quotation ${q.quoteNo} for ${q.client}?\n\nIt will carry the approved signatory's signature and can then be sent to the client.`)) return false;
+      await quotationsApi.update(q.id, { status: "approved", updatedAt: new Date().toISOString() });
+    } else {
+      const reason = window.prompt(`Return quotation ${q.quoteNo} to ${(q.initiatedBy && q.initiatedBy.name) || "the preparer"} as a draft?\n\nReason / what to change:`);
+      if (reason == null) return false;
+      if (!reason.trim()) { alert("Please give a reason so the preparer knows what to change."); return false; }
+      await quotationsApi.update(q.id, { status: "draft", rejectReason: reason.trim(), updatedAt: new Date().toISOString() });
+    }
+    await ctx.reload();
+    return true;
+  } catch (e) { alert(e.message || "That didn't work."); return false; }
 }
 
 function Quotations({ ctx, clientFilter, setClientFilter }) {
@@ -6726,10 +6751,15 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
   const lost = withStatus.filter((x) => x._st === "declined");
   const winRate = won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : null;
   const canDel = canDo(ctx, "deleteRecords");
+  const approver = isHrOrAdmin(ctx);
+  const pending = withStatus.filter((x) => x._st === "pending_approval");
   return (
     <>
+      {approver && pending.length > 0 && (
+        <Banner Icon={ClipboardCheck}><b>{pending.length} quotation{pending.length === 1 ? "" : "s"} awaiting your approval.</b> They stay drafts (watermarked, unsigned) until you approve them. <span style={{ color: "var(--brand)", fontWeight: 600, cursor: "pointer" }} onClick={() => setSt("pending_approval")}>Show them</span></Banner>
+      )}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
-        <StatCard Icon={FileSignature} label="Quotations" value={all.length} meta={`${withStatus.filter((x) => x._st === "draft").length} draft`} tone="brand" />
+        <StatCard Icon={FileSignature} label="Quotations" value={all.length} meta={`${withStatus.filter((x) => x._st === "draft").length} draft · ${pending.length} awaiting approval`} tone="brand" />
         <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
         <StatCard Icon={Check} label="Accepted" value={won.length} meta={`${ugxShort(ugx(won))} won`} tone="success" />
         <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
@@ -6750,13 +6780,24 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
             { label: "Date", render: (x) => fmtDate(x.date) },
             { label: "Valid until", render: (x) => <span style={{ color: x._st === "expired" ? "var(--warning)" : "var(--text-2)" }}>{fmtDate(quoteValidUntil(x))}</span> },
             { label: "Total", num: true, render: (x) => <span className="mono">{x.currency} {fmtN(x._t.grand)}</span> },
-            { label: "Status", render: (x) => <Pill tone={quoteStatusTone(x._st)}>{quoteStatusLabel(x._st)}</Pill> },
+            { label: "Status", render: (x) => (
+              <div>
+                <Pill tone={quoteStatusTone(x._st)}>{quoteStatusLabel(x._st)}</Pill>
+                {x._st === "pending_approval" && x.initiatedBy && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>from {x.initiatedBy.name}</div>}
+                {x.approval && !quoteIsDraft(x) && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>approved by {x.approval.name}</div>}
+                {x._st === "draft" && x.rejection && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 3 }} title={x.rejection.reason}>returned: {String(x.rejection.reason || "").slice(0, 36)}</div>}
+              </div>
+            ) },
             { label: "", render: (x) => (
-              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {approver && x._st === "pending_approval" && <>
+                  <Btn size="sm" variant="success" onClick={() => quoteDecide(ctx, x, true)} title="Approve"><Check size={13} />Approve</Btn>
+                  <Btn size="sm" variant="danger" onClick={() => quoteDecide(ctx, x, false)} title="Return to the preparer as a draft"><X size={13} /></Btn>
+                </>}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationPreview ctx={cc} q={x} />)} title="Preview"><Eye size={13} /></Btn>
                 <Btn size="sm" variant="primary" onClick={() => printQuote(ctx, x)} title="Download PDF"><Printer size={13} />PDF</Btn>
                 <Btn size="sm" onClick={() => excelQuote(ctx, x)} title="Download Excel"><Download size={13} /></Btn>
-                <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>
+                {(approver || x.status === "draft") && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} copyOf={x.id} />)} title="Duplicate as a new quotation"><Copy size={13} /></Btn>
                 {canDel && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={quotationsApi} id={x.id} label={x.quoteNo || x.id} />)} title="Delete"><Trash2 size={13} /></Btn>}
               </div>
@@ -6774,7 +6815,13 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
 // Quotations raised against those clients.
 function ClientsPage({ ctx }) {
   const { store } = ctx;
-  const [tab, setTab] = useState("register");
+  // Land on Quotations when something there needs this user's attention.
+  const [tab, setTab] = useState(() => {
+    const qs = store.quotations || [];
+    const myId = (ctx.currentEmp && ctx.currentEmp.id) || (ctx.auth && ctx.auth.empId) || "";
+    const waiting = isHrOrAdmin(ctx) ? qs.some((q) => q.status === "pending_approval") : qs.some((q) => q.status === "draft" && q.rejection && q.initiatedBy && q.initiatedBy.by === myId);
+    return waiting ? "quotes" : "register";
+  });
   const [clientFilter, setClientFilter] = useState("");
   const clientCount = (store.clients || []).length;
   const quoteCount = (store.quotations || []).length;
@@ -7007,7 +7054,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
   const me = ctx.currentEmp ? `${ctx.currentEmp.firstName} ${ctx.currentEmp.lastName}`.trim() : ((ctx.auth && ctx.auth.name) || "");
   const [f, setF] = useState(() => {
     const base = existing ? normalizeQuotation(existing) : normalizeQuotation({
-      ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined } : {}),
+      ...(source ? { ...source, id: undefined, status: "draft", sentAt: null, decidedAt: null, createdAt: undefined, approval: null, rejection: null, initiatedBy: null, submittedAt: null, needsApproval: false } : {}),
       quoteNo: nextQuoteNumber(list), date: TODAY, preparedBy: me,
     });
     // Link to the client record (older quotations are matched by name).
@@ -7018,6 +7065,8 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
       ...(fresh ? { currency: c.currency, vatRate: c.vatDefault ? 18 : 0, validityDays: c.validityDays } : {}) };
   });
   const lockedClient = !!presetClientId && !existing;
+  // Roles other than HR & Admin prepare quotations for HR & Admin approval.
+  const approver = isHrOrAdmin(ctx);
   const clientOpts = allClients.filter((c) => c.status !== "Inactive" || c.id === f.clientId).sort((a, b) => a.name.localeCompare(b.name));
   const selClient = allClients.find((c) => c.id === f.clientId) || null;
   // Switch client: Attn and Location follow the client unless they were typed in.
@@ -7057,6 +7106,9 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
         lineItems: valid.map((it) => ({ description: String(it.description).trim(), unit: String(it.unit || "").trim() || "item", qty: Number(it.qty) || 0, rate: Number(it.rate) || 0 })),
         status: nextStatus, sentAt: nextStatus === "sent" ? (f.sentAt || now) : f.sentAt, preparedBy: f.preparedBy || me, updatedAt: now,
       };
+      // Approval fields are stamped by the server, never sent from here.
+      ["approval", "rejection", "initiatedBy", "submittedAt", "needsApproval"].forEach((k) => { delete payload[k]; });
+      if (!approver && existing && f.status !== "draft") { alert("This quotation is no longer a draft, so it can't be changed."); setBusy(false); return; }
       const saved = existing ? await quotationsApi.update(existing.id, payload) : await quotationsApi.create({ ...payload, createdAt: now });
       await reload();
       if (printAfter) printQuote(ctx, saved || payload);
@@ -7072,9 +7124,13 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, marginRight: "auto", color: "var(--text-2)" }}><input type="checkbox" checked={printAfter} onChange={(e) => setPrintAfter(e.target.checked)} />Download PDF after saving</label>
         <Btn onClick={() => setModal(null)}>Cancel</Btn>
         {(!existing || f.status === "draft") && <Btn disabled={busy} onClick={() => save("draft")}>Save draft</Btn>}
-        <Btn variant="primary" disabled={busy} onClick={() => save(existing && f.status !== "draft" ? f.status : "sent")}><Send size={15} />{busy ? "Saving…" : existing && f.status !== "draft" ? "Save changes" : "Save as sent"}</Btn>
+        {approver
+          ? <Btn variant="primary" disabled={busy} onClick={() => save(existing && f.status !== "draft" ? f.status : "sent")}><Send size={15} />{busy ? "Saving…" : existing && f.status !== "draft" ? "Save changes" : "Save as sent"}</Btn>
+          : <Btn variant="primary" disabled={busy} onClick={() => save("pending_approval")}><Send size={15} />{busy ? "Saving…" : "Submit for approval"}</Btn>}
       </>}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {f.status === "draft" && f.rejection && <Banner Icon={AlertTriangle} tone="warning"><b>Returned by {f.rejection.name}{f.rejection.at ? ` on ${fmtDate(f.rejection.at)}` : ""}:</b> {f.rejection.reason || "no reason given"}. Make the changes, then submit it again.</Banner>}
+        {!approver && <Banner Icon={ClipboardCheck}>HR &amp; Admin approve quotations before they're issued. Until then it stays a draft — watermarked and unsigned.</Banner>}
         <Card style={{ padding: 0 }}>
           <CardHead title="Quotation details" sub="As printed at the top of the quotation" />
           <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -7090,7 +7146,7 @@ function QuotationForm({ ctx, id, copyOf, clientId: presetClientId }) {
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
             <Field label="Currency"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
             <Field label="VAT"><Select value={String(f.vatRate)} onChange={set("vatRate")} options={[{ value: "18", label: "18% VAT added per item" }, { value: "0", label: "No VAT" }]} /></Field>
-            {existing && <Field label="Status"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
+            {existing && approver && <Field label="Status"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
           </div>
         </Card>
         <Card style={{ padding: 0 }}>
@@ -7149,16 +7205,20 @@ function QuotationPreview({ ctx, q: raw }) {
   const disp = quoteDisplayStatus(q, TODAY);
   const sig = SIGNATORIES[0] || {};
   const sigImg = isSigImage(sig.signature) ? sig.signature : signatureFor(sig.name);
+  const approver = isHrOrAdmin(ctx);
   const setStatus = async (status) => {
-    if (status === "sent" && !String(q.attn || "").trim()) {
-      alert("Add the Attn (the person at the client this quotation is addressed to) before marking it as sent.");
+    if (["sent", "pending_approval", "approved"].includes(status) && !String(q.attn || "").trim()) {
+      alert("Add the Attn (the person at the client this quotation is addressed to) first.");
       setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />);
       return;
     }
     const now = new Date().toISOString();
-    await quotationsApi.update(q.id, { status, ...(status === "sent" ? { sentAt: q.sentAt || now } : {}), ...(status === "accepted" || status === "declined" ? { decidedAt: now } : {}), updatedAt: now });
-    await ctx.reload(); setModal(null);
+    try {
+      await quotationsApi.update(q.id, { status, ...(status === "sent" ? { sentAt: q.sentAt || now } : {}), ...(status === "accepted" || status === "declined" ? { decidedAt: now } : {}), updatedAt: now });
+      await ctx.reload(); setModal(null);
+    } catch (e) { alert(e.message || "That didn't work."); }
   };
+  const decide = async (ok) => { if (await quoteDecide(ctx, q, ok)) setModal(null); };
   const ink = "var(--text)", body = "var(--text-2)", line = "1px solid var(--border)";
   const kv = (k, v, strong) => (
     <div style={{ display: "flex", borderBottom: line }}>
@@ -7172,10 +7232,14 @@ function QuotationPreview({ ctx, q: raw }) {
   const footer = (
     <>
       <Btn onClick={() => setModal(null)}>Close</Btn>
-      {q.status === "draft" && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
+      {approver && q.status === "pending_approval" && <Btn variant="danger" onClick={() => decide(false)}><X size={14} />Return</Btn>}
+      {approver && q.status === "pending_approval" && <Btn variant="success" onClick={() => decide(true)}><Check size={14} />Approve</Btn>}
+      {!approver && q.status === "draft" && <Btn variant="primary" onClick={() => setStatus("pending_approval")}><Send size={14} />Submit for approval</Btn>}
+      {!approver && q.status === "pending_approval" && <Btn onClick={() => setStatus("draft")} title="Take it back to make changes"><RotateCcw size={14} />Withdraw</Btn>}
+      {((approver && q.status === "draft") || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
       {(q.status === "sent") && <Btn variant="danger" onClick={() => setStatus("declined")}><X size={14} />Declined</Btn>}
       {(q.status === "sent") && <Btn variant="success" onClick={() => setStatus("accepted")}><Check size={14} />Accepted</Btn>}
-      <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>
+      {(approver || q.status === "draft") && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
       <Btn onClick={() => excelQuote(ctx, raw)}><Download size={14} />Excel</Btn>
       <Btn variant="primary" onClick={() => printQuote(ctx, raw)}><Printer size={14} />Download PDF</Btn>
     </>
@@ -7183,7 +7247,10 @@ function QuotationPreview({ ctx, q: raw }) {
   return (
     <Modal wide title="Quotation preview" sub={`${q.quoteNo}${q.client ? " · " + q.client : ""}`} onClose={() => setModal(null)} footer={footer}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 12, color: "var(--muted)" }}>Prepared by {q.preparedBy || "—"}{q.sentAt ? ` · sent ${fmtDate(q.sentAt)}` : ""}{q.decidedAt ? ` · ${quoteStatusLabel(q.status).toLowerCase()} ${fmtDate(q.decidedAt)}` : ""}</div>
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+          Prepared by {(q.initiatedBy && q.initiatedBy.name) || q.preparedBy || "—"}{q.submittedAt ? ` · submitted ${fmtDate(q.submittedAt)}` : ""}{q.approval ? ` · approved by ${q.approval.name} ${fmtDate(q.approval.at)}` : ""}{q.sentAt ? ` · sent ${fmtDate(q.sentAt)}` : ""}{q.decidedAt ? ` · ${quoteStatusLabel(q.status).toLowerCase()} ${fmtDate(q.decidedAt)}` : ""}
+          {q.status === "draft" && q.rejection && <div style={{ color: "var(--danger)", marginTop: 2 }}>Returned by {q.rejection.name}: {q.rejection.reason}</div>}
+        </div>
         <Pill tone={quoteStatusTone(disp)}>{quoteStatusLabel(disp)}</Pill>
       </div>
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "20px 22px", background: "var(--bg-elevated)" }}>
@@ -7229,8 +7296,8 @@ function QuotationPreview({ ctx, q: raw }) {
             {sig.title && <div style={{ fontSize: 11.5, color: "var(--brand)", fontWeight: 600 }}>{sig.title}</div>}
             {sig.contact && <div style={{ fontSize: 11.5, color: body }}>{sig.contact}</div>}
           </div>
-          {sigImg && q.status !== "draft" && <img src={sigImg} alt={`Signature of ${sig.name}`} style={{ height: 70 }} />}
-          {q.status === "draft" && <span style={{ fontSize: 11.5, color: "var(--muted)", fontStyle: "italic" }}>Draft — signature added when saved as sent</span>}
+          {sigImg && !quoteIsDraft(q) && <img src={sigImg} alt={`Signature of ${sig.name}`} style={{ height: 70 }} />}
+          {quoteIsDraft(q) && <span style={{ fontSize: 11.5, color: "var(--muted)", fontStyle: "italic" }}>{q.status === "pending_approval" ? "Draft — awaiting HR & Admin approval; signature added once approved" : approver ? "Draft — signature added when saved as sent" : "Draft — signature added once HR & Admin approve it"}</span>}
         </div>
       </div>
     </Modal>
