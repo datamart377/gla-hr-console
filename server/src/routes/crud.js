@@ -174,18 +174,21 @@ async function supersedePrevious(doc, id) {
 const QUOTE_STAFF_MOVES = {
   draft: ["draft", "pending_approval"],
   pending_approval: ["pending_approval", "draft"], // draft = withdraw
-  approved: ["approved", "sent"],
+  approved: ["approved", "sent", "accepted", "declined"],
   sent: ["sent", "accepted", "declined"],
   accepted: ["accepted"],
   declined: ["declined"],
 };
+// Outcome of an issued quotation: "accepted" is shown as Awarded and needs the
+// client's order number; "declined" is shown as Rejected and needs a remark.
+const ORDER_NO_RE = /^(?=.*[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9\-\/.]{0,39}$/;
 function shapeQuotation(req, patch, existing) {
   const now = new Date().toISOString();
   const approver = isHrAdmin(req);
   const me = { by: req.user.empId || "", name: req.user.name || req.user.email || "", role: req.user.role, at: now };
   const out = { ...patch };
   const rejectReason = out.rejectReason; delete out.rejectReason;
-  delete out.approval; delete out.rejection; delete out.initiatedBy; delete out.submittedAt; delete out.needsApproval;
+  delete out.approval; delete out.rejection; delete out.initiatedBy; delete out.submittedAt; delete out.needsApproval; delete out.outcome;
   const cur = existing || {};
   const from = existing ? (QUOTE_STATES.includes(cur.status) ? cur.status : "draft") : null;
   let next = "status" in out ? out.status : (from || "draft");
@@ -206,6 +209,23 @@ function shapeQuotation(req, patch, existing) {
         return { error: from === "pending_approval" ? "This quotation is waiting for HR & Admin approval. Withdraw it to draft to make changes." : "This quotation has been approved and can't be changed. Duplicate it to prepare a revised quotation." };
       }
     }
+  }
+  // Awarded / Rejected — only from an approved or sent quotation, with the details.
+  if (["accepted", "declined"].includes(next) && next !== from) {
+    if (!["approved", "sent", "accepted", "declined"].includes(from || "")) return { error: "Only an approved or sent quotation can be marked Awarded or Rejected." };
+    if (next === "accepted") {
+      const orderNo = String(out.orderNo || "").trim();
+      if (!ORDER_NO_RE.test(orderNo)) return { error: "Enter the client's order number (letters and numbers; - / . allowed, no spaces)." };
+      out.orderNo = orderNo; out.outcomeRemark = "";
+    } else {
+      const remark = String(out.outcomeRemark || "").trim();
+      if (!remark) return { error: "Add a remark explaining why the quotation was rejected." };
+      out.outcomeRemark = remark.slice(0, 500); out.orderNo = "";
+    }
+    out.outcome = { status: next, orderNo: out.orderNo, remark: out.outcomeRemark, by: me.by, name: me.name, role: me.role, at: now };
+    out.decidedAt = now;
+  } else {
+    delete out.orderNo; delete out.outcomeRemark; // only set together with the outcome
   }
   out.status = next;
   if (next === "pending_approval" && from !== "pending_approval") { out.submittedAt = now; out.rejection = null; }

@@ -454,7 +454,7 @@ export function normalizePurchaseOrder(po = {}) {
 // draft -> pending_approval -> approved (by HR & Admin) -> sent -> accepted/declined.
 // Until approved they remain drafts: DRAFT watermark, no signature.
 export const QUOTE_STATUSES = ["draft", "pending_approval", "approved", "sent", "accepted", "declined"];
-export const quoteStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting approval", approved: "Approved", sent: "Sent", accepted: "Accepted", declined: "Declined", expired: "Expired", superseded: "Superseded" }[s] || s);
+export const quoteStatusLabel = (s) => ({ draft: "Draft", pending_approval: "Awaiting approval", approved: "Approved", sent: "Sent", accepted: "Awarded", declined: "Rejected", expired: "Expired", superseded: "Superseded" }[s] || s);
 export const quoteStatusTone = (s) => ({ draft: "muted", pending_approval: "warning", approved: "info", sent: "accent", accepted: "success", declined: "danger", expired: "warning", superseded: "muted" }[s] || "muted");
 // A revised quotation keeps its reference (Gla/001/26); the revision number is
 // printed alongside it ("Gla/001/26 Rev. 1").
@@ -522,6 +522,10 @@ export function normalizeQuotation(q = {}) {
     previousId: q.previousId || "",       // id of the version this one revises
     revisionReason: q.revisionReason || "",
     supersededBy: q.supersededBy || "",   // set once a later revision is approved
+    // Outcome once issued: "accepted" = Awarded (client order number), "declined" = Rejected (remark).
+    orderNo: q.orderNo || "",
+    outcomeRemark: q.outcomeRemark || "",
+    outcome: q.outcome || null,           // { status, orderNo, remark, by, name, role, at } — stamped by the server
     status: QUOTE_STATUSES.includes(q.status) ? q.status : "draft",
     preparedBy: q.preparedBy || "",
     sentAt: q.sentAt || null,

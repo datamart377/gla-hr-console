@@ -6722,6 +6722,42 @@ const quoteFamily = (q) => q.revisionOf || q.id;
 const quoteRevisionInProgress = (q, all) => (all || []).some((y) => y.previousId && quoteFamily(y) === quoteFamily(q) && ["draft", "pending_approval"].includes(y.status) && !y.supersededBy);
 const quoteCanRevise = (q, all) => !q.supersededBy && ["approved", "sent", "declined", "accepted"].includes(q.status) && !quoteRevisionInProgress(q, all);
 
+// Record the client's decision on an issued quotation: Awarded (with the
+// client's order number) or Rejected (with a remark).
+const ORDER_NO_RE = /^(?=.*[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9\-\/.]{0,39}$/;
+const quoteCanSetOutcome = (q) => !q.supersededBy && ["approved", "sent"].includes(q.status);
+function QuoteOutcomeModal({ ctx, q, outcome }) {
+  const award = outcome === "accepted";
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const v = val.trim();
+  const ok = award ? ORDER_NO_RE.test(v) : v.length > 0;
+  const save = async () => {
+    if (!ok) { setErr(award ? "Enter the client's order number — letters and numbers only (- / . allowed, no spaces)." : "Add a remark."); return; }
+    setBusy(true); setErr("");
+    try {
+      await quotationsApi.update(q.id, { status: outcome, ...(award ? { orderNo: v } : { outcomeRemark: v }), updatedAt: new Date().toISOString() });
+      await ctx.reload(); ctx.setModal(null);
+    } catch (e) { setErr(e.message || "Couldn't save."); setBusy(false); }
+  };
+  return (
+    <Modal title={award ? "Mark quotation as Awarded" : "Mark quotation as Rejected"} sub={`${quoteRef(q)} · ${q.client || ""} · ${q.currency || "UGX"} ${fmtN(quoteTotals(q).grand)}`} onClose={() => ctx.setModal(null)}
+      footer={<><Btn onClick={() => ctx.setModal(null)}>Cancel</Btn>
+        <Btn variant={award ? "success" : "danger"} disabled={busy || !ok} onClick={save}>{award ? <Check size={15} /> : <X size={15} />}{busy ? "Saving…" : award ? "Mark as Awarded" : "Mark as Rejected"}</Btn></>}>
+      {award
+        ? <Field label="Client's order number" required hint="As on the client's purchase order / LPO — letters and numbers (- / . allowed, no spaces)">
+            <Input value={val} onChange={(e) => setVal(e.target.value.replace(/\s+/g, ""))} placeholder="e.g. PO-2026-0145" autoFocus className="mono" />
+          </Field>
+        : <Field label="Remark" required hint="Why the client didn't take it up — e.g. price, timing, went with another contractor">
+            <Textarea value={val} onChange={(e) => setVal(e.target.value)} placeholder="e.g. Client chose a lower bid" autoFocus />
+          </Field>}
+      {val && award && !ok && <div style={{ marginTop: 8, fontSize: 12.5, color: "var(--warning)" }}>Use letters and numbers only (you may use - / . between them).</div>}
+      {err && <div style={{ marginTop: 10, color: "var(--danger)", fontSize: 13 }}>{err}</div>}
+    </Modal>
+  );
+}
+
 // HR & Admin decide on a quotation another role submitted for approval.
 async function quoteDecide(ctx, q, approve) {
   try {
@@ -6773,8 +6809,8 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", marginBottom: 16 }}>
         <StatCard Icon={FileSignature} label="Quotations" value={current.length} meta={`${current.filter((x) => x._st === "draft").length} draft · ${pending.length} awaiting approval${oldCount ? ` · ${oldCount} superseded` : ""}`} tone="brand" />
         <StatCard Icon={Send} label="Open (sent)" value={open.length} meta={`${ugxShort(ugx(open))} awaiting reply`} tone="accent" />
-        <StatCard Icon={Check} label="Accepted" value={won.length} meta={`${ugxShort(ugx(won))} won`} tone="success" />
-        <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} won · ${lost.length} declined`} tone="warning" />
+        <StatCard Icon={Check} label="Awarded" value={won.length} meta={`${ugxShort(ugx(won))} won`} tone="success" />
+        <StatCard Icon={TrendingUp} label="Win rate" value={winRate == null ? "—" : winRate + "%"} meta={`${won.length} awarded · ${lost.length} rejected`} tone="warning" />
       </div>
       <Toolbar>
         <SearchBox value={q} onChange={setQ} placeholder="Search client, ref, scope or location…" />
@@ -6804,6 +6840,8 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
                 {x._st === "pending_approval" && x.initiatedBy && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>from {x.initiatedBy.name}</div>}
                 {x.approval && !quoteIsDraft(x) && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>approved by {x.approval.name}</div>}
                 {x._st === "draft" && x.rejection && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 3 }} title={x.rejection.reason}>returned: {String(x.rejection.reason || "").slice(0, 36)}</div>}
+                {x.status === "accepted" && x.orderNo && <div className="mono" style={{ fontSize: 11, color: "var(--success)", marginTop: 3 }}>Order {x.orderNo}</div>}
+                {x.status === "declined" && x.outcomeRemark && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, maxWidth: 180 }} title={x.outcomeRemark}>{String(x.outcomeRemark).slice(0, 40)}{x.outcomeRemark.length > 40 ? "…" : ""}</div>}
               </div>
             ) },
             { label: "", render: (x) => (
@@ -6817,6 +6855,10 @@ function Quotations({ ctx, clientFilter, setClientFilter }) {
                 <Btn size="sm" variant="primary" onClick={() => printQuote(ctx, x)} title="Download PDF"><Printer size={13} />PDF</Btn>
                 <Btn size="sm" onClick={() => excelQuote(ctx, x)} title="Download Excel"><Download size={13} /></Btn>
                 {!x.supersededBy && (approver || x.status === "draft") && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={x.id} />)} title="Edit"><Pencil size={13} /></Btn>}
+                {quoteCanSetOutcome(x) && <>
+                  <Btn size="sm" variant="success" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={x} outcome="accepted" />)} title="Client awarded it — record their order number"><Check size={13} />Awarded</Btn>
+                  <Btn size="sm" variant="danger" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={x} outcome="declined" />)} title="Client rejected it — add a remark"><X size={13} />Rejected</Btn>
+                </>}
                 {quoteCanRevise(x, all) && <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} reviseOf={x.id} />)} title="Revise — e.g. a discount or changed items; keeps the same reference"><RotateCcw size={13} />Revise</Btn>}
                 <Btn size="sm" onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} copyOf={x.id} />)} title="Duplicate as a new quotation (new reference)"><Copy size={13} /></Btn>
                 {canDel && <Btn size="sm" onClick={() => setModal(() => (cc) => <ConfirmDelete ctx={cc} api={quotationsApi} id={x.id} label={x.quoteNo || x.id} />)} title="Delete"><Trash2 size={13} /></Btn>}
@@ -6913,7 +6955,7 @@ function ClientRegister({ ctx }) {
         <StatCard Icon={Handshake} label="Clients" value={all.length} meta={`${active} active`} tone="brand" />
         <StatCard Icon={Send} label="With open quotes" value={withOpen} meta="awaiting the client's reply" tone="accent" />
         <StatCard Icon={FileSignature} label="Quoted value" value={ugxShort(quoted)} meta={`${quotes.length} quotation${quotes.length === 1 ? "" : "s"}`} tone="warning" />
-        <StatCard Icon={Check} label="Won value" value={ugxShort(won)} meta="accepted quotations" tone="success" />
+        <StatCard Icon={Check} label="Won value" value={ugxShort(won)} meta="awarded quotations" tone="success" />
       </div>
       <Toolbar>
         <SearchBox value={q} onChange={setQ} placeholder="Search name, TIN, contact, location…" />
@@ -7192,7 +7234,7 @@ function QuotationForm({ ctx, id, copyOf, reviseOf, clientId: presetClientId }) 
             <Field label="Quote validity (calendar days)" hint={`Valid until ${fmtDate(quoteValidUntil(f))}`}><Input type="number" min={1} value={f.validityDays} onChange={set("validityDays")} /></Field>
             <Field label="Currency"><Select value={f.currency} onChange={set("currency")} options={PO_CURRENCIES.map((c) => ({ value: c, label: `${c} — ${QUOTE_CURRENCY_WORDS[c] || c}` }))} /></Field>
             <Field label="VAT"><Select value={String(f.vatRate)} onChange={set("vatRate")} options={[{ value: "18", label: "18% VAT added per item" }, { value: "0", label: "No VAT" }]} /></Field>
-            {existing && approver && <Field label="Status"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
+            {existing && approver && !["accepted", "declined"].includes(f.status) && <Field label="Status" hint="Use Awarded / Rejected on the quotation to record the client's decision"><Select value={f.status} onChange={set("status")} options={QUOTE_STATUSES.filter((x) => !["accepted", "declined"].includes(x)).map((x) => ({ value: x, label: quoteStatusLabel(x) }))} /></Field>}
           </div>
         </Card>
         <Card style={{ padding: 0 }}>
@@ -7301,8 +7343,8 @@ function QuotationPreview({ ctx, q: raw }) {
       {!approver && q.status === "pending_approval" && <Btn onClick={() => setStatus("draft")} title="Take it back to make changes"><RotateCcw size={14} />Withdraw</Btn>}
       {approver && q.status === "draft" && !q.needsApproval && <Btn variant="success" onClick={() => setStatus("approved")}><Check size={14} />Approve</Btn>}
       {((approver && q.status === "draft") || q.status === "approved") && <Btn onClick={() => setStatus("sent")}><Send size={14} />Mark as sent</Btn>}
-      {(q.status === "sent") && <Btn variant="danger" onClick={() => setStatus("declined")}><X size={14} />Declined</Btn>}
-      {(q.status === "sent") && <Btn variant="success" onClick={() => setStatus("accepted")}><Check size={14} />Accepted</Btn>}
+      {quoteCanSetOutcome(q) && <Btn variant="danger" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={q} outcome="declined" />)}><X size={14} />Rejected</Btn>}
+      {quoteCanSetOutcome(q) && <Btn variant="success" onClick={() => setModal(() => (cc) => <QuoteOutcomeModal ctx={cc} q={q} outcome="accepted" />)}><Check size={14} />Awarded</Btn>}
       {!q.supersededBy && (approver || q.status === "draft") && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={q.id} />)}><Pencil size={14} />Edit</Btn>}
       {quoteCanRevise(q, ctx.store.quotations) && <Btn onClick={() => setModal(() => (cc) => <QuotationForm ctx={cc} id={null} reviseOf={q.id} />)}><RotateCcw size={14} />Revise</Btn>}
       <Btn onClick={() => excelQuote(ctx, raw)}><Download size={14} />Excel</Btn>
@@ -7315,6 +7357,8 @@ function QuotationPreview({ ctx, q: raw }) {
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
           Prepared by {(q.initiatedBy && q.initiatedBy.name) || q.preparedBy || "—"}{q.submittedAt ? ` · submitted ${fmtDate(q.submittedAt)}` : ""}{q.approval ? ` · approved by ${q.approval.name} ${fmtDate(q.approval.at)}` : ""}{q.sentAt ? ` · sent ${fmtDate(q.sentAt)}` : ""}{q.decidedAt ? ` · ${quoteStatusLabel(q.status).toLowerCase()} ${fmtDate(q.decidedAt)}` : ""}
           {q.status === "draft" && q.rejection && <div style={{ color: "var(--danger)", marginTop: 2 }}>Returned by {q.rejection.name}: {q.rejection.reason}</div>}
+          {q.status === "accepted" && <div style={{ color: "var(--success)", marginTop: 2 }}>Awarded{q.outcome && q.outcome.name ? ` (recorded by ${q.outcome.name})` : ""} — client order no. <b className="mono">{q.orderNo || "—"}</b></div>}
+          {q.status === "declined" && <div style={{ color: "var(--danger)", marginTop: 2 }}>Rejected{q.outcome && q.outcome.name ? ` (recorded by ${q.outcome.name})` : ""}{q.outcomeRemark ? `: ${q.outcomeRemark}` : ""}</div>}
           {q.supersededBy && (() => { const nx = (ctx.store.quotations || []).find((x) => x.id === q.supersededBy); return <div style={{ color: "var(--warning)", marginTop: 2 }}>Superseded by {nx ? quoteRef(nx) : "a later revision"} — this version is kept for the record.</div>; })()}
         </div>
         <Pill tone={quoteStatusTone(disp)}>{quoteStatusLabel(disp)}</Pill>
