@@ -365,7 +365,7 @@ const VIEW_META = {
   appraisals: ["Performance Appraisals", "Competency reviews and ratings"],
   reports: ["HR Reports", "Staff analytics — attendance, workforce, leave and payroll"],
   sessions: ["Accounts & Sessions", "Who can sign in, their last activity, and revoking access"],
-  tenancy: ["Tenancy", "Your apartments — units, tenants, leases, rent and arrears, deposits and repairs (private to you)"],
+  tenancy: ["Tenancy", "Mr. Abu-Baker Nsubuga's apartments — units, tenants, leases, rent and arrears, deposits and repairs (private to the Administrator)"],
   security: ["Security Monitoring", "Intrusion detection — threats, blocked addresses, locked accounts and alerts"],
   settings: ["Settings Management", "Roles, permissions, announcements and system configuration"],
   staffFile: ["Electronic Staff File", "Complete staff record"],
@@ -614,6 +614,7 @@ function fmtSessionExpiry(ms) {
 /* ================================ TENANCY ================================ */
 // The Administrator's personal apartments. Data is loaded only on this page
 // (never into the shared store) and the server serves it to the admin role only.
+const TENANCY_LANDLORD = { landlordName: "Abu-Baker Nsubuga", phone: "+256 772 413 777", email: "", address: "", paymentInstructions: "Mobile Money: 0772 413 777 (Abu-Baker Nsubuga)" };
 const T_APIS = {
   meta: () => tenancyMetaApi, properties: () => tenancyPropertiesApi, tenants: () => tenancyTenantsApi, leases: () => tenancyLeasesApi,
   payments: () => tenancyPaymentsApi, charges: () => tenancyChargesApi, maintenance: () => tenancyMaintenanceApi,
@@ -637,7 +638,8 @@ function TenancyPage({ ctx }) {
       const vals = await Promise.all(keys.map((k) => T_APIS[k]().list()));
       const next = Object.fromEntries(keys.map((k, i) => [k, vals[i] || []]));
       next.leases = next.leases.map(normalizeLease);
-      next.profile = (next.meta || []).find((m) => m.id === "profile") || { landlordName: (ctx.currentEmp ? fullName(ctx.currentEmp) : ""), phone: "", email: "", address: "", paymentInstructions: "" };
+      // The landlord is Mr. Abu-Baker Nsubuga; used until his details are saved.
+      next.profile = (next.meta || []).find((m) => m.id === "profile") || { ...TENANCY_LANDLORD };
       setT(next); setErr("");
       return next;
     } catch (e) { setErr(e.message || "Couldn't load tenancy records."); return null; }

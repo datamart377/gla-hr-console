@@ -1757,7 +1757,7 @@ export function nextTenancyId(list = [], prefix) {
 {
   const t = TODAY;
   const ago = (months, day = 1) => { const d = new Date(t + "T00:00:00"); d.setDate(1); d.setMonth(d.getMonth() - months); d.setDate(day); return _iso(d); };
-  data.tenancyMeta = [{ id: "profile", landlordName: "Robert Okello", phone: "+256 772 413 501", email: "", address: "Kyanja, Kampala", paymentInstructions: "Mobile Money: 0772 413 501 (Robert Okello) · Stanbic Bank A/C 9030001234501" }];
+  data.tenancyMeta = [{ id: "profile", landlordName: "Abu-Baker Nsubuga", phone: "+256 772 413 777", email: "", address: "Kampala, Uganda", paymentInstructions: "Mobile Money: 0772 413 777 (Abu-Baker Nsubuga)" }];
   data.tenancyProperties = [
     { id: "PRP-001", name: "Kyanja Apartments", location: "Kyanja, Kampala", notes: "Block of 6 apartments", units: [
       { id: "A1", label: "A1", type: "2 bedroom", rent: 900000 }, { id: "A2", label: "A2", type: "2 bedroom", rent: 900000 },
